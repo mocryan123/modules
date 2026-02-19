@@ -3,7 +3,7 @@
  * Module Name: Finance Management
  * Module Slug: fn
  * Description: Complete finance management with income/expense tracking, e-commerce integration, and financial reporting
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: BNTM Hub
  * Icon: 💰
  */
@@ -932,6 +932,8 @@ function bntm_fn_render_transaction_history($limit = 10) {
     
     ob_start();
     ?>
+    
+   <div class="bntm-table-wrapper">
     <table class="bntm-table">
         <thead>
             <tr>
@@ -968,7 +970,7 @@ function bntm_fn_render_transaction_history($limit = 10) {
             <?php endif; ?>
         </tbody>
     </table>
-    
+    </div>
     <?php if ($total_pages > 1): ?>
         <div class="fn-pagination">
             <?php
@@ -1094,7 +1096,7 @@ function bntm_fn_reports_tab() {
         
         <h4 style="margin-top: 30px;">Income Statement - <?php echo date('F Y', strtotime("$year-$month-01")); ?></h4>
         
-        <div class="bntm-financial-statement">
+        <div class="bntm-financial-statement bntm-table-wrapper">
             <table class="bntm-table bntm-financial-table">
                 <thead>
                     <tr>
@@ -1175,7 +1177,6 @@ function bntm_fn_reports_tab() {
         background: white;
         border: 1px solid #e5e7eb;
         border-radius: 8px;
-        overflow: hidden;
     }
     
     .bntm-financial-table {

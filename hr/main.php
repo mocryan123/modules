@@ -3,7 +3,7 @@
  * Module Name: HR Management
  * Module Slug: hr
  * Description: Complete Human Resources management solution with employee records, attendance tracking, and leave management
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Your Name
  * Icon: 👥
  */
@@ -1328,40 +1328,43 @@ function bntm_hr_dashboard_view($user_id, $can_manage) {
             $recent_leaves = $wpdb->get_results("SELECT * FROM {$prefix}hr_leave_requests ORDER BY created_at DESC LIMIT 5");
             
             if ($recent_leaves): ?>
-                <table class="bntm-table">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Type</th>
-                            <th>Dates</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($recent_leaves as $leave):
-                            $employee = get_userdata($leave->employee_id);
-                            $status_class = $leave->status === 'approved' ? 'bntm-notice-success' : ($leave->status === 'rejected' ? 'bntm-notice-error' : '');
-                        ?>
-                            <tr>
-                                <td><?php echo esc_html($employee->display_name); ?></td>
-                                <td><?php echo esc_html($leave->leave_type); ?></td>
-                                <td><?php echo esc_html($leave->start_date . ' to ' . $leave->end_date); ?></td>
-                                <td>
-                                    <span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;">
-                                        <?php echo esc_html($leave->status); ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <?php if ($leave->status === 'pending'): ?>
-                                        <button class="bntm-btn-small approve-leave" data-id="<?php echo $leave->id; ?>">Approve</button>
-                                        <button class="bntm-btn-small bntm-btn-danger reject-leave" data-id="<?php echo $leave->id; ?>">Reject</button>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+            
+           <div class="bntm-table-wrapper">
+                   <table class="bntm-table">
+                       <thead>
+                           <tr>
+                               <th>Employee</th>
+                               <th>Type</th>
+                               <th>Dates</th>
+                               <th>Status</th>
+                               <th>Actions</th>
+                           </tr>
+                       </thead>
+                       <tbody>
+                           <?php foreach ($recent_leaves as $leave):
+                               $employee = get_userdata($leave->employee_id);
+                               $status_class = $leave->status === 'approved' ? 'bntm-notice-success' : ($leave->status === 'rejected' ? 'bntm-notice-error' : '');
+                           ?>
+                               <tr>
+                                   <td><?php echo esc_html($employee->display_name); ?></td>
+                                   <td><?php echo esc_html($leave->leave_type); ?></td>
+                                   <td><?php echo esc_html($leave->start_date . ' to ' . $leave->end_date); ?></td>
+                                   <td>
+                                       <span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;">
+                                           <?php echo esc_html($leave->status); ?>
+                                       </span>
+                                   </td>
+                                   <td>
+                                       <?php if ($leave->status === 'pending'): ?>
+                                           <button class="bntm-btn-small approve-leave" data-id="<?php echo $leave->id; ?>">Approve</button>
+                                           <button class="bntm-btn-small bntm-btn-danger reject-leave" data-id="<?php echo $leave->id; ?>">Reject</button>
+                                       <?php endif; ?>
+                                   </td>
+                               </tr>
+                           <?php endforeach; ?>
+                       </tbody>
+                   </table>
+                </div>
             <?php else: ?>
                 <p>No recent leave requests.</p>
             <?php endif; ?>
@@ -1373,6 +1376,8 @@ function bntm_hr_dashboard_view($user_id, $can_manage) {
             $recent_overtime = $wpdb->get_results("SELECT o.*, u.display_name FROM {$prefix}hr_overtime o LEFT JOIN {$wpdb->users} u ON o.employee_id = u.ID ORDER BY o.created_at DESC LIMIT 5");
             
             if ($recent_overtime): ?>
+            
+        <div class="bntm-table-wrapper">
                 <table class="bntm-table">
                     <thead>
                         <tr>
@@ -1410,6 +1415,7 @@ function bntm_hr_dashboard_view($user_id, $can_manage) {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+         </div>
             <?php else: ?>
                 <p>No recent overtime requests.</p>
             <?php endif; ?>
@@ -1421,6 +1427,8 @@ function bntm_hr_dashboard_view($user_id, $can_manage) {
             $recent_missing = $wpdb->get_results("SELECT m.*, u.display_name FROM {$prefix}hr_missing_logs m LEFT JOIN {$wpdb->users} u ON m.employee_id = u.ID ORDER BY m.created_at DESC LIMIT 5");
             
             if ($recent_missing): ?>
+            
+           <div class="bntm-table-wrapper">
                 <table class="bntm-table">
                     <thead>
                         <tr>
@@ -1461,6 +1469,7 @@ function bntm_hr_dashboard_view($user_id, $can_manage) {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+            </div>
             <?php else: ?>
                 <p>No recent missing logs.</p>
             <?php endif; ?>
@@ -2150,6 +2159,8 @@ function bntm_hr_employees_view($can_manage) {
         
         <!-- Employees Table -->
         <?php if ($employees): ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -2205,6 +2216,7 @@ function bntm_hr_employees_view($can_manage) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php else: ?>
             <p>No employees found.</p>
         <?php endif; ?>
@@ -3035,68 +3047,70 @@ function bntm_hr_attendance_view($user_id, $can_manage) {
                 </div>
             </div>
             
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <?php if ($can_manage && !$filter_employee_id): ?><th>Employee</th><?php endif; ?>
-                        <th>Date</th>
-                        <th>Clock In</th>
-                        <th>Clock Out</th>
-                        <th>Hours</th>
-                        <th>Status</th>
-                        <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($attendance as $record): 
-                        $status_colors = [
-                            'present' => 'background: #d1fae5; color: #065f46;',
-                            'late' => 'background: #fef3c7; color: #92400e;',
-                            'absent' => 'background: #fee2e2; color: #991b1b;',
-                            'on_leave' => 'background: #e0e7ff; color: #3730a3;'
-                        ];
-                        $status_style = isset($status_colors[$record->status]) ? $status_colors[$record->status] : '';
-                    ?>
-                        <tr>
-                            <?php if ($can_manage && !$filter_employee_id): ?>
-                                <td><?php echo esc_html($record->display_name); ?></td>
-                            <?php endif; ?>
-                            <td><?php echo esc_html(date('M d, Y', strtotime($record->clock_in))); ?></td>
-                            <td><?php echo esc_html(date('h:i A', strtotime($record->clock_in))); ?></td>
-                            <td>
-                                <?php if ($record->clock_out): ?>
-                                    <?php echo esc_html(date('h:i A', strtotime($record->clock_out))); ?>
-                                <?php else: ?>
-                                    <span style="color: #dc2626; font-weight: 500;">Not clocked out</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <?php if ($record->total_hours): ?>
-                                    <strong><?php echo esc_html(number_format($record->total_hours, 2)); ?> hrs</strong>
-                                <?php else: ?>
-                                    <span style="color: #9ca3af;">-</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; font-size: 12px; <?php echo $status_style; ?>">
-                                    <?php echo esc_html(ucfirst($record->status)); ?>
-                                </span>
-                            </td>
-                            <?php if ($can_manage): ?>
-                                <td>
-                                    <button class="bntm-btn-small edit-attendance" 
-                                            data-id="<?php echo $record->id; ?>"
-                                            data-clock-in="<?php echo esc_attr($record->clock_in); ?>"
-                                            data-clock-out="<?php echo esc_attr($record->clock_out); ?>"
-                                            data-status="<?php echo esc_attr($record->status); ?>">
-                                        Edit
-                                    </button>
-                                </td>
-                            <?php endif; ?>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <?php if ($can_manage && !$filter_employee_id): ?><th>Employee</th><?php endif; ?>
+                           <th>Date</th>
+                           <th>Clock In</th>
+                           <th>Clock Out</th>
+                           <th>Hours</th>
+                           <th>Status</th>
+                           <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($attendance as $record): 
+                           $status_colors = [
+                               'present' => 'background: #d1fae5; color: #065f46;',
+                               'late' => 'background: #fef3c7; color: #92400e;',
+                               'absent' => 'background: #fee2e2; color: #991b1b;',
+                               'on_leave' => 'background: #e0e7ff; color: #3730a3;'
+                           ];
+                           $status_style = isset($status_colors[$record->status]) ? $status_colors[$record->status] : '';
+                       ?>
+                           <tr>
+                               <?php if ($can_manage && !$filter_employee_id): ?>
+                                   <td><?php echo esc_html($record->display_name); ?></td>
+                               <?php endif; ?>
+                               <td><?php echo esc_html(date('M d, Y', strtotime($record->clock_in))); ?></td>
+                               <td><?php echo esc_html(date('h:i A', strtotime($record->clock_in))); ?></td>
+                               <td>
+                                   <?php if ($record->clock_out): ?>
+                                       <?php echo esc_html(date('h:i A', strtotime($record->clock_out))); ?>
+                                   <?php else: ?>
+                                       <span style="color: #dc2626; font-weight: 500;">Not clocked out</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td>
+                                   <?php if ($record->total_hours): ?>
+                                       <strong><?php echo esc_html(number_format($record->total_hours, 2)); ?> hrs</strong>
+                                   <?php else: ?>
+                                       <span style="color: #9ca3af;">-</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td>
+                                   <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; font-size: 12px; <?php echo $status_style; ?>">
+                                       <?php echo esc_html(ucfirst($record->status)); ?>
+                                   </span>
+                               </td>
+                               <?php if ($can_manage): ?>
+                                   <td>
+                                       <button class="bntm-btn-small edit-attendance" 
+                                               data-id="<?php echo $record->id; ?>"
+                                               data-clock-in="<?php echo esc_attr($record->clock_in); ?>"
+                                               data-clock-out="<?php echo esc_attr($record->clock_out); ?>"
+                                               data-status="<?php echo esc_attr($record->status); ?>">
+                                           Edit
+                                       </button>
+                                   </td>
+                               <?php endif; ?>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php else: ?>
             <div style="text-align: center; padding: 40px; background: #f9fafb; border-radius: 8px;">
                 <p style="color: #64748b; margin: 0;">No attendance records found for the selected period.</p>
@@ -3354,45 +3368,48 @@ function bntm_hr_leaves_view($user_id, $can_manage) {
         <h3><?php echo $can_manage ? 'All Leave Requests' : 'My Leave Requests'; ?></h3>
         
         <?php if ($leaves): ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
-                        <th>Type</th>
-                        <th>Start Date</th>
-                        <th>End Date</th>
-                        <th>Days</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($leaves as $leave):
-                        $status_class = $leave->status === 'approved' ? 'bntm-notice-success' : ($leave->status === 'rejected' ? 'bntm-notice-error' : '');
-                    ?>
-                        <tr>
-                            <?php if ($can_manage): ?>
-                                <td><?php echo esc_html($leave->display_name); ?></td>
-                            <?php endif; ?>
-                            <td><?php echo esc_html($leave->leave_type); ?></td>
-                            <td><?php echo esc_html(date('M d, Y', strtotime($leave->start_date))); ?></td>
-                            <td><?php echo esc_html(date('M d, Y', strtotime($leave->end_date))); ?></td>
-                            <td><?php echo esc_html($leave->total_days); ?></td>
-                            <td>
-                                <span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;">
-                                    <?php echo esc_html($leave->status); ?>
-                                </span>
-                            </td>
-                            <td>
-                                <?php if ($can_manage && $leave->status === 'pending'): ?>
-                                    <button class="bntm-btn-small approve-leave" data-id="<?php echo $leave->id; ?>">Approve</button>
-                                    <button class="bntm-btn-small bntm-btn-danger reject-leave" data-id="<?php echo $leave->id; ?>">Reject</button>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
+                           <th>Type</th>
+                           <th>Start Date</th>
+                           <th>End Date</th>
+                           <th>Days</th>
+                           <th>Status</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($leaves as $leave):
+                           $status_class = $leave->status === 'approved' ? 'bntm-notice-success' : ($leave->status === 'rejected' ? 'bntm-notice-error' : '');
+                       ?>
+                           <tr>
+                               <?php if ($can_manage): ?>
+                                   <td><?php echo esc_html($leave->display_name); ?></td>
+                               <?php endif; ?>
+                               <td><?php echo esc_html($leave->leave_type); ?></td>
+                               <td><?php echo esc_html(date('M d, Y', strtotime($leave->start_date))); ?></td>
+                               <td><?php echo esc_html(date('M d, Y', strtotime($leave->end_date))); ?></td>
+                               <td><?php echo esc_html($leave->total_days); ?></td>
+                               <td>
+                                   <span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;">
+                                       <?php echo esc_html($leave->status); ?>
+                                   </span>
+                               </td>
+                               <td>
+                                   <?php if ($can_manage && $leave->status === 'pending'): ?>
+                                       <button class="bntm-btn-small approve-leave" data-id="<?php echo $leave->id; ?>">Approve</button>
+                                       <button class="bntm-btn-small bntm-btn-danger reject-leave" data-id="<?php echo $leave->id; ?>">Reject</button>
+                                   <?php endif; ?>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php else: ?>
             <p>No leave requests found.</p>
         <?php endif; ?>
@@ -3705,50 +3722,53 @@ function bntm_hr_payslips_view($user_id, $can_manage) {
         
         <!-- Payslips Table -->
         <?php if ($payslips): ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <?php if ($can_manage): ?><th><input type="checkbox" id="select-all-payslips" /></th><?php endif; ?>
-                        <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
-                        <th>Period</th>
-                        <th>Basic Pay</th>
-                        <th>Deductions</th>
-                        <th>Net Pay</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($payslips as $payslip): ?>
-                        <tr>
-                            <?php if ($can_manage): ?>
-                                <td><input type="checkbox" class="payslip-checkbox" value="<?php echo $payslip->id; ?>" data-imported="<?php echo $payslip->is_imported; ?>" /></td>
-                            <?php endif; ?>
-                            <?php if ($can_manage): ?>
-                                <td><?php echo esc_html($payslip->display_name); ?></td>
-                            <?php endif; ?>
-                            <td><?php echo date('M d', strtotime($payslip->period_start)) . ' - ' . date('M d, Y', strtotime($payslip->period_end)); ?></td>
-                            <td class="bntm-stat-income">₱<?php echo number_format($payslip->basic_pay, 2); ?></td>
-                            <td class="bntm-stat-expense">₱<?php echo number_format($payslip->total_deductions, 2); ?></td>
-                            <td><strong>₱<?php echo number_format($payslip->net_pay, 2); ?></strong></td>
-                            <td>
-                                <?php if ($payslip->is_imported): ?>
-                                    <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; background: #d1fae5; color: #065f46; font-size: 12px;">
-                                        ✓ Imported
-                                    </span>
-                                <?php else: ?>
-                                    <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; background: #f3f4f6; color: #6b7280; font-size: 12px;">
-                                        Not Imported
-                                    </span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <button class="bntm-btn-small download-payslip" data-id="<?php echo $payslip->id; ?>">Download PDF</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <?php if ($can_manage): ?><th><input type="checkbox" id="select-all-payslips" /></th><?php endif; ?>
+                           <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
+                           <th>Period</th>
+                           <th>Basic Pay</th>
+                           <th>Deductions</th>
+                           <th>Net Pay</th>
+                           <th>Status</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($payslips as $payslip): ?>
+                           <tr>
+                               <?php if ($can_manage): ?>
+                                   <td><input type="checkbox" class="payslip-checkbox" value="<?php echo $payslip->id; ?>" data-imported="<?php echo $payslip->is_imported; ?>" /></td>
+                               <?php endif; ?>
+                               <?php if ($can_manage): ?>
+                                   <td><?php echo esc_html($payslip->display_name); ?></td>
+                               <?php endif; ?>
+                               <td><?php echo date('M d', strtotime($payslip->period_start)) . ' - ' . date('M d, Y', strtotime($payslip->period_end)); ?></td>
+                               <td class="bntm-stat-income">₱<?php echo number_format($payslip->basic_pay, 2); ?></td>
+                               <td class="bntm-stat-expense">₱<?php echo number_format($payslip->total_deductions, 2); ?></td>
+                               <td><strong>₱<?php echo number_format($payslip->net_pay, 2); ?></strong></td>
+                               <td>
+                                   <?php if ($payslip->is_imported): ?>
+                                       <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; background: #d1fae5; color: #065f46; font-size: 12px;">
+                                           ✓ Imported
+                                       </span>
+                                   <?php else: ?>
+                                       <span style="padding: 4px 8px; border-radius: 4px; display: inline-block; background: #f3f4f6; color: #6b7280; font-size: 12px;">
+                                           Not Imported
+                                       </span>
+                                   <?php endif; ?>
+                               </td>
+                               <td>
+                                   <button class="bntm-btn-small download-payslip" data-id="<?php echo $payslip->id; ?>">Download PDF</button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
             
             <?php if ($can_manage): ?>
             <div style="margin-top: 15px; display: flex; gap: 10px;">
@@ -5423,43 +5443,46 @@ function bntm_hr_overtime_missing_view($user_id, $can_manage) {
         
         if ($overtime):
         ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
-                        <th>Date</th>
-                        <th>Time</th>
-                        <th>Hours</th>
-                        <th>Reason</th>
-                        <th>Status</th>
-                        <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($overtime as $ot): 
-                        $status_class = $ot->status === 'approved' ? 'bntm-notice-success' : ($ot->status === 'rejected' ? 'bntm-notice-error' : '');
-                        $start = DateTime::createFromFormat('H:i:s', $ot->start_time)->format('h:i A');
-                        $end = DateTime::createFromFormat('H:i:s', $ot->end_time)->format('h:i A');
-                    ?>
-                        <tr>
-                            <?php if ($can_manage): ?><td><?php echo esc_html($ot->display_name); ?></td><?php endif; ?>
-                            <td><?php echo esc_html(date('M d, Y', strtotime($ot->overtime_date))); ?></td>
-                            <td><?php echo esc_html($start . ' - ' . $end); ?></td>
-                            <td><?php echo esc_html($ot->total_hours . ' hrs'); ?></td>
-                            <td><?php echo esc_html($ot->reason); ?></td>
-                            <td><span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;"><?php echo esc_html(ucfirst($ot->status)); ?></span></td>
-                            <?php if ($can_manage): ?>
-                                <td>
-                                    <?php if ($ot->status === 'pending'): ?>
-                                        <button class="bntm-btn-small approve-overtime" data-id="<?php echo $ot->id; ?>">Approve</button>
-                                        <button class="bntm-btn-small bntm-btn-danger reject-overtime" data-id="<?php echo $ot->id; ?>">Reject</button>
-                                    <?php endif; ?>
-                                </td>
-                            <?php endif; ?>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
+                           <th>Date</th>
+                           <th>Time</th>
+                           <th>Hours</th>
+                           <th>Reason</th>
+                           <th>Status</th>
+                           <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($overtime as $ot): 
+                           $status_class = $ot->status === 'approved' ? 'bntm-notice-success' : ($ot->status === 'rejected' ? 'bntm-notice-error' : '');
+                           $start = DateTime::createFromFormat('H:i:s', $ot->start_time)->format('h:i A');
+                           $end = DateTime::createFromFormat('H:i:s', $ot->end_time)->format('h:i A');
+                       ?>
+                           <tr>
+                               <?php if ($can_manage): ?><td><?php echo esc_html($ot->display_name); ?></td><?php endif; ?>
+                               <td><?php echo esc_html(date('M d, Y', strtotime($ot->overtime_date))); ?></td>
+                               <td><?php echo esc_html($start . ' - ' . $end); ?></td>
+                               <td><?php echo esc_html($ot->total_hours . ' hrs'); ?></td>
+                               <td><?php echo esc_html($ot->reason); ?></td>
+                               <td><span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;"><?php echo esc_html(ucfirst($ot->status)); ?></span></td>
+                               <?php if ($can_manage): ?>
+                                   <td>
+                                       <?php if ($ot->status === 'pending'): ?>
+                                           <button class="bntm-btn-small approve-overtime" data-id="<?php echo $ot->id; ?>">Approve</button>
+                                           <button class="bntm-btn-small bntm-btn-danger reject-overtime" data-id="<?php echo $ot->id; ?>">Reject</button>
+                                       <?php endif; ?>
+                                   </td>
+                               <?php endif; ?>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php else: ?>
             <p>No overtime requests found.</p>
         <?php endif; ?>
@@ -5485,46 +5508,49 @@ function bntm_hr_overtime_missing_view($user_id, $can_manage) {
         
         if ($missing):
         ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Clock In</th>
-                        <th>Clock Out</th>
-                        <th>Reason</th>
-                        <th>Status</th>
-                        <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($missing as $log):
-                        $status_class = $log->status === 'approved' ? 'bntm-notice-success' : ($log->status === 'rejected' ? 'bntm-notice-error' : '');
-                        $type_label = $log->log_type === 'clock_in' ? 'Missing Clock In' : ($log->log_type === 'clock_out' ? 'Missing Clock Out' : 'Missing Both');
-                        $clock_in = $log->clock_in_time ? DateTime::createFromFormat('H:i:s', $log->clock_in_time)->format('h:i A') : '-';
-                        $clock_out = $log->clock_out_time ? DateTime::createFromFormat('H:i:s', $log->clock_out_time)->format('h:i A') : '-';
-                    ?>
-                        <tr>
-                            <?php if ($can_manage): ?><td><?php echo esc_html($log->display_name); ?></td><?php endif; ?>
-                            <td><?php echo esc_html(date('M d, Y', strtotime($log->log_date))); ?></td>
-                            <td><?php echo esc_html($type_label); ?></td>
-                            <td><?php echo esc_html($clock_in); ?></td>
-                            <td><?php echo esc_html($clock_out); ?></td>
-                            <td><?php echo esc_html($log->reason); ?></td>
-                            <td><span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;"><?php echo esc_html(ucfirst($log->status)); ?></span></td>
-                            <?php if ($can_manage): ?>
-                                <td>
-                                    <?php if ($log->status === 'pending'): ?>
-                                        <button class="bntm-btn-small approve-missing" data-id="<?php echo $log->id; ?>">Approve</button>
-                                        <button class="bntm-btn-small bntm-btn-danger reject-missing" data-id="<?php echo $log->id; ?>">Reject</button>
-                                    <?php endif; ?>
-                                </td>
-                            <?php endif; ?>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <?php if ($can_manage): ?><th>Employee</th><?php endif; ?>
+                           <th>Date</th>
+                           <th>Type</th>
+                           <th>Clock In</th>
+                           <th>Clock Out</th>
+                           <th>Reason</th>
+                           <th>Status</th>
+                           <?php if ($can_manage): ?><th>Actions</th><?php endif; ?>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($missing as $log):
+                           $status_class = $log->status === 'approved' ? 'bntm-notice-success' : ($log->status === 'rejected' ? 'bntm-notice-error' : '');
+                           $type_label = $log->log_type === 'clock_in' ? 'Missing Clock In' : ($log->log_type === 'clock_out' ? 'Missing Clock Out' : 'Missing Both');
+                           $clock_in = $log->clock_in_time ? DateTime::createFromFormat('H:i:s', $log->clock_in_time)->format('h:i A') : '-';
+                           $clock_out = $log->clock_out_time ? DateTime::createFromFormat('H:i:s', $log->clock_out_time)->format('h:i A') : '-';
+                       ?>
+                           <tr>
+                               <?php if ($can_manage): ?><td><?php echo esc_html($log->display_name); ?></td><?php endif; ?>
+                               <td><?php echo esc_html(date('M d, Y', strtotime($log->log_date))); ?></td>
+                               <td><?php echo esc_html($type_label); ?></td>
+                               <td><?php echo esc_html($clock_in); ?></td>
+                               <td><?php echo esc_html($clock_out); ?></td>
+                               <td><?php echo esc_html($log->reason); ?></td>
+                               <td><span class="<?php echo $status_class; ?>" style="padding: 4px 8px; border-radius: 4px; display: inline-block;"><?php echo esc_html(ucfirst($log->status)); ?></span></td>
+                               <?php if ($can_manage): ?>
+                                   <td>
+                                       <?php if ($log->status === 'pending'): ?>
+                                           <button class="bntm-btn-small approve-missing" data-id="<?php echo $log->id; ?>">Approve</button>
+                                           <button class="bntm-btn-small bntm-btn-danger reject-missing" data-id="<?php echo $log->id; ?>">Reject</button>
+                                       <?php endif; ?>
+                                   </td>
+                               <?php endif; ?>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php else: ?>
             <p>No missing logs found.</p>
         <?php endif; ?>

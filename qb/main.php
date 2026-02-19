@@ -3,7 +3,7 @@
  * Module Name: Quotations and Billings
  * Module Slug: qb
  * Description: Quotations and Billing Schedules management
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Your Name
  * Icon: 📋
  */
@@ -333,6 +333,8 @@ function qb_quotations_tab($business_id) {
         <?php if (empty($quotations)): ?>
             <p>No quotations yet.</p>
         <?php else: ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -385,6 +387,7 @@ function qb_quotations_tab($business_id) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php endif; ?>
     </div>
 
@@ -1167,6 +1170,8 @@ function qb_billing_tab($business_id) {
         <?php if (empty($schedules)): ?>
             <p>No billing schedules yet.</p>
         <?php else: ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -1289,6 +1294,7 @@ function qb_billing_tab($business_id) {
                 <?php endforeach; ?>
             </tbody>
         </table>
+        </div>
     <?php endif; ?>
 </div>
 

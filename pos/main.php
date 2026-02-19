@@ -3,7 +3,7 @@
  * Module Name: Point of Sale
  * Module Slug: pos
  * Description: Complete POS system with sales, inventory, and staff management
- * Version: 1.0.1
+ * Version: 1.0.3
  * Author: Your Name
  * Icon: 🏪
  */
@@ -144,6 +144,2587 @@ function bntm_pos_create_tables() {
 // Register shortcodes
 //add_shortcode('pos_cashier', 'bntm_pos_shortcode_cashier');
 //add_shortcode('pos_dashboard', 'bntm_pos_shortcode_dashboard');
+
+function bntm_pos_shortcode_dashboard() {
+    if (!is_user_logged_in()) {
+        return '<div class="bntm-notice">Please log in to access the POS dashboard.</div>';
+    }
+    
+    $active_tab = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : 'overview';
+    
+    ob_start();
+    ?>
+    <div class="bntm-ecommerce-container">
+        <div class="bntm-tabs">
+            <a href="?type=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
+            <a href="?type=products" class="bntm-tab <?php echo $active_tab === 'products' ? 'active' : ''; ?>">Products</a>
+            <a href="?type=finance" class="bntm-tab <?php echo $active_tab === 'finance' ? 'active' : ''; ?>">Finance</a>
+            <a href="?type=settings" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">Settings</a>
+        </div>
+        
+        <div class="bntm-tab-content">
+            <?php if ($active_tab === 'overview'): ?>
+                <?php echo pos_overview_tab(); ?>
+            <?php elseif ($active_tab === 'products'): ?>
+                <?php echo pos_products_tab(); ?>
+            <?php elseif ($active_tab === 'finance'): ?>
+                <?php echo pos_finance_tab(); ?>
+            <?php elseif ($active_tab === 'settings'): ?>
+                <?php echo pos_settings_tab(); ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+    $content = ob_get_clean();
+    return bntm_universal_container('POS Dashboard', $content);
+}
+/* ---------- OVERVIEW TAB ---------- */
+function pos_overview_tab() {
+    $stats = pos_get_dashboard_stats();
+    $pos_page = get_page_by_path('pos');
+    $pos_url = $pos_page ? get_permalink($pos_page) : '';
+    
+    ob_start();
+    ?>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+    
+    <?php if ($pos_url): ?>
+    <div class="pos-cashier-card">
+        <div class="pos-cashier-header">
+            <div>
+                <h3>POS Cashier Page</h3>
+                <p class="pos-cashier-subtitle">Access your point of sale system</p>
+            </div>
+            <span class="pos-status-badge pos-status-active">Active</span>
+        </div>
+        <div class="pos-cashier-actions">
+            <input type="text" id="pos-url" value="<?php echo esc_url($pos_url); ?>" readonly class="pos-url-input">
+            <button class="bntm-btn-secondary" id="copy-pos-url">Copy Link</button>
+            <a href="<?php echo esc_url($pos_url); ?>" target="_blank" class="bntm-btn-primary">Open POS</a>
+        </div>
+    </div>
+    <?php endif; ?>
+    
+    <div class="pos-dashboard-stats">
+        <div class="pos-stat-card">
+            <div class="pos-stat-icon pos-stat-icon-success">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="1" x2="12" y2="23"></line>
+                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                </svg>
+            </div>
+            <div class="pos-stat-content">
+                <h3>Sales Today</h3>
+                <p class="pos-stat-number"><?php echo pos_format_price($stats['sales_today']); ?></p>
+                <span class="pos-stat-change pos-stat-positive">
+                    <?php echo $stats['sales_today_change']; ?>% vs yesterday
+                </span>
+            </div>
+        </div>
+        
+        <div class="pos-stat-card">
+            <div class="pos-stat-icon pos-stat-icon-primary">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+                </svg>
+            </div>
+            <div class="pos-stat-content">
+                <h3>Transactions Today</h3>
+                <p class="pos-stat-number"><?php echo esc_html($stats['transactions_today']); ?></p>
+                <span class="pos-stat-change pos-stat-neutral">
+                    <?php echo esc_html($stats['avg_transaction_value']); ?> avg. value
+                </span>
+            </div>
+        </div>
+        
+        <div class="pos-stat-card">
+            <div class="pos-stat-icon pos-stat-icon-info">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+            </div>
+            <div class="pos-stat-content">
+                <h3>Sales This Month</h3>
+                <p class="pos-stat-number"><?php echo pos_format_price($stats['sales_month']); ?></p>
+                <span class="pos-stat-change pos-stat-neutral">
+                    <?php echo esc_html($stats['transactions_month']); ?> transactions
+                </span>
+            </div>
+        </div>
+        
+        <div class="pos-stat-card">
+            <div class="pos-stat-icon <?php echo $stats['low_stock'] > 0 ? 'pos-stat-icon-warning' : 'pos-stat-icon-success'; ?>">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                </svg>
+            </div>
+            <div class="pos-stat-content">
+                <h3>Low Stock Items</h3>
+                <p class="pos-stat-number" style="color: <?php echo $stats['low_stock'] > 0 ? '#f59e0b' : '#10b981'; ?>">
+                    <?php echo esc_html($stats['low_stock']); ?>
+                </p>
+                <span class="pos-stat-change pos-stat-neutral">
+                    <?php echo esc_html($stats['total_products']); ?> total products
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="pos-charts-grid">
+        <div class="pos-chart-card pos-chart-large">
+            <h3>Sales Trend (Last 7 Days)</h3>
+            <canvas id="salesTrendChart"></canvas>
+        </div>
+        
+        <div class="pos-chart-card">
+            <h3>Payment Methods</h3>
+            <canvas id="paymentMethodsChart"></canvas>
+        </div>
+        
+        <div class="pos-chart-card">
+            <h3>Hourly Sales Today</h3>
+            <canvas id="hourlySalesChart"></canvas>
+        </div>
+    </div>
+
+    <div class="pos-insights-grid">
+        <div class="pos-insight-card">
+            <div class="pos-insight-header">
+                <h4>Top Selling Products</h4>
+                <span class="pos-insight-badge">Today</span>
+            </div>
+            <div class="pos-insight-list">
+                <?php foreach ($stats['top_products'] as $product): ?>
+                <div class="pos-insight-item">
+                    <div class="pos-insight-item-info">
+                        <span class="pos-insight-item-name"><?php echo esc_html($product['name']); ?></span>
+                        <span class="pos-insight-item-meta"><?php echo esc_html($product['quantity']); ?> sold</span>
+                    </div>
+                    <span class="pos-insight-item-value"><?php echo pos_format_price($product['total']); ?></span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        
+        <div class="pos-insight-card">
+            <div class="pos-insight-header">
+                <h4>Peak Hours</h4>
+                <span class="pos-insight-badge">This Week</span>
+            </div>
+            <div class="pos-insight-list">
+                <?php foreach ($stats['peak_hours'] as $hour): ?>
+                <div class="pos-insight-item">
+                    <div class="pos-insight-item-info">
+                        <span class="pos-insight-item-name"><?php echo esc_html($hour['hour']); ?></span>
+                        <span class="pos-insight-item-meta"><?php echo esc_html($hour['transactions']); ?> transactions</span>
+                    </div>
+                    <div class="pos-insight-progress">
+                        <div class="pos-insight-progress-bar" style="width: <?php echo esc_attr($hour['percentage']); ?>%"></div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="pos-recent-transactions-section">
+        <h3>Recent Transactions</h3>
+        <?php echo pos_render_recent_transactions(); ?>
+    </div>
+<style>
+.pos-cashier-card {
+    background: #f8f9fa;
+    padding: 24px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    border: 1px solid #e5e7eb;
+}
+
+.pos-cashier-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.pos-cashier-header h3 {
+    margin: 0;
+    color: #111827;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.pos-status-badge {
+    background: #10b981;
+    color: #ffffff;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.pos-cashier-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.pos-url-input {
+    flex: 1;
+    min-width: 300px;
+    padding: 12px 16px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #374151;
+    font-size: 14px;
+    font-family: monospace;
+    transition: all 0.2s ease;
+}
+
+.pos-url-input:focus {
+    outline: none;
+    border-color: #9ca3af;
+}
+
+.pos-dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.pos-stat-card {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    border: 1px solid #e5e7eb;
+    transition: all 0.2s ease;
+}
+
+.pos-stat-card:hover {
+    border-color: #d1d5db;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.pos-stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.pos-stat-icon-primary {
+    background: var(--bntm-primary, #374151);
+    color: #ffffff;
+}
+
+.pos-stat-icon-success {
+    background: #10b981;
+    color: #ffffff;
+}
+
+.pos-stat-icon-info {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+.pos-stat-icon-warning {
+    background: #f59e0b;
+    color: #ffffff;
+}
+
+.pos-stat-content {
+    flex: 1;
+}
+
+.pos-stat-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pos-stat-number {
+    font-size: 28px;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+    line-height: 1;
+}
+
+.pos-stat-change {
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-block;
+    margin-top: 4px;
+}
+
+.pos-stat-positive {
+    color: #10b981;
+}
+
+.pos-stat-negative {
+    color: #ef4444;
+}
+
+.pos-stat-neutral {
+    color: #6b7280;
+}
+
+.pos-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.pos-chart-card {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+}
+
+.pos-chart-large {
+    grid-column: 1 / -1;
+}
+
+.pos-chart-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pos-chart-card canvas {
+    max-height: 300px;
+}
+
+.pos-insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.pos-insight-card {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+}
+
+.pos-insight-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.pos-insight-header h4 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pos-insight-badge {
+    background: #f3f4f6;
+    color: #6b7280;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pos-insight-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.pos-insight-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.pos-insight-item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pos-insight-item-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pos-insight-item-meta {
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.pos-insight-item-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.pos-insight-progress {
+    flex: 1;
+    height: 8px;
+    background: #f3f4f6;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.pos-insight-progress-bar {
+    height: 100%;
+    background: var(--bntm-primary, #374151);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.pos-recent-transactions-section {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+}
+
+.pos-recent-transactions-section h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+    /* Pagination styles */
+    .pos-pagination {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 20px;
+        padding: 15px;
+        background: #f9fafb;
+        border-radius: 8px;
+        flex-wrap: wrap;
+    }
+    .pos-page-btn {
+        padding: 8px 16px;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        text-decoration: none;
+        color: #374151;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    .pos-page-btn:hover {
+        background: #f3f4f6;
+        border-color: #9ca3af;
+    }
+    .pos-page-numbers {
+        display: flex;
+        gap: 5px;
+        flex: 1;
+        justify-content: center;
+    }
+    .pos-page-num {
+        padding: 8px 12px;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        text-decoration: none;
+        color: #374151;
+        min-width: 40px;
+        text-align: center;
+        transition: all 0.2s;
+    }
+    .pos-page-num:hover {
+        background: #f3f4f6;
+        border-color: #9ca3af;
+    }
+    .pos-page-num.active {
+        background: #3b82f6;
+        color: #fff;
+        border-color: #3b82f6;
+        font-weight: 600;
+    }
+    .pos-page-dots {
+        padding: 8px 4px;
+        color: #6b7280;
+    }
+    .pos-page-info {
+        color: #6b7280;
+        font-size: 14px;
+        margin-left: auto;
+    }
+@media (max-width: 768px) {
+    .pos-chart-card {
+        grid-column: 1 / -1;
+    }
+    .pos-insight-card {
+        grid-column: 1 / -1;
+    }
+}
+</style>
+    
+    <script>
+    (function() {
+        // Copy URL functionality
+        const copyBtn = document.getElementById('copy-pos-url');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', function() {
+                const urlInput = document.getElementById('pos-url');
+                urlInput.select();
+                document.execCommand('copy');
+                
+                const originalText = this.textContent;
+                this.textContent = 'Copied!';
+                this.style.background = '#10b981';
+                this.style.color = '#ffffff';
+                this.style.borderColor = '#10b981';
+                
+                setTimeout(() => {
+                    this.textContent = originalText;
+                    this.style.background = '';
+                    this.style.color = '';
+                    this.style.borderColor = '';
+                }, 2000);
+            });
+        }
+        
+        // Chart.js configuration
+        const primaryColor = getComputedStyle(document.documentElement)
+            .getPropertyValue('--bntm-primary').trim() || '#667eea';
+        
+        // Sales Trend Chart (Line Chart - 7 Days)
+        const salesTrendCtx = document.getElementById('salesTrendChart');
+        if (salesTrendCtx) {
+            new Chart(salesTrendCtx, {
+                type: 'line',
+                data: {
+                    labels: <?php echo json_encode(array_column($stats['daily_sales_data'], 'date')); ?>,
+                    datasets: [{
+                        label: 'Sales',
+                        data: <?php echo json_encode(array_column($stats['daily_sales_data'], 'total')); ?>,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointBackgroundColor: '#667eea',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointRadius: 5,
+                        pointHoverRadius: 7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#111827',
+                            padding: 12,
+                            titleFont: { size: 14, weight: '600' },
+                            bodyFont: { size: 13 },
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Sales: ₱' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#f3f4f6'
+                            },
+                            ticks: {
+                                color: '#6b7280',
+                                font: { size: 12 }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: '#6b7280',
+                                font: { size: 12 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Payment Methods Chart (Doughnut Chart)
+        const paymentMethodsCtx = document.getElementById('paymentMethodsChart');
+        if (paymentMethodsCtx) {
+            new Chart(paymentMethodsCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: <?php echo json_encode(array_column($stats['payment_methods_data'], 'method')); ?>,
+                    datasets: [{
+                        data: <?php echo json_encode(array_column($stats['payment_methods_data'], 'total')); ?>,
+                        backgroundColor: [
+                            '#667eea',
+                            '#10b981',
+                            '#f59e0b',
+                            '#ef4444',
+                            '#6b7280'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 15,
+                                font: { size: 12 },
+                                color: '#374151'
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#111827',
+                            padding: 12,
+                            titleFont: { size: 14, weight: '600' },
+                            bodyFont: { size: 13 },
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    return label + ': ₱' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Hourly Sales Chart (Bar Chart)
+        const hourlySalesCtx = document.getElementById('hourlySalesChart');
+        if (hourlySalesCtx) {
+            new Chart(hourlySalesCtx, {
+                type: 'bar',
+                data: {
+                    labels: <?php echo json_encode(array_column($stats['hourly_sales_data'], 'hour')); ?>,
+                    datasets: [{
+                        label: 'Sales',
+                        data: <?php echo json_encode(array_column($stats['hourly_sales_data'], 'total')); ?>,
+                        backgroundColor: '#764ba2',
+                        borderRadius: 6,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: '#111827',
+                            padding: 12,
+                            titleFont: { size: 14, weight: '600' },
+                            bodyFont: { size: 13 },
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Sales: ₱' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#f3f4f6'
+                            },
+                            ticks: {
+                                color: '#6b7280',
+                                font: { size: 12 }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: '#6b7280',
+                                font: { size: 12 }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    })();
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+function pos_get_dashboard_stats() {
+    global $wpdb;
+    $trans_table = $wpdb->prefix . 'pos_transactions';
+    $items_table = $wpdb->prefix . 'pos_transaction_items';
+    $prod_table = $wpdb->prefix . 'pos_products';
+    
+    // Sales today
+    $sales_today = $wpdb->get_var(
+        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
+        WHERE DATE(created_at) = CURDATE() AND status = 'completed'"
+    );
+    
+    // Sales yesterday
+    $sales_yesterday = $wpdb->get_var(
+        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
+        WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND status = 'completed'"
+    );
+    
+    // Calculate percentage change
+    $sales_today_change = $sales_yesterday > 0 
+        ? round((($sales_today - $sales_yesterday) / $sales_yesterday) * 100, 1) 
+        : 0;
+    
+    // Transactions today
+    $transactions_today = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$trans_table} 
+        WHERE DATE(created_at) = CURDATE() AND status = 'completed'"
+    );
+    
+    // Average transaction value
+    $avg_transaction_value = $transactions_today > 0 
+        ? pos_format_price($sales_today / $transactions_today) 
+        : pos_format_price(0);
+    
+    // Sales this month
+    $sales_month = $wpdb->get_var(
+        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
+        WHERE MONTH(created_at) = MONTH(CURDATE()) 
+        AND YEAR(created_at) = YEAR(CURDATE()) 
+        AND status = 'completed'"
+    );
+    
+    // Transactions this month
+    $transactions_month = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$trans_table} 
+        WHERE MONTH(created_at) = MONTH(CURDATE()) 
+        AND YEAR(created_at) = YEAR(CURDATE()) 
+        AND status = 'completed'"
+    );
+    
+    // Low stock count
+    $low_stock = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$prod_table} 
+        WHERE stock <= reorder_level AND status = 'active'"
+    );
+    
+    // Total products
+    $total_products = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$prod_table} WHERE status = 'active'"
+    );
+    
+    // Daily sales data (last 7 days)
+    $daily_sales_data = $wpdb->get_results(
+        "SELECT DATE_FORMAT(created_at, '%a') as date, COALESCE(SUM(total), 0) as total
+        FROM {$trans_table}
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        AND status = 'completed'
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at)",
+        ARRAY_A
+    );
+    
+    // If no data, create empty days
+    if (empty($daily_sales_data)) {
+        $daily_sales_data = [];
+        for ($i = 6; $i >= 0; $i--) {
+            $daily_sales_data[] = [
+                'date' => date('D', strtotime("-$i days")),
+                'total' => 0
+            ];
+        }
+    }
+    
+    // Payment methods data
+    $payment_methods_data = $wpdb->get_results(
+        "SELECT payment_method as method, COALESCE(SUM(total), 0) as total
+        FROM {$trans_table}
+        WHERE DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        AND status = 'completed'
+        GROUP BY payment_method",
+        ARRAY_A
+    );
+    
+    // Hourly sales today
+    $hourly_sales_data = $wpdb->get_results(
+        "SELECT DATE_FORMAT(created_at, '%h %p') as hour, COALESCE(SUM(total), 0) as total
+        FROM {$trans_table}
+        WHERE DATE(created_at) = CURDATE()
+        AND status = 'completed'
+        GROUP BY HOUR(created_at)
+        ORDER BY HOUR(created_at)",
+        ARRAY_A
+    );
+    
+    // Top products today
+    $top_products = $wpdb->get_results(
+        "SELECT p.name, SUM(ti.quantity) as quantity, SUM(ti.quantity * ti.price) as total
+        FROM {$items_table} ti
+        JOIN {$prod_table} p ON ti.product_id = p.id
+        JOIN {$trans_table} t ON ti.transaction_id = t.id
+        WHERE DATE(t.created_at) = CURDATE()
+        AND t.status = 'completed'
+        GROUP BY p.id, p.name
+        ORDER BY total DESC
+        LIMIT 5",
+        ARRAY_A
+    );
+    
+    // Peak hours this week
+    $peak_hours = $wpdb->get_results(
+        "SELECT 
+            DATE_FORMAT(created_at, '%h %p') as hour,
+            COUNT(*) as transactions,
+            (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM {$trans_table} 
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) 
+                AND status = 'completed')) as percentage
+        FROM {$trans_table}
+        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        AND status = 'completed'
+        GROUP BY HOUR(created_at)
+        ORDER BY transactions DESC
+        LIMIT 5",
+        ARRAY_A
+    );
+    
+    return [
+        'sales_today' => floatval($sales_today),
+        'sales_today_change' => $sales_today_change,
+        'transactions_today' => intval($transactions_today),
+        'avg_transaction_value' => $avg_transaction_value,
+        'sales_month' => floatval($sales_month),
+        'transactions_month' => intval($transactions_month),
+        'low_stock' => intval($low_stock),
+        'total_products' => intval($total_products),
+        'daily_sales_data' => $daily_sales_data,
+        'payment_methods_data' => $payment_methods_data ?: [],
+        'hourly_sales_data' => $hourly_sales_data ?: [],
+        'top_products' => $top_products ?: [],
+        'peak_hours' => $peak_hours ?: []
+    ];
+}
+
+function pos_format_price($amount) {
+    return '₱' . number_format(floatval($amount), 2);
+}
+/* ---------- RECENT TRANSACTIONS WITH PAGINATION ---------- */
+function pos_render_recent_transactions($limit = 10) {
+    global $wpdb;
+    $trans_table = $wpdb->prefix . 'pos_transactions';
+    
+    // Get current page from URL parameter
+    $current_page = isset($_GET['pos_page']) ? max(1, intval($_GET['pos_page'])) : 1;
+    $offset = ($current_page - 1) * $limit;
+    
+    // Get total count for pagination
+    $total_transactions = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$trans_table}"
+    );
+    
+    $total_pages = ceil($total_transactions / $limit);
+    
+    // Get transactions for current page
+    $recent_transactions = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$trans_table} ORDER BY created_at DESC LIMIT %d OFFSET %d",
+        $limit, $offset
+    ));
+    
+    if (empty($recent_transactions) && $current_page == 1) {
+        return '<p>No transactions yet.</p>';
+    }
+    
+    ob_start();
+    ?>
+    
+   <div class="bntm-table-wrapper">
+    <table class="bntm-table">
+        <thead>
+            <tr>
+                <th>Transaction #</th>
+                <th>Staff</th>
+                <th>Total</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Date/Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php if (!empty($recent_transactions)): ?>
+                <?php foreach ($recent_transactions as $trans): ?>
+                    <tr>
+                        <td>#<?php echo esc_html($trans->transaction_number); ?></td>
+                        <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
+                        <td style="color: #059669; font-weight: 600;">₱<?php echo number_format($trans->total, 2); ?></td>
+                        <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
+                        <td>
+                            <span class="pos-status-badge pos-status-<?php echo esc_attr($trans->status); ?>">
+                                <?php echo esc_html(ucfirst($trans->status)); ?>
+                            </span>
+                        </td>
+                        <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <tr>
+                    <td colspan="6" style="text-align: center;">No transactions found on this page.</td>
+                </tr>
+            <?php endif; ?>
+        </tbody>
+    </table>
+   </div> 
+    <?php if ($total_pages > 1): ?>
+        <div class="pos-pagination">
+            <?php
+            $base_url = remove_query_arg('pos_page');
+            
+            // Previous button
+            if ($current_page > 1): ?>
+                <a href="<?php echo esc_url(add_query_arg('pos_page', $current_page - 1, $base_url)); ?>" class="pos-page-btn">
+                    &laquo; Previous
+                </a>
+            <?php endif; ?>
+            
+            <!-- Page numbers -->
+            <div class="pos-page-numbers">
+                <?php
+                // Show first page
+                if ($current_page > 3) {
+                    echo '<a href="' . esc_url(add_query_arg('pos_page', 1, $base_url)) . '" class="pos-page-num">1</a>';
+                    if ($current_page > 4) {
+                        echo '<span class="pos-page-dots">...</span>';
+                    }
+                }
+                
+                // Show pages around current page
+                for ($i = max(1, $current_page - 2); $i <= min($total_pages, $current_page + 2); $i++) {
+                    $active_class = ($i == $current_page) ? ' active' : '';
+                    echo '<a href="' . esc_url(add_query_arg('pos_page', $i, $base_url)) . '" class="pos-page-num' . $active_class . '">' . $i . '</a>';
+                }
+                
+                // Show last page
+                if ($current_page < $total_pages - 2) {
+                    if ($current_page < $total_pages - 3) {
+                        echo '<span class="pos-page-dots">...</span>';
+                    }
+                    echo '<a href="' . esc_url(add_query_arg('pos_page', $total_pages, $base_url)) . '" class="pos-page-num">' . $total_pages . '</a>';
+                }
+                ?>
+            </div>
+            
+            <!-- Next button -->
+            <?php if ($current_page < $total_pages): ?>
+                <a href="<?php echo esc_url(add_query_arg('pos_page', $current_page + 1, $base_url)); ?>" class="pos-page-btn">
+                    Next &raquo;
+                </a>
+            <?php endif; ?>
+            
+            <div class="pos-page-info">
+                Page <?php echo $current_page; ?> of <?php echo $total_pages; ?>
+                (<?php echo $total_transactions; ?> total transactions)
+            </div>
+        </div>
+    <?php endif; ?>
+    
+
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- PRODUCTS TAB ---------- */
+function pos_products_tab() {
+    global $wpdb;
+    $pos_table = $wpdb->prefix . 'pos_products';
+    $in_table = $wpdb->prefix . 'in_products';
+    
+    // Get all POS products with real-time stock from IN module
+    $products = $wpdb->get_results("
+        SELECT pos.*, 
+               COALESCE(inprod.stock_quantity, pos.stock) as current_stock,
+               inprod.image AS in_image
+        FROM {$pos_table} AS pos
+        LEFT JOIN {$in_table} AS inprod ON pos.rand_id = inprod.rand_id
+        ORDER BY pos.name ASC
+    ");
+    
+    $nonce = wp_create_nonce('pos_products_nonce');
+    
+    ob_start();
+    ?>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+    
+    <div class="bntm-form-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>POS Products (<?php echo count($products); ?>)</h3>
+            <button id="add-new-pos-product-btn" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>">
+                + Add New Product
+            </button>
+        </div>
+        
+        <?php if (empty($products)): ?>
+            <p>No products yet. Click "Add New Product" to get started.</p>
+        <?php else: ?>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Name</th>
+                           <th>SKU</th>
+                           <th>Price</th>
+                           <th>Stock (Live from Inventory)</th>
+                           <th>Status</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($products as $product): ?>
+                           <tr data-product-id="<?php echo $product->id; ?>" class="product-row <?php echo $product->status === 'inactive' ? 'product-hidden' : ''; ?>">
+                               <td><?php echo esc_html($product->name); ?></td>
+                               <td><?php echo esc_html($product->sku ?: '-'); ?></td>
+                               <td>₱<?php echo number_format($product->price, 2); ?></td>
+                               <td>
+                                   <span class="stock-display"><?php echo esc_html($product->current_stock); ?></span>
+                                   <?php if ($product->current_stock <= $product->reorder_level): ?>
+                                       <span style="color: #dc2626; font-size: 12px;">⚠ Low</span>
+                                   <?php endif; ?>
+                                   <small style="color: #6b7280; display: block; font-size: 11px;">Auto-synced</small>
+                               </td>
+                               <td>
+                                   <label class="pos-toggle">
+                                       <input type="checkbox" 
+                                              class="pos-toggle-status" 
+                                              data-id="<?php echo $product->id; ?>"
+                                              data-nonce="<?php echo $nonce; ?>"
+                                              <?php checked($product->status, 'active'); ?>>
+                                       <span class="pos-toggle-slider"></span>
+                                   </label>
+                                   <span class="status-text"><?php echo ucfirst($product->status); ?></span>
+                               </td>
+                               <td>
+                                   <button class="bntm-btn-small pos-edit-product" 
+                                           data-id="<?php echo $product->id; ?>"
+                                           data-nonce="<?php echo $nonce; ?>"
+                                           title="Edit product">
+                                       Edit
+                                   </button>
+                                   <button class="bntm-btn-small bntm-btn-danger pos-delete-product" 
+                                           data-id="<?php echo $product->id; ?>"
+                                           data-nonce="<?php echo $nonce; ?>"
+                                           title="Delete product"
+                                           style="background: #dc2626; color: white; margin-left: 5px;">
+                                       Delete
+                                   </button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Add/Edit Product Modal -->
+    <div id="pos-product-modal" class="pos-modal" style="display: none;">
+        <div class="pos-modal-content">
+            <div class="pos-modal-header">
+                <h2 id="pos-modal-title">Add New Product</h2>
+                <button class="pos-modal-close">&times;</button>
+            </div>
+            <div class="pos-modal-body">
+                <form id="pos-product-form" class="bntm-form">
+                    <input type="hidden" id="pos-product-id" name="product_id" value="">
+                    
+                    <div class="bntm-form-group">
+                        <label>Product Name *</label>
+                        <input type="text" id="pos-product-name" name="name" required>
+                    </div>
+                    
+                    <div class="bntm-form-row">
+                        <div class="bntm-form-group">
+                            <label>SKU *</label>
+                            <input type="text" id="pos-product-sku" name="sku" required>
+                            <small>Unique product identifier</small>
+                        </div>
+                        
+                        <div class="bntm-form-group">
+                            <label>Barcode</label>
+                            <input type="text" id="pos-product-barcode" name="barcode">
+                        </div>
+                    </div>
+                    
+                    <div class="bntm-form-row">
+                        <div class="bntm-form-group">
+                            <label>Price *</label>
+                            <input type="number" id="pos-product-price" name="price" step="0.01" min="0" required>
+                        </div>
+                        
+                        <div class="bntm-form-group">
+                            <label>Cost per Unit</label>
+                            <input type="number" id="pos-product-cost" name="cost" step="0.01" min="0" value="0">
+                            <small>For inventory tracking</small>
+                        </div>
+                    </div>
+                    
+                    <div class="bntm-form-row">
+                        <div class="bntm-form-group">
+                            <label>Initial Stock *</label>
+                            <input type="number" id="pos-product-stock" name="stock" min="0" required>
+                            <small>Starting inventory quantity</small>
+                        </div>
+                        
+                        <div class="bntm-form-group">
+                            <label>Reorder Level</label>
+                            <input type="number" id="pos-product-reorder" name="reorder_level" min="0" value="10">
+                            <small>Alert when stock falls below</small>
+                        </div>
+                    </div>
+                    
+                    <div class="bntm-form-group">
+                        <label>Description</label>
+                        <textarea id="pos-product-description" name="description" rows="3"></textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button type="submit" class="bntm-btn-primary" style="flex: 1;">
+                            <span id="pos-submit-text">Save Product</span>
+                        </button>
+                        <button type="button" class="bntm-btn-secondary pos-cancel-modal" style="flex: 1;">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+                <div id="pos-product-form-message"></div>
+            </div>
+        </div>
+    </div>
+    
+    <style>
+    .pos-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+    
+    .pos-modal-content {
+        background: white;
+        border-radius: 12px;
+        max-width: 600px;
+        width: 100%;
+        max-height: 90vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    }
+    
+    .pos-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 30px;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .pos-modal-header h2 {
+        margin: 0;
+        font-size: 24px;
+        color: #1f2937;
+    }
+    
+    .pos-modal-close {
+        background: none;
+        border: none;
+        font-size: 32px;
+        color: #6b7280;
+        cursor: pointer;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+    
+    .pos-modal-close:hover {
+        background: #f3f4f6;
+        color: #1f2937;
+    }
+    
+    .pos-modal-body {
+        padding: 30px;
+        overflow-y: auto;
+    }
+    
+    .bntm-btn-secondary {
+        background: #6b7280;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    
+    .bntm-btn-secondary:hover {
+        background: #4b5563;
+    }
+    
+    .stock-display {
+        font-weight: 600;
+        color: #059669;
+    }
+    
+    .pos-toggle {
+        position: relative;
+        display: inline-block;
+        width: 50px;
+        height: 24px;
+        margin-right: 10px;
+    }
+    .pos-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .pos-toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .4s;
+        border-radius: 24px;
+    }
+    .pos-toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    .pos-toggle input:checked + .pos-toggle-slider {
+        background-color: #059669;
+    }
+    .pos-toggle input:checked + .pos-toggle-slider:before {
+        transform: translateX(26px);
+    }
+    .product-hidden {
+        opacity: 0.5;
+        background: #f9fafb;
+    }
+    .status-text {
+        font-size: 14px;
+        color: #6b7280;
+    }
+    </style>
+    
+    <script>
+    (function() {
+        const modal = document.getElementById('pos-product-modal');
+        const modalTitle = document.getElementById('pos-modal-title');
+        const productForm = document.getElementById('pos-product-form');
+        const message = document.getElementById('pos-product-form-message');
+        
+        // Open modal for new product
+        document.getElementById('add-new-pos-product-btn').addEventListener('click', function() {
+            modalTitle.textContent = 'Add New Product';
+            productForm.reset();
+            document.getElementById('pos-product-id').value = '';
+            document.getElementById('pos-submit-text').textContent = 'Save Product';
+            modal.style.display = 'flex';
+        });
+        
+        // Open modal for edit
+        document.querySelectorAll('.pos-edit-product').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const productId = this.dataset.id;
+                
+                modalTitle.textContent = 'Edit Product';
+                document.getElementById('pos-submit-text').textContent = 'Update Product';
+                
+                // Fetch product data
+                const formData = new FormData();
+                formData.append('action', 'pos_get_product_data');
+                formData.append('product_id', productId);
+                formData.append('nonce', this.dataset.nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        const p = json.data;
+                        document.getElementById('pos-product-id').value = p.id;
+                        document.getElementById('pos-product-name').value = p.name;
+                        document.getElementById('pos-product-sku').value = p.sku;
+                        document.getElementById('pos-product-barcode').value = p.barcode || '';
+                        document.getElementById('pos-product-price').value = p.selling_price || p.price;
+                        document.getElementById('pos-product-stock').value = p.stock_quantity || p.stock;
+                        document.getElementById('pos-product-cost').value = p.cost_per_unit || p.cost || 0;
+                        document.getElementById('pos-product-reorder').value = p.reorder_level || 10;
+                        document.getElementById('pos-product-description').value = p.description || '';
+                        modal.style.display = 'flex';
+                    } else {
+                        alert('Failed to load product data');
+                    }
+                })
+                .catch(err => {
+                    alert('Error loading product: ' + err.message);
+                });
+            });
+        });
+        
+        // Close modal
+        document.querySelectorAll('.pos-modal-close, .pos-cancel-modal').forEach(btn => {
+            btn.addEventListener('click', () => {
+                modal.style.display = 'none';
+            });
+        });
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
+        // Submit form
+        productForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('action', 'pos_save_product');
+            formData.append('nonce', '<?php echo $nonce; ?>');
+            
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const submitText = document.getElementById('pos-submit-text');
+            const originalText = submitText.textContent;
+            
+            submitBtn.disabled = true;
+            submitText.textContent = 'Saving...';
+            
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                message.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+                if (json.success) {
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    submitBtn.disabled = false;
+                    submitText.textContent = originalText;
+                }
+            });
+        });
+        
+        // Toggle status
+        document.querySelectorAll('.pos-toggle-status').forEach(toggle => {
+            toggle.addEventListener('change', function() {
+                const formData = new FormData();
+                formData.append('action', 'pos_toggle_product_status');
+                formData.append('product_id', this.dataset.id);
+                formData.append('status', this.checked ? 'active' : 'inactive');
+                formData.append('nonce', this.dataset.nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        const statusText = this.closest('td').querySelector('.status-text');
+                        statusText.textContent = this.checked ? 'Active' : 'Inactive';
+                        
+                        const row = this.closest('tr');
+                        if (this.checked) {
+                            row.classList.remove('product-hidden');
+                        } else {
+                            row.classList.add('product-hidden');
+                        }
+                    } else {
+                        alert(json.data.message);
+                        this.checked = !this.checked;
+                    }
+                });
+            });
+        });
+        
+        // Delete product
+        document.querySelectorAll('.pos-delete-product').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (!confirm('Are you sure you want to delete this product? This will also remove it from inventory.')) return;
+                
+                this.disabled = true;
+                this.textContent = '⏳';
+                
+                const formData = new FormData();
+                formData.append('action', 'pos_delete_product');
+                formData.append('product_id', this.dataset.id);
+                formData.append('nonce', this.dataset.nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    alert(json.data.message);
+                    if (json.success) location.reload();
+                    else {
+                        this.disabled = false;
+                        this.textContent = 'Delete';
+                    }
+                });
+            });
+        });
+    })();
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- FINANCE TAB ---------- */
+function pos_finance_tab() {
+    global $wpdb;
+    $trans_table = $wpdb->prefix . 'pos_transactions';
+    $fn_table = $wpdb->prefix . 'fn_transactions';
+    
+    $transactions = $wpdb->get_results("
+        SELECT t.*, 
+        (SELECT COUNT(*) FROM {$fn_table} WHERE reference_type='pos_sale' AND reference_id=t.id) as is_imported
+        FROM {$trans_table} t
+        WHERE t.status = 'completed'
+        ORDER BY t.created_at DESC
+    ");
+    
+    $nonce = wp_create_nonce('pos_nonce');
+    
+    ob_start();
+    ?>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+    
+    <div class="bntm-form-section">
+        <h3>POS Transactions</h3>
+        <p>Import completed sales as income transactions to Finance module</p>
+        
+        <div style="margin-bottom: 15px;">
+            <label style="cursor: pointer; margin-right: 20px;">
+                <input type="checkbox" id="select-all-not-imported"> 
+                <strong>Select All (Not Imported)</strong>
+            </label>
+            <label style="cursor: pointer;">
+                <input type="checkbox" id="select-all-imported"> 
+                <strong>Select All (Imported)</strong>
+            </label>
+        </div>
+        
+        <div style="margin-bottom: 15px;">
+            <button id="bulk-import-btn" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>" style="margin-right: 10px;">
+                Import Selected
+            </button>
+            <button id="bulk-revert-btn" class="bntm-btn-secondary" data-nonce="<?php echo $nonce; ?>">
+                Revert Selected
+            </button>
+            <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
+        </div>
+        
+        <div class="bntm-table-wrapper">
+           <table class="bntm-table">
+               <thead>
+                   <tr>
+                       <th width="40"></th>
+                       <th>Transaction #</th>
+                       <th>Date</th>
+                       <th>Staff</th>
+                       <th>Total</th>
+                       <th>Payment</th>
+                       <th>Status</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   <?php if (empty($transactions)): ?>
+                   <tr><td colspan="7" style="text-align:center;">No transactions found</td></tr>
+                   <?php else: foreach ($transactions as $trans): ?>
+                   <tr>
+                       <td>
+                           <input type="checkbox" 
+                                  class="trans-checkbox <?php echo $trans->is_imported ? 'imported-trans' : 'not-imported-trans'; ?>" 
+                                  data-id="<?php echo $trans->id; ?>"
+                                  data-amount="<?php echo $trans->total; ?>"
+                                  data-imported="<?php echo $trans->is_imported ? '1' : '0'; ?>">
+                       </td>
+                       <td>#<?php echo $trans->transaction_number; ?></td>
+                       <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
+                       <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
+                       <td class="bntm-stat-income">₱<?php echo number_format($trans->total, 2); ?></td>
+                       <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
+                       <td>
+                           <?php if ($trans->is_imported): ?>
+                           <span style="color:#059669;">✓ Imported</span>
+                           <?php else: ?>
+                           <span style="color:#6b7280;">Not Imported</span>
+                           <?php endif; ?>
+                       </td>
+                   </tr>
+                   <?php endforeach; endif; ?>
+               </tbody>
+           </table>
+        </div>
+    </div>
+    
+    <script>
+    (function() {
+        const nonce = '<?php echo $nonce; ?>';
+        
+        // Update selected count
+        function updateSelectedCount() {
+            const selected = document.querySelectorAll('.trans-checkbox:checked').length;
+            document.getElementById('selected-count').textContent = selected > 0 ? `${selected} selected` : '';
+        }
+        
+        // Select all not imported
+        document.getElementById('select-all-not-imported').addEventListener('change', function() {
+            document.querySelectorAll('.not-imported-trans').forEach(cb => {
+                cb.checked = this.checked;
+            });
+            if (this.checked) {
+                document.getElementById('select-all-imported').checked = false;
+            }
+            updateSelectedCount();
+        });
+        
+        // Select all imported
+        document.getElementById('select-all-imported').addEventListener('change', function() {
+            document.querySelectorAll('.imported-trans').forEach(cb => {
+                cb.checked = this.checked;
+            });
+            if (this.checked) {
+                document.getElementById('select-all-not-imported').checked = false;
+            }
+            updateSelectedCount();
+        });
+        
+        // Update count on individual checkbox change
+        document.querySelectorAll('.trans-checkbox').forEach(cb => {
+            cb.addEventListener('change', updateSelectedCount);
+        });
+        
+        // Bulk Import
+        document.getElementById('bulk-import-btn').addEventListener('click', function() {
+            const selected = Array.from(document.querySelectorAll('.trans-checkbox:checked'))
+                .filter(cb => cb.dataset.imported === '0');
+            
+            if (selected.length === 0) {
+                alert('Please select at least one transaction that is not imported');
+                return;
+            }
+            
+            if (!confirm(`Import ${selected.length} transaction(s) as income?`)) return;
+            
+            this.disabled = true;
+            this.textContent = 'Importing...';
+            
+            // Import one by one using existing AJAX
+            let completed = 0;
+            const total = selected.length;
+            
+            selected.forEach(cb => {
+                const data = new FormData();
+                data.append('action', 'pos_import_transaction');
+                data.append('trans_id', cb.dataset.id);
+                data.append('amount', cb.dataset.amount);
+                data.append('nonce', nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: data})
+                .then(r => r.json())
+                .then(json => {
+                    completed++;
+                    if (completed === total) {
+                        alert(`Successfully imported ${total} transaction(s)`);
+                        location.reload();
+                    }
+                })
+                .catch(err => {
+                    console.error('Import error:', err);
+                    completed++;
+                    if (completed === total) {
+                        alert('Import completed with some errors. Please check and try again.');
+                        location.reload();
+                    }
+                });
+            });
+        });
+        
+        // Bulk Revert
+        document.getElementById('bulk-revert-btn').addEventListener('click', function() {
+            const selected = Array.from(document.querySelectorAll('.trans-checkbox:checked'))
+                .filter(cb => cb.dataset.imported === '1');
+            
+            if (selected.length === 0) {
+                alert('Please select at least one imported transaction');
+                return;
+            }
+            
+            if (!confirm(`Remove ${selected.length} transaction(s) from finance?`)) return;
+            
+            this.disabled = true;
+            this.textContent = 'Reverting...';
+            
+            // Revert one by one using existing AJAX
+            let completed = 0;
+            const total = selected.length;
+            
+            selected.forEach(cb => {
+                const data = new FormData();
+                data.append('action', 'pos_revert_transaction');
+                data.append('trans_id', cb.dataset.id);
+                data.append('nonce', nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: data})
+                .then(r => r.json())
+                .then(json => {
+                    completed++;
+                    if (completed === total) {
+                        alert(`Successfully reverted ${total} transaction(s)`);
+                        location.reload();
+                    }
+                })
+                .catch(err => {
+                    console.error('Revert error:', err);
+                    completed++;
+                    if (completed === total) {
+                        alert('Revert completed with some errors. Please check and try again.');
+                        location.reload();
+                    }
+                });
+            });
+        });
+    })();
+    </script>
+    
+    <style>
+    .bntm-btn-secondary {
+        background: #6b7280;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    .bntm-btn-secondary:hover {
+        background: #4b5563;
+    }
+    .bntm-btn-secondary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    </style>
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- SETTINGS TAB ---------- */
+function pos_settings_tab() {
+    // Get all users with 'pos_cashier' role
+    $staff_members = get_users(['role' => 'pos_cashier']);
+    
+    // Get user limit
+    $user_limit = get_option('bntm_user_limit', 0);
+    $current_users = count(get_users(['exclude' => [1]]));
+    $limit_text = $user_limit > 0 ? " ({$current_users}/{$user_limit})" : " ({$current_users})";
+    $limit_reached = $user_limit > 0 && $current_users >= $user_limit;
+    
+    $nonce = wp_create_nonce('pos_nonce');
+    
+    ob_start();
+    ?>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+    
+    <div class="bntm-form-section">
+        <h3>Staff Management</h3>
+        <p>Assign staff members who can use the POS system</p>
+        
+        <div style="margin: 20px 0;">
+            <button id="show-add-staff" class="bntm-btn-primary" <?php echo $limit_reached ? 'disabled' : ''; ?>>
+                + Add Staff<?php echo $limit_text; ?>
+            </button>
+        </div>
+        
+        <?php if ($limit_reached): ?>
+            <div style="background: #fee2e2; border: 1px solid #fca5a5; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                <strong>⚠️ User Limit Reached:</strong> Maximum of <?php echo $user_limit; ?> users allowed.
+            </div>
+        <?php endif; ?>
+        
+        <div id="add-staff-form" style="display:none; background:#f9fafb; padding:20px; border-radius:8px; margin-bottom:20px;">
+            <h4 style="margin-top:0;">Add New Staff</h4>
+            <form id="staff-form" class="bntm-form">
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Name *</label>
+                        <input type="text" name="staff_name" required>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Username *</label>
+                        <input type="text" name="staff_username" required>
+                        <small>Unique username for login</small>
+                    </div>
+                </div>
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Email *</label>
+                        <input type="email" name="staff_email" required>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Password *</label>
+                        <input type="password" name="staff_password" required minlength="6">
+                        <small>Minimum 6 characters</small>
+                    </div>
+                </div>
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Phone</label>
+                        <input type="tel" name="staff_phone">
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>PIN Code (4-6 digits)</label>
+                        <input type="text" name="staff_pin" pattern="[0-9]{4,6}" maxlength="6">
+                        <small>Optional PIN for quick POS login</small>
+                    </div>
+                </div>
+                <button type="submit" class="bntm-btn-primary">Add Staff</button>
+                <button type="button" id="cancel-add-staff" class="bntm-btn-secondary">Cancel</button>
+                <div id="staff-message"></div>
+            </form>
+        </div>
+        
+        <div class="bntm-table-wrapper">
+           <table class="bntm-table">
+               <thead>
+                   <tr>
+                       <th>Name</th>
+                       <th>Username</th>
+                       <th>Email</th>
+                       <th>Phone</th>
+                       <th>PIN</th>
+                       <th>Status</th>
+                       <th>Actions</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   <?php if (empty($staff_members)): ?>
+                   <tr><td colspan="7" style="text-align:center;">No staff members yet</td></tr>
+                   <?php else: foreach ($staff_members as $staff): 
+                       $phone = get_user_meta($staff->ID, 'pos_phone', true);
+                       $pin = get_user_meta($staff->ID, 'pos_pin', true);
+                       $status = get_user_meta($staff->ID, 'pos_status', true) ?: 'active';
+                   ?>
+                   <tr>
+                       <td><?php echo esc_html($staff->display_name); ?></td>
+                       <td><?php echo esc_html($staff->user_login); ?></td>
+                       <td><?php echo esc_html($staff->user_email); ?></td>
+                       <td><?php echo esc_html($phone ?: '-'); ?></td>
+                       <td><?php echo $pin ? $pin : '-'; ?></td>
+                       <td>
+                           <span style="color: <?php echo $status === 'active' ? '#059669' : '#dc2626'; ?>">
+                               <?php echo ucfirst($status); ?>
+                           </span>
+                       </td>
+                       <td>
+                           <?php if ($status === 'active'): ?>
+                           <button class="bntm-btn-small bntm-btn-danger toggle-staff-status" 
+                                   data-id="<?php echo $staff->ID; ?>"
+                                   data-status="inactive"
+                                   data-nonce="<?php echo $nonce; ?>">
+                               Deactivate
+                           </button>
+                           <?php else: ?>
+                           <button class="bntm-btn-small bntm-btn-success toggle-staff-status" 
+                                   data-id="<?php echo $staff->ID; ?>"
+                                   data-status="active"
+                                   data-nonce="<?php echo $nonce; ?>">
+                               Activate
+                           </button>
+                           <?php endif; ?>
+                       </td>
+                   </tr>
+                   <?php endforeach; endif; ?>
+               </tbody>
+           </table>
+       </div>
+    </div>
+    
+    <div class="bntm-form-section">
+        <h3>POS Settings</h3>
+        <form id="pos-settings-form" class="bntm-form">
+            <div class="bntm-form-group">
+                <label>Tax Rate (%)</label>
+                <input type="number" name="tax_rate" step="0.01" value="<?php echo esc_attr(bntm_get_setting('pos_tax_rate', '0')); ?>">
+                <small>Applied to all sales</small>
+            </div>
+            <div class="bntm-form-group">
+                <label>Receipt Header</label>
+                <textarea name="receipt_header" rows="3"><?php echo esc_textarea(bntm_get_setting('pos_receipt_header', '')); ?></textarea>
+                <small>Store name, address, contact info</small>
+            </div>
+            <div class="bntm-form-group">
+                <label>Receipt Footer</label>
+                <textarea name="receipt_footer" rows="2"><?php echo esc_textarea(bntm_get_setting('pos_receipt_footer', 'Thank you for your purchase!')); ?></textarea>
+            </div>
+            <button type="submit" class="bntm-btn-primary">Save Settings</button>
+            <div id="settings-message"></div>
+        </form>
+    </div>
+    
+    <script>
+    (function() {
+        // Show/hide add staff form
+        document.getElementById('show-add-staff').addEventListener('click', function() {
+            document.getElementById('add-staff-form').style.display = 'block';
+        });
+        
+        document.getElementById('cancel-add-staff').addEventListener('click', function() {
+            document.getElementById('add-staff-form').style.display = 'none';
+            document.getElementById('staff-form').reset();
+        });
+        
+        // Add staff
+        document.getElementById('staff-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('action', 'pos_add_staff');
+            formData.append('nonce', '<?php echo $nonce; ?>');
+            
+            const btn = this.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+            
+            fetch(ajaxurl, {method:'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                const msg = document.getElementById('staff-message');
+                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+                
+                if (json.success) {
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = 'Add Staff';
+                }
+            });
+        });
+        
+        // Toggle staff status
+        document.querySelectorAll('.toggle-staff-status').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const action = this.dataset.status === 'active' ? 'activate' : 'deactivate';
+                if (!confirm('Are you sure you want to ' + action + ' this staff member?')) return;
+                
+                const formData = new FormData();
+                formData.append('action', 'pos_toggle_staff_status');
+                formData.append('staff_id', this.dataset.id);
+                formData.append('status', this.dataset.status);
+                formData.append('nonce', this.dataset.nonce);
+                
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        location.reload();
+                    } else {
+                        alert(json.data.message);
+                    }
+                });
+            });
+        });
+        
+        // Save settings
+        document.getElementById('pos-settings-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('action', 'pos_save_settings');
+            formData.append('nonce', '<?php echo $nonce; ?>');
+            
+            const btn = this.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                const msg = document.getElementById('settings-message');
+                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+                
+                btn.disabled = false;
+                btn.textContent = 'Save Settings';
+            });
+        });
+    })();
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- AJAX HANDLERS ---------- */
+// Get product data for editing
+function bntm_ajax_pos_get_product_data() {
+    check_ajax_referer('pos_products_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $pos_table = $wpdb->prefix . 'pos_products';
+    $in_table = $wpdb->prefix . 'in_products';
+    $product_id = intval($_POST['product_id']);
+    
+    $product = $wpdb->get_row($wpdb->prepare(
+        "SELECT pos.*, 
+                inprod.cost_per_unit,
+                inprod.selling_price as in_selling_price,
+                inprod.stock_quantity
+         FROM $pos_table pos
+         LEFT JOIN $in_table inprod ON pos.rand_id = inprod.rand_id
+         WHERE pos.id = %d",
+        $product_id
+    ));
+    
+    if (!$product) {
+        wp_send_json_error(['message' => 'Product not found']);
+    }
+    
+    wp_send_json_success($product);
+}
+add_action('wp_ajax_pos_get_product_data', 'bntm_ajax_pos_get_product_data');
+
+function bntm_ajax_pos_save_product() {
+    check_ajax_referer('pos_products_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $pos_table = $wpdb->prefix . 'pos_products';
+    $in_table = $wpdb->prefix . 'in_products';
+    $batches_table = $wpdb->prefix . 'in_batches';
+    
+    $product_id = intval($_POST['product_id'] ?? 0);
+    $name = sanitize_text_field($_POST['name']);
+    $sku = sanitize_text_field($_POST['sku']);
+    $barcode = sanitize_text_field($_POST['barcode'] ?? '');
+    $price = floatval($_POST['price']);
+    $stock = intval($_POST['stock']);
+    $cost = floatval($_POST['cost'] ?? 0);
+    $reorder_level = intval($_POST['reorder_level'] ?? 10);
+    $description = sanitize_textarea_field($_POST['description'] ?? '');
+    
+    // Generate SKU if empty
+    if (empty($sku)) {
+        $sku = 'POS-' . strtoupper(substr(md5(uniqid()), 0, 8));
+    }
+    
+    // Generate barcode if empty
+    if (empty($barcode)) {
+        $barcode = 'POS-' . str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
+    }
+    
+    if (empty($name)) {
+        wp_send_json_error(['message' => 'Product name is required']);
+    }
+    
+    $wpdb->show_errors();
+    $wpdb->query('START TRANSACTION');
+    
+    try {
+        if ($product_id > 0) {
+            // UPDATE existing product
+            $existing = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $pos_table WHERE id = %d",
+                $product_id
+            ));
+            
+            if (!$existing) {
+                throw new Exception('Product not found');
+            }
+            
+            // Check if SKU changed and conflicts
+            if ($sku !== $existing->sku) {
+                $sku_exists = $wpdb->get_var($wpdb->prepare(
+                    "SELECT id FROM $pos_table WHERE sku = %s AND id != %d",
+                    $sku, $product_id
+                ));
+                
+                if ($sku_exists) {
+                    throw new Exception('SKU already exists');
+                }
+            }
+            
+            // Update POS product
+            $wpdb->update(
+                $pos_table,
+                [
+                    'name' => $name,
+                    'sku' => $sku,
+                    'barcode' => $barcode,
+                    'price' => $price,
+                    'description' => $description,
+                    'reorder_level' => $reorder_level
+                ],
+                ['id' => $product_id],
+                ['%s', '%s', '%s', '%f', '%s', '%d'],
+                ['%d']
+            );
+            
+            // Update IN product
+            $wpdb->update(
+                $in_table,
+                [
+                    'name' => $name,
+                    'sku' => $sku,
+                    'barcode' => $barcode,
+                    'selling_price' => $price,
+                    'cost_per_unit' => $cost,
+                    'description' => $description,
+                    'reorder_level' => $reorder_level
+                ],
+                ['rand_id' => $existing->rand_id],
+                ['%s', '%s', '%s', '%f', '%f', '%s', '%d'],
+                ['%s']
+            );
+            
+            $message = 'Product updated successfully!';
+            
+        } else {
+            // CREATE new product
+            $sku_exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM $pos_table WHERE sku = %s",
+                $sku
+            ));
+            
+            if ($sku_exists) {
+                throw new Exception('SKU already exists');
+            }
+            
+            $rand_id = bntm_rand_id();
+            $business_id = get_current_user_id();
+            
+            // Insert into POS
+            $wpdb->insert($pos_table, [
+                'rand_id' => $rand_id,
+                'name' => $name,
+                'sku' => $sku,
+                'barcode' => $barcode,
+                'price' => $price,
+                'cost' => $cost,
+                'stock' => $stock,
+                'reorder_level' => $reorder_level,
+                'description' => $description,
+                'status' => 'active'
+            ], ['%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s']);
+            
+            if (!$wpdb->insert_id) {
+                throw new Exception('Failed to create POS product. Error: ' . $wpdb->last_error);
+            }
+            
+            // Insert into IN
+            $wpdb->insert($in_table, [
+                'rand_id' => $rand_id,
+                'business_id' => $business_id,
+                'name' => $name,
+                'sku' => $sku,
+                'barcode' => $barcode,
+                'inventory_type' => 'Product',
+                'cost_per_unit' => $cost,
+                'selling_price' => $price,
+                'stock_quantity' => $stock,
+                'reorder_level' => $reorder_level,
+                'description' => $description
+            ], ['%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s']);
+            
+            $in_id = $wpdb->insert_id;
+            
+            if (!$in_id) {
+                throw new Exception('Failed to create IN product. Error: ' . $wpdb->last_error);
+            }
+            
+            // Log initial stock batch if stock > 0
+            if ($stock > 0) {
+                $wpdb->insert($batches_table, [
+                    'rand_id' => bntm_rand_id(),
+                    'business_id' => $business_id,
+                    'product_id' => $in_id,
+                    'batch_code' => 'INITIAL-POS-' . $sku,
+                    'type' => 'stock_in',
+                    'quantity' => $stock,
+                    'cost_per_unit' => $cost,
+                    'total_cost' => $stock * $cost,
+                    'reference_number' => 'INITIAL',
+                    'notes' => 'Initial stock from POS product creation',
+                    'created_at' => current_time('mysql')
+                ], ['%s', '%d', '%d', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']);
+            }
+            
+            $message = 'Product created successfully in both POS and Inventory!';
+        }
+        
+        $wpdb->query('COMMIT');
+        wp_send_json_success(['message' => $message]);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(['message' => $e->getMessage()]);
+    }
+}
+add_action('wp_ajax_pos_save_product', 'bntm_ajax_pos_save_product');
+
+function bntm_ajax_pos_delete_product() {
+    check_ajax_referer('pos_products_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $pos_table = $wpdb->prefix . 'pos_products';
+    $in_table = $wpdb->prefix . 'in_products';
+    $product_id = intval($_POST['product_id']);
+    
+    // Get product
+    $product = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $pos_table WHERE id = %d",
+        $product_id
+    ));
+    
+    if (!$product) {
+        wp_send_json_error(['message' => 'Product not found']);
+    }
+    
+    $wpdb->query('START TRANSACTION');
+    
+    try {
+        // Delete from IN module
+        $wpdb->delete(
+            $in_table,
+            ['rand_id' => $product->rand_id],
+            ['%s']
+        );
+        
+        // Delete from POS module
+        $wpdb->delete(
+            $pos_table,
+            ['id' => $product_id],
+            ['%d']
+        );
+        
+        $wpdb->query('COMMIT');
+        wp_send_json_success(['message' => 'Product deleted from both POS and Inventory']);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(['message' => 'Failed to delete product']);
+    }
+}
+add_action('wp_ajax_pos_delete_product', 'bntm_ajax_pos_delete_product');
+
+function bntm_ajax_pos_toggle_product_status() {
+    check_ajax_referer('pos_products_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_products';
+    $product_id = intval($_POST['product_id']);
+    $status = sanitize_text_field($_POST['status']);
+    
+    $result = $wpdb->update(
+        $table,
+        ['status' => $status],
+        ['id' => $product_id],
+        ['%s'],
+        ['%d']
+    );
+    
+    if ($result !== false) {
+        wp_send_json_success(['message' => 'Status updated']);
+    } else {
+        wp_send_json_error(['message' => 'Failed to update status']);
+    }
+}
+add_action('wp_ajax_pos_toggle_product_status', 'bntm_ajax_pos_toggle_product_status');
+/* ---------- AJAX HANDLERS ---------- */
+
+// Create POS Cashier role on activation
+function pos_create_cashier_role() {
+    if (!get_role('pos_cashier')) {
+        add_role(
+            'pos_cashier',
+            'POS Cashier',
+            [
+                'read' => true,
+                'pos_access' => true  // Custom capability
+            ]
+        );
+    }
+}
+// Hook this to your plugin/module activation
+register_activation_hook(__FILE__, 'pos_create_cashier_role');
+// Modified POS add staff function
+function bntm_ajax_pos_add_staff() {
+    check_ajax_referer('pos_nonce', 'nonce');
+    
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    // Check user limit
+    $user_limit = get_option('bntm_user_limit', 0);
+    if ($user_limit > 0) {
+        $current_count = count(get_users(['exclude' => [1]]));
+        if ($current_count >= $user_limit) {
+            wp_send_json_error(['message' => "User limit reached. Maximum {$user_limit} users allowed."]);
+        }
+    }
+    
+    // Ensure role exists
+    if (!get_role('pos_cashier')) {
+        pos_create_cashier_role();
+    }
+    
+    $name = sanitize_text_field($_POST['staff_name']);
+    $username = sanitize_user($_POST['staff_username']);
+    $email = sanitize_email($_POST['staff_email']);
+    $password = $_POST['staff_password'];
+    $phone = sanitize_text_field($_POST['staff_phone']);
+    $pin = sanitize_text_field($_POST['staff_pin']);
+    
+    // Validation
+    if (empty($name) || empty($username) || empty($email) || empty($password)) {
+        wp_send_json_error(['message' => 'Name, username, email, and password are required']);
+    }
+    
+    if (username_exists($username)) {
+        wp_send_json_error(['message' => 'Username already exists']);
+    }
+    
+    if (email_exists($email)) {
+        wp_send_json_error(['message' => 'Email already exists']);
+    }
+    
+    // Check if PIN already exists
+    if (!empty($pin)) {
+        $existing_pin = get_users([
+            'meta_key' => 'pos_pin',
+            'meta_value' => $pin,
+            'number' => 1
+        ]);
+        
+        if (!empty($existing_pin)) {
+            wp_send_json_error(['message' => 'PIN code already in use']);
+        }
+    }
+    
+    // Create user
+    $user_id = wp_create_user($username, $password, $email);
+    
+    if (is_wp_error($user_id)) {
+        wp_send_json_error(['message' => 'Failed to create user: ' . $user_id->get_error_message()]);
+    }
+    
+    // Set user role to pos_cashier (WordPress role)
+    $user = new WP_User($user_id);
+    $user->set_role('pos_cashier');
+    
+    // Update user meta
+    wp_update_user([
+        'ID' => $user_id,
+        'display_name' => $name,
+        'first_name' => $name
+    ]);
+    
+    // Add custom meta for POS
+    update_user_meta($user_id, 'pos_phone', $phone);
+    update_user_meta($user_id, 'pos_pin', $pin);
+    update_user_meta($user_id, 'pos_status', 'active');
+    
+    // Add HR role meta if HR module exists
+    if (function_exists('bntm_get_hr_roles')) {
+        update_user_meta($user_id, 'bntm_role', 'pos_cashier');
+        update_user_meta($user_id, 'bntm_status', 'active');
+    }
+    
+    wp_send_json_success(['message' => 'Staff member added successfully!']);
+}
+add_action('wp_ajax_pos_add_staff', 'bntm_ajax_pos_add_staff');
+add_action('wp_ajax_pos_add_staff', 'bntm_ajax_pos_add_staff');
+
+// Toggle staff status (activate/deactivate)
+function bntm_ajax_pos_toggle_staff_status() {
+    check_ajax_referer('pos_nonce', 'nonce');
+    
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    $staff_id = intval($_POST['staff_id']);
+    $status = sanitize_text_field($_POST['status']);
+    
+    if (!in_array($status, ['active', 'inactive'])) {
+        wp_send_json_error(['message' => 'Invalid status']);
+    }
+    
+    $user = get_user_by('ID', $staff_id);
+    
+    if (!$user || !in_array('pos_cashier', $user->roles)) {
+        wp_send_json_error(['message' => 'Invalid staff member']);
+    }
+    
+    update_user_meta($staff_id, 'pos_status', $status);
+    
+    $message = $status === 'active' ? 'Staff member activated' : 'Staff member deactivated';
+    wp_send_json_success(['message' => $message]);
+}
+add_action('wp_ajax_pos_toggle_staff_status', 'bntm_ajax_pos_toggle_staff_status');
+
+
+/* ---------- HELPER FUNCTIONS ---------- */
+// Check if user can access POS
+function pos_user_can_access($user_id = null) {
+    if (!$user_id) {
+        $user_id = get_current_user_id();
+    }
+    
+    if (!$user_id) {
+        return false;
+    }
+    
+    // Get user object
+    $user = get_userdata($user_id);
+    
+    if (!$user) {
+        return false;
+    }
+    
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($user_id);
+    $can_manage = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
+    
+    // Admins can always access
+    if ($can_manage) {
+        return true;
+    }
+    
+    // Check if user has pos_cashier role or cashier HR role and is active
+    $user_roles = $user->roles ?? [];
+    
+    if (in_array('pos_cashier', $user_roles) || in_array($current_role, ['pos_cashier', 'cashier'])) {
+        $status = get_user_meta($user_id, 'pos_status', true);
+        return $status === 'active' || empty($status); // Active by default
+    }
+    
+    return false;
+}
+
+// Get staff member by PIN (from previous artifact)
+function pos_get_staff_by_pin($pin) {
+    if (empty($pin)) {
+        return null;
+    }
+    
+    $users = get_users([
+        'role' => 'pos_cashier',
+        'meta_key' => 'pos_pin',
+        'meta_value' => $pin,
+        'number' => 1
+    ]);
+    
+    if (!empty($users)) {
+        $user = $users[0];
+        $status = get_user_meta($user->ID, 'pos_status', true);
+        
+        // Only return if active
+        if ($status === 'active' || empty($status)) {
+            return $user;
+        }
+    }
+    
+    return null;
+}
+function bntm_ajax_pos_save_settings() {
+    check_ajax_referer('pos_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    bntm_set_setting('pos_tax_rate', floatval($_POST['tax_rate']));
+    bntm_set_setting('pos_receipt_header', sanitize_textarea_field($_POST['receipt_header']));
+    bntm_set_setting('pos_receipt_footer', sanitize_textarea_field($_POST['receipt_footer']));
+    
+    wp_send_json_success(['message' => 'Settings saved successfully!']);
+}
+add_action('wp_ajax_pos_save_settings', 'bntm_ajax_pos_save_settings');
+
+function bntm_ajax_pos_import_transaction() {
+    check_ajax_referer('pos_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $fn_table = $wpdb->prefix . 'fn_transactions';
+    $trans_table = $wpdb->prefix . 'pos_transactions';
+    
+    $trans_id = intval($_POST['trans_id']);
+    $amount = floatval($_POST['amount']);
+    
+    // Check if already imported
+    $exists = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM {$fn_table} WHERE reference_type='pos_sale' AND reference_id=%d",
+        $trans_id
+    ));
+    
+    if ($exists) {
+        wp_send_json_error(['message' => 'Transaction already imported']);
+    }
+    
+    // Get transaction details
+    $trans = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$trans_table} WHERE id = %d",
+        $trans_id
+    ));
+    
+    if (!$trans) {
+        wp_send_json_error(['message' => 'Transaction not found']);
+    }
+    
+    $data = [
+        'rand_id' => bntm_rand_id(),
+        'business_id' => 0,
+        'type' => 'income',
+        'amount' => $amount,
+        'category' => 'Sales',
+        'notes' => 'POS Sale #' . $trans->transaction_number . ' - ' . $trans->staff_name,
+        'reference_type' => 'pos_sale',
+        'reference_id' => $trans_id,
+        'created_at' => $trans->created_at
+    ];
+    
+    $result = $wpdb->insert($fn_table, $data);
+    
+    if ($result) {
+        // Update cashflow summary if function exists
+        if (function_exists('bntm_fn_update_cashflow_summary')) {
+            bntm_fn_update_cashflow_summary();
+        }
+        wp_send_json_success(['message' => 'Transaction imported successfully!']);
+    } else {
+        wp_send_json_error(['message' => 'Failed to import transaction']);
+    }
+}
+add_action('wp_ajax_pos_import_transaction', 'bntm_ajax_pos_import_transaction');
+
+function bntm_ajax_pos_revert_transaction() {
+    check_ajax_referer('pos_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $table = $wpdb->prefix . 'fn_transactions';
+    $trans_id = intval($_POST['trans_id']);
+    
+    $result = $wpdb->delete($table, [
+        'reference_type' => 'pos_sale',
+        'reference_id' => $trans_id
+    ]);
+    
+    if ($result) {
+        // Update cashflow summary if function exists
+        if (function_exists('bntm_fn_update_cashflow_summary')) {
+            bntm_fn_update_cashflow_summary();
+        }
+        wp_send_json_success(['message' => 'Transaction reverted from finance']);
+    } else {
+        wp_send_json_error(['message' => 'Failed to revert transaction']);
+    }
+}
+add_action('wp_ajax_pos_revert_transaction', 'bntm_ajax_pos_revert_transaction');
+
 
 // AJAX handlers
 add_action('wp_ajax_pos_search_product', 'bntm_ajax_pos_search_product');
@@ -1734,2389 +4315,3 @@ function bntm_ajax_pos_complete_sale() {
 add_action('wp_ajax_pos_complete_sale', 'bntm_ajax_pos_complete_sale');
 add_action('wp_ajax_nopriv_pos_complete_sale', 'bntm_ajax_pos_complete_sale');
 /* ---------- POS DASHBOARD SHORTCODE ---------- */
-function bntm_pos_shortcode_dashboard() {
-    if (!is_user_logged_in()) {
-        return '<div class="bntm-notice">Please log in to access the POS dashboard.</div>';
-    }
-    
-    $active_tab = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : 'overview';
-    
-    ob_start();
-    ?>
-    <div class="bntm-ecommerce-container">
-        <div class="bntm-tabs">
-            <a href="?type=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
-            <a href="?type=products" class="bntm-tab <?php echo $active_tab === 'products' ? 'active' : ''; ?>">Products</a>
-            <a href="?type=finance" class="bntm-tab <?php echo $active_tab === 'finance' ? 'active' : ''; ?>">Finance</a>
-            <a href="?type=settings" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">Settings</a>
-        </div>
-        
-        <div class="bntm-tab-content">
-            <?php if ($active_tab === 'overview'): ?>
-                <?php echo pos_overview_tab(); ?>
-            <?php elseif ($active_tab === 'products'): ?>
-                <?php echo pos_products_tab(); ?>
-            <?php elseif ($active_tab === 'finance'): ?>
-                <?php echo pos_finance_tab(); ?>
-            <?php elseif ($active_tab === 'settings'): ?>
-                <?php echo pos_settings_tab(); ?>
-            <?php endif; ?>
-        </div>
-    </div>
-    <?php
-    $content = ob_get_clean();
-    return bntm_universal_container('POS Dashboard', $content);
-}
-/* ---------- OVERVIEW TAB ---------- */
-function pos_overview_tab() {
-    $stats = pos_get_dashboard_stats();
-    $pos_page = get_page_by_path('pos');
-    $pos_url = $pos_page ? get_permalink($pos_page) : '';
-    
-    ob_start();
-    ?>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script>
-    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-    </script>
-    
-    <?php if ($pos_url): ?>
-    <div class="pos-cashier-card">
-        <div class="pos-cashier-header">
-            <div>
-                <h3>POS Cashier Page</h3>
-                <p class="pos-cashier-subtitle">Access your point of sale system</p>
-            </div>
-            <span class="pos-status-badge pos-status-active">Active</span>
-        </div>
-        <div class="pos-cashier-actions">
-            <input type="text" id="pos-url" value="<?php echo esc_url($pos_url); ?>" readonly class="pos-url-input">
-            <button class="bntm-btn-secondary" id="copy-pos-url">Copy Link</button>
-            <a href="<?php echo esc_url($pos_url); ?>" target="_blank" class="bntm-btn-primary">Open POS</a>
-        </div>
-    </div>
-    <?php endif; ?>
-    
-    <div class="pos-dashboard-stats">
-        <div class="pos-stat-card">
-            <div class="pos-stat-icon pos-stat-icon-success">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="12" y1="1" x2="12" y2="23"></line>
-                    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                </svg>
-            </div>
-            <div class="pos-stat-content">
-                <h3>Sales Today</h3>
-                <p class="pos-stat-number"><?php echo pos_format_price($stats['sales_today']); ?></p>
-                <span class="pos-stat-change pos-stat-positive">
-                    <?php echo $stats['sales_today_change']; ?>% vs yesterday
-                </span>
-            </div>
-        </div>
-        
-        <div class="pos-stat-card">
-            <div class="pos-stat-icon pos-stat-icon-primary">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-                    <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-                </svg>
-            </div>
-            <div class="pos-stat-content">
-                <h3>Transactions Today</h3>
-                <p class="pos-stat-number"><?php echo esc_html($stats['transactions_today']); ?></p>
-                <span class="pos-stat-change pos-stat-neutral">
-                    <?php echo esc_html($stats['avg_transaction_value']); ?> avg. value
-                </span>
-            </div>
-        </div>
-        
-        <div class="pos-stat-card">
-            <div class="pos-stat-icon pos-stat-icon-info">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="16" y1="2" x2="16" y2="6"></line>
-                    <line x1="8" y1="2" x2="8" y2="6"></line>
-                    <line x1="3" y1="10" x2="21" y2="10"></line>
-                </svg>
-            </div>
-            <div class="pos-stat-content">
-                <h3>Sales This Month</h3>
-                <p class="pos-stat-number"><?php echo pos_format_price($stats['sales_month']); ?></p>
-                <span class="pos-stat-change pos-stat-neutral">
-                    <?php echo esc_html($stats['transactions_month']); ?> transactions
-                </span>
-            </div>
-        </div>
-        
-        <div class="pos-stat-card">
-            <div class="pos-stat-icon <?php echo $stats['low_stock'] > 0 ? 'pos-stat-icon-warning' : 'pos-stat-icon-success'; ?>">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
-                </svg>
-            </div>
-            <div class="pos-stat-content">
-                <h3>Low Stock Items</h3>
-                <p class="pos-stat-number" style="color: <?php echo $stats['low_stock'] > 0 ? '#f59e0b' : '#10b981'; ?>">
-                    <?php echo esc_html($stats['low_stock']); ?>
-                </p>
-                <span class="pos-stat-change pos-stat-neutral">
-                    <?php echo esc_html($stats['total_products']); ?> total products
-                </span>
-            </div>
-        </div>
-    </div>
-
-    <div class="pos-charts-grid">
-        <div class="pos-chart-card pos-chart-large">
-            <h3>Sales Trend (Last 7 Days)</h3>
-            <canvas id="salesTrendChart"></canvas>
-        </div>
-        
-        <div class="pos-chart-card">
-            <h3>Payment Methods</h3>
-            <canvas id="paymentMethodsChart"></canvas>
-        </div>
-        
-        <div class="pos-chart-card">
-            <h3>Hourly Sales Today</h3>
-            <canvas id="hourlySalesChart"></canvas>
-        </div>
-    </div>
-
-    <div class="pos-insights-grid">
-        <div class="pos-insight-card">
-            <div class="pos-insight-header">
-                <h4>Top Selling Products</h4>
-                <span class="pos-insight-badge">Today</span>
-            </div>
-            <div class="pos-insight-list">
-                <?php foreach ($stats['top_products'] as $product): ?>
-                <div class="pos-insight-item">
-                    <div class="pos-insight-item-info">
-                        <span class="pos-insight-item-name"><?php echo esc_html($product['name']); ?></span>
-                        <span class="pos-insight-item-meta"><?php echo esc_html($product['quantity']); ?> sold</span>
-                    </div>
-                    <span class="pos-insight-item-value"><?php echo pos_format_price($product['total']); ?></span>
-                </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        
-        <div class="pos-insight-card">
-            <div class="pos-insight-header">
-                <h4>Peak Hours</h4>
-                <span class="pos-insight-badge">This Week</span>
-            </div>
-            <div class="pos-insight-list">
-                <?php foreach ($stats['peak_hours'] as $hour): ?>
-                <div class="pos-insight-item">
-                    <div class="pos-insight-item-info">
-                        <span class="pos-insight-item-name"><?php echo esc_html($hour['hour']); ?></span>
-                        <span class="pos-insight-item-meta"><?php echo esc_html($hour['transactions']); ?> transactions</span>
-                    </div>
-                    <div class="pos-insight-progress">
-                        <div class="pos-insight-progress-bar" style="width: <?php echo esc_attr($hour['percentage']); ?>%"></div>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-    </div>
-
-    <div class="pos-recent-transactions-section">
-        <h3>Recent Transactions</h3>
-        <?php echo pos_render_recent_transactions(); ?>
-    </div>
-<style>
-.pos-cashier-card {
-    background: #f8f9fa;
-    padding: 24px;
-    border-radius: 12px;
-    margin-bottom: 30px;
-    border: 1px solid #e5e7eb;
-}
-
-.pos-cashier-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-}
-
-.pos-cashier-header h3 {
-    margin: 0;
-    color: #111827;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.pos-status-badge {
-    background: #10b981;
-    color: #ffffff;
-    padding: 4px 12px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.pos-cashier-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.pos-url-input {
-    flex: 1;
-    min-width: 300px;
-    padding: 12px 16px;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    background: #ffffff;
-    color: #374151;
-    font-size: 14px;
-    font-family: monospace;
-    transition: all 0.2s ease;
-}
-
-.pos-url-input:focus {
-    outline: none;
-    border-color: #9ca3af;
-}
-
-.pos-dashboard-stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.pos-stat-card {
-    background: #ffffff;
-    padding: 24px;
-    border-radius: 12px;
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    border: 1px solid #e5e7eb;
-    transition: all 0.2s ease;
-}
-
-.pos-stat-card:hover {
-    border-color: #d1d5db;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-}
-
-.pos-stat-icon {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.pos-stat-icon-primary {
-    background: var(--bntm-primary, #374151);
-    color: #ffffff;
-}
-
-.pos-stat-icon-success {
-    background: #10b981;
-    color: #ffffff;
-}
-
-.pos-stat-icon-info {
-    background: #3b82f6;
-    color: #ffffff;
-}
-
-.pos-stat-icon-warning {
-    background: #f59e0b;
-    color: #ffffff;
-}
-
-.pos-stat-content {
-    flex: 1;
-}
-
-.pos-stat-content h3 {
-    margin: 0 0 8px 0;
-    font-size: 13px;
-    color: #6b7280;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.pos-stat-number {
-    font-size: 28px;
-    font-weight: 700;
-    color: #111827;
-    margin: 0;
-    line-height: 1;
-}
-
-.pos-stat-change {
-    font-size: 12px;
-    font-weight: 500;
-    display: inline-block;
-    margin-top: 4px;
-}
-
-.pos-stat-positive {
-    color: #10b981;
-}
-
-.pos-stat-negative {
-    color: #ef4444;
-}
-
-.pos-stat-neutral {
-    color: #6b7280;
-}
-
-.pos-charts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.pos-chart-card {
-    background: #ffffff;
-    padding: 24px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-}
-
-.pos-chart-large {
-    grid-column: 1 / -1;
-}
-
-.pos-chart-card h3 {
-    margin: 0 0 20px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #111827;
-}
-
-.pos-chart-card canvas {
-    max-height: 300px;
-}
-
-.pos-insights-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
-
-.pos-insight-card {
-    background: #ffffff;
-    padding: 24px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-}
-
-.pos-insight-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 20px;
-}
-
-.pos-insight-header h4 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #111827;
-}
-
-.pos-insight-badge {
-    background: #f3f4f6;
-    color: #6b7280;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.pos-insight-list {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.pos-insight-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.pos-insight-item-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.pos-insight-item-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: #111827;
-}
-
-.pos-insight-item-meta {
-    font-size: 12px;
-    color: #6b7280;
-}
-
-.pos-insight-item-value {
-    font-size: 15px;
-    font-weight: 700;
-    color: #111827;
-}
-
-.pos-insight-progress {
-    flex: 1;
-    height: 8px;
-    background: #f3f4f6;
-    border-radius: 4px;
-    overflow: hidden;
-}
-
-.pos-insight-progress-bar {
-    height: 100%;
-    background: var(--bntm-primary, #374151);
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.pos-recent-transactions-section {
-    background: #ffffff;
-    padding: 24px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-}
-
-.pos-recent-transactions-section h3 {
-    margin: 0 0 20px 0;
-    font-size: 18px;
-    font-weight: 600;
-    color: #111827;
-}
-
-    /* Pagination styles */
-    .pos-pagination {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-top: 20px;
-        padding: 15px;
-        background: #f9fafb;
-        border-radius: 8px;
-        flex-wrap: wrap;
-    }
-    .pos-page-btn {
-        padding: 8px 16px;
-        background: #fff;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        text-decoration: none;
-        color: #374151;
-        font-weight: 500;
-        transition: all 0.2s;
-    }
-    .pos-page-btn:hover {
-        background: #f3f4f6;
-        border-color: #9ca3af;
-    }
-    .pos-page-numbers {
-        display: flex;
-        gap: 5px;
-        flex: 1;
-        justify-content: center;
-    }
-    .pos-page-num {
-        padding: 8px 12px;
-        background: #fff;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        text-decoration: none;
-        color: #374151;
-        min-width: 40px;
-        text-align: center;
-        transition: all 0.2s;
-    }
-    .pos-page-num:hover {
-        background: #f3f4f6;
-        border-color: #9ca3af;
-    }
-    .pos-page-num.active {
-        background: #3b82f6;
-        color: #fff;
-        border-color: #3b82f6;
-        font-weight: 600;
-    }
-    .pos-page-dots {
-        padding: 8px 4px;
-        color: #6b7280;
-    }
-    .pos-page-info {
-        color: #6b7280;
-        font-size: 14px;
-        margin-left: auto;
-    }
-@media (max-width: 768px) {
-    .pos-chart-card {
-        grid-column: 1 / -1;
-    }
-    .pos-insight-card {
-        grid-column: 1 / -1;
-    }
-}
-</style>
-    
-    <script>
-    (function() {
-        // Copy URL functionality
-        const copyBtn = document.getElementById('copy-pos-url');
-        if (copyBtn) {
-            copyBtn.addEventListener('click', function() {
-                const urlInput = document.getElementById('pos-url');
-                urlInput.select();
-                document.execCommand('copy');
-                
-                const originalText = this.textContent;
-                this.textContent = 'Copied!';
-                this.style.background = '#10b981';
-                this.style.color = '#ffffff';
-                this.style.borderColor = '#10b981';
-                
-                setTimeout(() => {
-                    this.textContent = originalText;
-                    this.style.background = '';
-                    this.style.color = '';
-                    this.style.borderColor = '';
-                }, 2000);
-            });
-        }
-        
-        // Chart.js configuration
-        const primaryColor = getComputedStyle(document.documentElement)
-            .getPropertyValue('--bntm-primary').trim() || '#667eea';
-        
-        // Sales Trend Chart (Line Chart - 7 Days)
-        const salesTrendCtx = document.getElementById('salesTrendChart');
-        if (salesTrendCtx) {
-            new Chart(salesTrendCtx, {
-                type: 'line',
-                data: {
-                    labels: <?php echo json_encode(array_column($stats['daily_sales_data'], 'date')); ?>,
-                    datasets: [{
-                        label: 'Sales',
-                        data: <?php echo json_encode(array_column($stats['daily_sales_data'], 'total')); ?>,
-                        borderColor: '#667eea',
-                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                        tension: 0.4,
-                        fill: true,
-                        pointBackgroundColor: '#667eea',
-                        pointBorderColor: '#fff',
-                        pointBorderWidth: 2,
-                        pointRadius: 5,
-                        pointHoverRadius: 7
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: '#111827',
-                            padding: 12,
-                            titleFont: { size: 14, weight: '600' },
-                            bodyFont: { size: 13 },
-                            cornerRadius: 8,
-                            callbacks: {
-                                label: function(context) {
-                                    return 'Sales: ₱' + context.parsed.y.toFixed(2);
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: '#f3f4f6'
-                            },
-                            ticks: {
-                                color: '#6b7280',
-                                font: { size: 12 }
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            },
-                            ticks: {
-                                color: '#6b7280',
-                                font: { size: 12 }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Payment Methods Chart (Doughnut Chart)
-        const paymentMethodsCtx = document.getElementById('paymentMethodsChart');
-        if (paymentMethodsCtx) {
-            new Chart(paymentMethodsCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: <?php echo json_encode(array_column($stats['payment_methods_data'], 'method')); ?>,
-                    datasets: [{
-                        data: <?php echo json_encode(array_column($stats['payment_methods_data'], 'total')); ?>,
-                        backgroundColor: [
-                            '#667eea',
-                            '#10b981',
-                            '#f59e0b',
-                            '#ef4444',
-                            '#6b7280'
-                        ],
-                        borderWidth: 2,
-                        borderColor: '#ffffff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                padding: 15,
-                                font: { size: 12 },
-                                color: '#374151'
-                            }
-                        },
-                        tooltip: {
-                            backgroundColor: '#111827',
-                            padding: 12,
-                            titleFont: { size: 14, weight: '600' },
-                            bodyFont: { size: 13 },
-                            cornerRadius: 8,
-                            callbacks: {
-                                label: function(context) {
-                                    const label = context.label || '';
-                                    const value = context.parsed || 0;
-                                    return label + ': ₱' + value.toFixed(2);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Hourly Sales Chart (Bar Chart)
-        const hourlySalesCtx = document.getElementById('hourlySalesChart');
-        if (hourlySalesCtx) {
-            new Chart(hourlySalesCtx, {
-                type: 'bar',
-                data: {
-                    labels: <?php echo json_encode(array_column($stats['hourly_sales_data'], 'hour')); ?>,
-                    datasets: [{
-                        label: 'Sales',
-                        data: <?php echo json_encode(array_column($stats['hourly_sales_data'], 'total')); ?>,
-                        backgroundColor: '#764ba2',
-                        borderRadius: 6,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: '#111827',
-                            padding: 12,
-                            titleFont: { size: 14, weight: '600' },
-                            bodyFont: { size: 13 },
-                            cornerRadius: 8,
-                            callbacks: {
-                                label: function(context) {
-                                    return 'Sales: ₱' + context.parsed.y.toFixed(2);
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: '#f3f4f6'
-                            },
-                            ticks: {
-                                color: '#6b7280',
-                                font: { size: 12 }
-                            }
-                        },
-                        x: {
-                            grid: {
-                                display: false
-                            },
-                            ticks: {
-                                color: '#6b7280',
-                                font: { size: 12 }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    })();
-    </script>
-    <?php
-    return ob_get_clean();
-}
-
-function pos_get_dashboard_stats() {
-    global $wpdb;
-    $trans_table = $wpdb->prefix . 'pos_transactions';
-    $items_table = $wpdb->prefix . 'pos_transaction_items';
-    $prod_table = $wpdb->prefix . 'pos_products';
-    
-    // Sales today
-    $sales_today = $wpdb->get_var(
-        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
-        WHERE DATE(created_at) = CURDATE() AND status = 'completed'"
-    );
-    
-    // Sales yesterday
-    $sales_yesterday = $wpdb->get_var(
-        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
-        WHERE DATE(created_at) = DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND status = 'completed'"
-    );
-    
-    // Calculate percentage change
-    $sales_today_change = $sales_yesterday > 0 
-        ? round((($sales_today - $sales_yesterday) / $sales_yesterday) * 100, 1) 
-        : 0;
-    
-    // Transactions today
-    $transactions_today = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$trans_table} 
-        WHERE DATE(created_at) = CURDATE() AND status = 'completed'"
-    );
-    
-    // Average transaction value
-    $avg_transaction_value = $transactions_today > 0 
-        ? pos_format_price($sales_today / $transactions_today) 
-        : pos_format_price(0);
-    
-    // Sales this month
-    $sales_month = $wpdb->get_var(
-        "SELECT COALESCE(SUM(total), 0) FROM {$trans_table} 
-        WHERE MONTH(created_at) = MONTH(CURDATE()) 
-        AND YEAR(created_at) = YEAR(CURDATE()) 
-        AND status = 'completed'"
-    );
-    
-    // Transactions this month
-    $transactions_month = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$trans_table} 
-        WHERE MONTH(created_at) = MONTH(CURDATE()) 
-        AND YEAR(created_at) = YEAR(CURDATE()) 
-        AND status = 'completed'"
-    );
-    
-    // Low stock count
-    $low_stock = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$prod_table} 
-        WHERE stock <= reorder_level AND status = 'active'"
-    );
-    
-    // Total products
-    $total_products = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$prod_table} WHERE status = 'active'"
-    );
-    
-    // Daily sales data (last 7 days)
-    $daily_sales_data = $wpdb->get_results(
-        "SELECT DATE_FORMAT(created_at, '%a') as date, COALESCE(SUM(total), 0) as total
-        FROM {$trans_table}
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-        AND status = 'completed'
-        GROUP BY DATE(created_at)
-        ORDER BY DATE(created_at)",
-        ARRAY_A
-    );
-    
-    // If no data, create empty days
-    if (empty($daily_sales_data)) {
-        $daily_sales_data = [];
-        for ($i = 6; $i >= 0; $i--) {
-            $daily_sales_data[] = [
-                'date' => date('D', strtotime("-$i days")),
-                'total' => 0
-            ];
-        }
-    }
-    
-    // Payment methods data
-    $payment_methods_data = $wpdb->get_results(
-        "SELECT payment_method as method, COALESCE(SUM(total), 0) as total
-        FROM {$trans_table}
-        WHERE DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-        AND status = 'completed'
-        GROUP BY payment_method",
-        ARRAY_A
-    );
-    
-    // Hourly sales today
-    $hourly_sales_data = $wpdb->get_results(
-        "SELECT DATE_FORMAT(created_at, '%h %p') as hour, COALESCE(SUM(total), 0) as total
-        FROM {$trans_table}
-        WHERE DATE(created_at) = CURDATE()
-        AND status = 'completed'
-        GROUP BY HOUR(created_at)
-        ORDER BY HOUR(created_at)",
-        ARRAY_A
-    );
-    
-    // Top products today
-    $top_products = $wpdb->get_results(
-        "SELECT p.name, SUM(ti.quantity) as quantity, SUM(ti.quantity * ti.price) as total
-        FROM {$items_table} ti
-        JOIN {$prod_table} p ON ti.product_id = p.id
-        JOIN {$trans_table} t ON ti.transaction_id = t.id
-        WHERE DATE(t.created_at) = CURDATE()
-        AND t.status = 'completed'
-        GROUP BY p.id, p.name
-        ORDER BY total DESC
-        LIMIT 5",
-        ARRAY_A
-    );
-    
-    // Peak hours this week
-    $peak_hours = $wpdb->get_results(
-        "SELECT 
-            DATE_FORMAT(created_at, '%h %p') as hour,
-            COUNT(*) as transactions,
-            (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM {$trans_table} 
-                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) 
-                AND status = 'completed')) as percentage
-        FROM {$trans_table}
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-        AND status = 'completed'
-        GROUP BY HOUR(created_at)
-        ORDER BY transactions DESC
-        LIMIT 5",
-        ARRAY_A
-    );
-    
-    return [
-        'sales_today' => floatval($sales_today),
-        'sales_today_change' => $sales_today_change,
-        'transactions_today' => intval($transactions_today),
-        'avg_transaction_value' => $avg_transaction_value,
-        'sales_month' => floatval($sales_month),
-        'transactions_month' => intval($transactions_month),
-        'low_stock' => intval($low_stock),
-        'total_products' => intval($total_products),
-        'daily_sales_data' => $daily_sales_data,
-        'payment_methods_data' => $payment_methods_data ?: [],
-        'hourly_sales_data' => $hourly_sales_data ?: [],
-        'top_products' => $top_products ?: [],
-        'peak_hours' => $peak_hours ?: []
-    ];
-}
-
-function pos_format_price($amount) {
-    return '₱' . number_format(floatval($amount), 2);
-}
-/* ---------- RECENT TRANSACTIONS WITH PAGINATION ---------- */
-function pos_render_recent_transactions($limit = 10) {
-    global $wpdb;
-    $trans_table = $wpdb->prefix . 'pos_transactions';
-    
-    // Get current page from URL parameter
-    $current_page = isset($_GET['pos_page']) ? max(1, intval($_GET['pos_page'])) : 1;
-    $offset = ($current_page - 1) * $limit;
-    
-    // Get total count for pagination
-    $total_transactions = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$trans_table}"
-    );
-    
-    $total_pages = ceil($total_transactions / $limit);
-    
-    // Get transactions for current page
-    $recent_transactions = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM {$trans_table} ORDER BY created_at DESC LIMIT %d OFFSET %d",
-        $limit, $offset
-    ));
-    
-    if (empty($recent_transactions) && $current_page == 1) {
-        return '<p>No transactions yet.</p>';
-    }
-    
-    ob_start();
-    ?>
-    <table class="bntm-table">
-        <thead>
-            <tr>
-                <th>Transaction #</th>
-                <th>Staff</th>
-                <th>Total</th>
-                <th>Payment</th>
-                <th>Status</th>
-                <th>Date/Time</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php if (!empty($recent_transactions)): ?>
-                <?php foreach ($recent_transactions as $trans): ?>
-                    <tr>
-                        <td>#<?php echo esc_html($trans->transaction_number); ?></td>
-                        <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
-                        <td style="color: #059669; font-weight: 600;">₱<?php echo number_format($trans->total, 2); ?></td>
-                        <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
-                        <td>
-                            <span class="pos-status-badge pos-status-<?php echo esc_attr($trans->status); ?>">
-                                <?php echo esc_html(ucfirst($trans->status)); ?>
-                            </span>
-                        </td>
-                        <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <tr>
-                    <td colspan="6" style="text-align: center;">No transactions found on this page.</td>
-                </tr>
-            <?php endif; ?>
-        </tbody>
-    </table>
-    
-    <?php if ($total_pages > 1): ?>
-        <div class="pos-pagination">
-            <?php
-            $base_url = remove_query_arg('pos_page');
-            
-            // Previous button
-            if ($current_page > 1): ?>
-                <a href="<?php echo esc_url(add_query_arg('pos_page', $current_page - 1, $base_url)); ?>" class="pos-page-btn">
-                    &laquo; Previous
-                </a>
-            <?php endif; ?>
-            
-            <!-- Page numbers -->
-            <div class="pos-page-numbers">
-                <?php
-                // Show first page
-                if ($current_page > 3) {
-                    echo '<a href="' . esc_url(add_query_arg('pos_page', 1, $base_url)) . '" class="pos-page-num">1</a>';
-                    if ($current_page > 4) {
-                        echo '<span class="pos-page-dots">...</span>';
-                    }
-                }
-                
-                // Show pages around current page
-                for ($i = max(1, $current_page - 2); $i <= min($total_pages, $current_page + 2); $i++) {
-                    $active_class = ($i == $current_page) ? ' active' : '';
-                    echo '<a href="' . esc_url(add_query_arg('pos_page', $i, $base_url)) . '" class="pos-page-num' . $active_class . '">' . $i . '</a>';
-                }
-                
-                // Show last page
-                if ($current_page < $total_pages - 2) {
-                    if ($current_page < $total_pages - 3) {
-                        echo '<span class="pos-page-dots">...</span>';
-                    }
-                    echo '<a href="' . esc_url(add_query_arg('pos_page', $total_pages, $base_url)) . '" class="pos-page-num">' . $total_pages . '</a>';
-                }
-                ?>
-            </div>
-            
-            <!-- Next button -->
-            <?php if ($current_page < $total_pages): ?>
-                <a href="<?php echo esc_url(add_query_arg('pos_page', $current_page + 1, $base_url)); ?>" class="pos-page-btn">
-                    Next &raquo;
-                </a>
-            <?php endif; ?>
-            
-            <div class="pos-page-info">
-                Page <?php echo $current_page; ?> of <?php echo $total_pages; ?>
-                (<?php echo $total_transactions; ?> total transactions)
-            </div>
-        </div>
-    <?php endif; ?>
-    
-
-    <?php
-    return ob_get_clean();
-}
-
-/* ---------- PRODUCTS TAB ---------- */
-function pos_products_tab() {
-    global $wpdb;
-    $pos_table = $wpdb->prefix . 'pos_products';
-    $in_table = $wpdb->prefix . 'in_products';
-    
-    // Get all pos products
-    $products = $wpdb->get_results("SELECT * FROM {$pos_table}");
- 
-    // Get available imports (not already imported based on SKU)
-    $available_imports = $wpdb->get_results($wpdb->prepare("
-        SELECT ip.*
-        FROM {$in_table} AS ip
-        LEFT JOIN {$pos_table} AS pp 
-            ON ip.sku = pp.sku AND ip.sku IS NOT NULL AND ip.sku != ''
-        WHERE pp.sku IS NULL
-          AND ip.inventory_type = %s
-          AND ip.sku IS NOT NULL 
-          AND ip.sku != ''
-        ORDER BY ip.name ASC
-    ", 'Product'));
-    
-    $nonce = wp_create_nonce('pos_nonce');
-    
-    ob_start();
-    ?>
-    <script>
-    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-    </script>
-    
-    <?php if (!empty($available_imports)): ?>
-    <div class="bntm-form-section" style="background: #eff6ff; border-left: 4px solid #3b82f6;">
-        <h3>Import Products from Inventory</h3>
-        <p>Select products to import (<?php echo count($available_imports); ?> available)</p>
-        
-        <div style="margin: 15px 0;">
-            <label style="cursor: pointer;">
-                <input type="checkbox" id="select-all-imports"> 
-                <strong>Select All</strong>
-            </label>
-        </div>
-        
-        <div class="import-products-list">
-            <?php foreach ($available_imports as $product): ?>
-                <label class="import-product-item">
-                    <input type="checkbox" name="import_products[]" value="<?php echo $product->id; ?>">
-                    <div class="import-product-info">
-                        <strong><?php echo esc_html($product->name); ?></strong>
-                        <?php if ($product->sku): ?>
-                            <span class="product-sku">SKU: <?php echo esc_html($product->sku); ?></span>
-                        <?php endif; ?>
-                        <div class="product-details">
-                            <span class="product-price">₱<?php echo number_format($product->selling_price, 2); ?></span>
-                            <span class="product-stock"><?php echo $product->stock_quantity; ?> in stock</span>
-                        </div>
-                    </div>
-                </label>
-            <?php endforeach; ?>
-        </div>
-        
-        <button id="pos-import-selected" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>" style="margin-top: 15px;">
-            Import Selected Products
-        </button>
-        <div id="import-message"></div>
-    </div>
-    <?php endif; ?>
-    
-    <div class="bntm-form-section">
-        <h3>POS Products (<?php echo count($products); ?>)</h3>
-        
-        <?php if (empty($products)): ?>
-            <p>No products yet. Import products from your inventory to get started.</p>
-        <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>SKU</th>
-                        <th>Price</th>
-                        <th>Stock</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($products as $product): ?>
-                        <tr class="<?php echo $product->status === 'inactive' ? 'product-hidden' : ''; ?>">
-                            <td><?php echo esc_html($product->name); ?></td>
-                            <td><?php echo esc_html($product->sku ?: '-'); ?></td>
-                            <td>₱<?php echo number_format($product->price, 2); ?></td>
-                            <td>
-                                <?php echo esc_html($product->stock); ?>
-                                <?php if ($product->stock <= $product->reorder_level): ?>
-                                    <span style="color: #dc2626; font-size: 12px;">⚠ Low</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <label class="pos-toggle">
-                                    <input type="checkbox" 
-                                           class="pos-toggle-status" 
-                                           data-id="<?php echo $product->id; ?>"
-                                           data-nonce="<?php echo $nonce; ?>"
-                                           <?php checked($product->status, 'active'); ?>>
-                                    <span class="pos-toggle-slider"></span>
-                                </label>
-                                <span class="status-text"><?php echo ucfirst($product->status); ?></span>
-                            </td>
-                            <td>
-                                <button class="bntm-btn-small pos-sync-product" 
-                                        data-id="<?php echo $product->id; ?>"
-                                        data-nonce="<?php echo $nonce; ?>"
-                                        title="Sync with inventory">
-                                    Sync
-                                </button>
-                                <button class="bntm-btn-small bntm-btn-danger pos-delete-product" 
-                                        data-id="<?php echo $product->id; ?>"
-                                        data-nonce="<?php echo $nonce; ?>"
-                                        title="Delete product"
-                                        style="background: #dc2626; color: white; margin-left: 5px;">
-                                    Delete
-                                </button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        <?php endif; ?>
-    </div>
-    
-    <style>
-    .import-products-list {
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 6px;
-        padding: 10px;
-        background: white;
-    }
-    .import-product-item {
-        display: flex;
-        align-items: center;
-        padding: 12px;
-        border-bottom: 1px solid #f3f4f6;
-        cursor: pointer;
-        transition: background 0.2s;
-    }
-    .import-product-item:hover {
-        background: #f9fafb;
-    }
-    .import-product-item:last-child {
-        border-bottom: none;
-    }
-    .import-product-item input[type="checkbox"] {
-        margin-right: 12px;
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-    }
-    .import-product-info {
-        flex: 1;
-    }
-    .import-product-info strong {
-        display: block;
-        color: #1f2937;
-        margin-bottom: 4px;
-    }
-    .product-sku {
-        display: inline-block;
-        font-size: 12px;
-        color: #6b7280;
-        background: #f3f4f6;
-        padding: 2px 8px;
-        border-radius: 4px;
-        margin-left: 8px;
-    }
-    .product-details {
-        display: flex;
-        gap: 15px;
-        margin-top: 6px;
-        font-size: 14px;
-    }
-    .product-price {
-        color: #059669;
-        font-weight: 600;
-    }
-    .product-stock {
-        color: #6b7280;
-    }
-    .pos-toggle {
-        position: relative;
-        display: inline-block;
-        width: 50px;
-        height: 24px;
-        margin-right: 10px;
-    }
-    .pos-toggle input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-    .pos-toggle-slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #ccc;
-        transition: .4s;
-        border-radius: 24px;
-    }
-    .pos-toggle-slider:before {
-        position: absolute;
-        content: "";
-        height: 18px;
-        width: 18px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        transition: .4s;
-        border-radius: 50%;
-    }
-    .pos-toggle input:checked + .pos-toggle-slider {
-        background-color: #059669;
-    }
-    .pos-toggle input:checked + .pos-toggle-slider:before {
-        transform: translateX(26px);
-    }
-    .product-hidden {
-        opacity: 0.5;
-        background: #f9fafb;
-    }
-    .status-text {
-        font-size: 14px;
-        color: #6b7280;
-    }
-    </style>
-    
-    <script>
-    (function() {
-        // Select all
-        const selectAllBtn = document.getElementById('select-all-imports');
-        if (selectAllBtn) {
-            selectAllBtn.addEventListener('change', function() {
-                document.querySelectorAll('input[name="import_products[]"]').forEach(cb => {
-                    cb.checked = this.checked;
-                });
-            });
-        }
-        
-        // Import selected
-        const importBtn = document.getElementById('pos-import-selected');
-        if (importBtn) {
-            importBtn.addEventListener('click', function() {
-                const selected = Array.from(document.querySelectorAll('input[name="import_products[]"]:checked'))
-                    .map(cb => cb.value);
-                
-                if (selected.length === 0) {
-                    alert('Please select at least one product');
-                    return;
-                }
-                
-                if (!confirm(`Import ${selected.length} product(s)?`)) return;
-                
-                this.disabled = true;
-                this.textContent = 'Importing...';
-                
-                const formData = new FormData();
-                formData.append('action', 'pos_import_products');
-                formData.append('product_ids', JSON.stringify(selected));
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    const msg = document.getElementById('import-message');
-                    msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                    if (json.success) {
-                        setTimeout(() => location.reload(), 1500);
-                    } else {
-                        this.disabled = false;
-                        this.textContent = 'Import Selected Products';
-                    }
-                });
-            });
-        }
-        
-        // Toggle status
-        document.querySelectorAll('.pos-toggle-status').forEach(toggle => {
-            toggle.addEventListener('change', function() {
-                const formData = new FormData();
-                formData.append('action', 'pos_toggle_product');
-                formData.append('product_id', this.dataset.id);
-                formData.append('status', this.checked ? 'active' : 'inactive');
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    if (json.success) {
-                        const statusText = this.closest('td').querySelector('.status-text');
-                        statusText.textContent = this.checked ? 'Active' : 'Inactive';
-                    } else {
-                        alert(json.data.message);
-                        this.checked = !this.checked;
-                    }
-                });
-            });
-        });
-        
-        // Sync product
-        document.querySelectorAll('.pos-sync-product').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if (!confirm('Sync this product with inventory? Product will be deleted if not found in inventory.')) return;
-                
-                this.disabled = true;
-                this.textContent = '⏳';
-                
-                const formData = new FormData();
-                formData.append('action', 'pos_sync_product');
-                formData.append('product_id', this.dataset.id);
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    alert(json.data.message);
-                    location.reload();
-                });
-            });
-        });
-        
-        // Delete product
-        document.querySelectorAll('.pos-delete-product').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if (!confirm('Are you sure you want to delete this product? This action cannot be undone.')) return;
-                
-                this.disabled = true;
-                this.textContent = '⏳';
-                
-                const formData = new FormData();
-                formData.append('action', 'pos_delete_product');
-                formData.append('product_id', this.dataset.id);
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    alert(json.data.message);
-                    if (json.success) location.reload();
-                    else {
-                        this.disabled = false;
-                        this.textContent = '🗑 Delete';
-                    }
-                });
-            });
-        });
-    })();
-    </script>
-    <?php
-    return ob_get_clean();
-}
-
-/* ---------- FINANCE TAB ---------- */
-function pos_finance_tab() {
-    global $wpdb;
-    $trans_table = $wpdb->prefix . 'pos_transactions';
-    $fn_table = $wpdb->prefix . 'fn_transactions';
-    
-    $transactions = $wpdb->get_results("
-        SELECT t.*, 
-        (SELECT COUNT(*) FROM {$fn_table} WHERE reference_type='pos_sale' AND reference_id=t.id) as is_imported
-        FROM {$trans_table} t
-        WHERE t.status = 'completed'
-        ORDER BY t.created_at DESC
-    ");
-    
-    $nonce = wp_create_nonce('pos_nonce');
-    
-    ob_start();
-    ?>
-    <script>
-    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-    </script>
-    
-    <div class="bntm-form-section">
-        <h3>POS Transactions</h3>
-        <p>Import completed sales as income transactions to Finance module</p>
-        
-        <div style="margin-bottom: 15px;">
-            <label style="cursor: pointer; margin-right: 20px;">
-                <input type="checkbox" id="select-all-not-imported"> 
-                <strong>Select All (Not Imported)</strong>
-            </label>
-            <label style="cursor: pointer;">
-                <input type="checkbox" id="select-all-imported"> 
-                <strong>Select All (Imported)</strong>
-            </label>
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-            <button id="bulk-import-btn" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>" style="margin-right: 10px;">
-                Import Selected
-            </button>
-            <button id="bulk-revert-btn" class="bntm-btn-secondary" data-nonce="<?php echo $nonce; ?>">
-                Revert Selected
-            </button>
-            <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
-        </div>
-        
-        <table class="bntm-table">
-            <thead>
-                <tr>
-                    <th width="40"></th>
-                    <th>Transaction #</th>
-                    <th>Date</th>
-                    <th>Staff</th>
-                    <th>Total</th>
-                    <th>Payment</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($transactions)): ?>
-                <tr><td colspan="7" style="text-align:center;">No transactions found</td></tr>
-                <?php else: foreach ($transactions as $trans): ?>
-                <tr>
-                    <td>
-                        <input type="checkbox" 
-                               class="trans-checkbox <?php echo $trans->is_imported ? 'imported-trans' : 'not-imported-trans'; ?>" 
-                               data-id="<?php echo $trans->id; ?>"
-                               data-amount="<?php echo $trans->total; ?>"
-                               data-imported="<?php echo $trans->is_imported ? '1' : '0'; ?>">
-                    </td>
-                    <td>#<?php echo $trans->transaction_number; ?></td>
-                    <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
-                    <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
-                    <td class="bntm-stat-income">₱<?php echo number_format($trans->total, 2); ?></td>
-                    <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
-                    <td>
-                        <?php if ($trans->is_imported): ?>
-                        <span style="color:#059669;">✓ Imported</span>
-                        <?php else: ?>
-                        <span style="color:#6b7280;">Not Imported</span>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-                <?php endforeach; endif; ?>
-            </tbody>
-        </table>
-    </div>
-    
-    <script>
-    (function() {
-        const nonce = '<?php echo $nonce; ?>';
-        
-        // Update selected count
-        function updateSelectedCount() {
-            const selected = document.querySelectorAll('.trans-checkbox:checked').length;
-            document.getElementById('selected-count').textContent = selected > 0 ? `${selected} selected` : '';
-        }
-        
-        // Select all not imported
-        document.getElementById('select-all-not-imported').addEventListener('change', function() {
-            document.querySelectorAll('.not-imported-trans').forEach(cb => {
-                cb.checked = this.checked;
-            });
-            if (this.checked) {
-                document.getElementById('select-all-imported').checked = false;
-            }
-            updateSelectedCount();
-        });
-        
-        // Select all imported
-        document.getElementById('select-all-imported').addEventListener('change', function() {
-            document.querySelectorAll('.imported-trans').forEach(cb => {
-                cb.checked = this.checked;
-            });
-            if (this.checked) {
-                document.getElementById('select-all-not-imported').checked = false;
-            }
-            updateSelectedCount();
-        });
-        
-        // Update count on individual checkbox change
-        document.querySelectorAll('.trans-checkbox').forEach(cb => {
-            cb.addEventListener('change', updateSelectedCount);
-        });
-        
-        // Bulk Import
-        document.getElementById('bulk-import-btn').addEventListener('click', function() {
-            const selected = Array.from(document.querySelectorAll('.trans-checkbox:checked'))
-                .filter(cb => cb.dataset.imported === '0');
-            
-            if (selected.length === 0) {
-                alert('Please select at least one transaction that is not imported');
-                return;
-            }
-            
-            if (!confirm(`Import ${selected.length} transaction(s) as income?`)) return;
-            
-            this.disabled = true;
-            this.textContent = 'Importing...';
-            
-            // Import one by one using existing AJAX
-            let completed = 0;
-            const total = selected.length;
-            
-            selected.forEach(cb => {
-                const data = new FormData();
-                data.append('action', 'pos_import_transaction');
-                data.append('trans_id', cb.dataset.id);
-                data.append('amount', cb.dataset.amount);
-                data.append('nonce', nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: data})
-                .then(r => r.json())
-                .then(json => {
-                    completed++;
-                    if (completed === total) {
-                        alert(`Successfully imported ${total} transaction(s)`);
-                        location.reload();
-                    }
-                })
-                .catch(err => {
-                    console.error('Import error:', err);
-                    completed++;
-                    if (completed === total) {
-                        alert('Import completed with some errors. Please check and try again.');
-                        location.reload();
-                    }
-                });
-            });
-        });
-        
-        // Bulk Revert
-        document.getElementById('bulk-revert-btn').addEventListener('click', function() {
-            const selected = Array.from(document.querySelectorAll('.trans-checkbox:checked'))
-                .filter(cb => cb.dataset.imported === '1');
-            
-            if (selected.length === 0) {
-                alert('Please select at least one imported transaction');
-                return;
-            }
-            
-            if (!confirm(`Remove ${selected.length} transaction(s) from finance?`)) return;
-            
-            this.disabled = true;
-            this.textContent = 'Reverting...';
-            
-            // Revert one by one using existing AJAX
-            let completed = 0;
-            const total = selected.length;
-            
-            selected.forEach(cb => {
-                const data = new FormData();
-                data.append('action', 'pos_revert_transaction');
-                data.append('trans_id', cb.dataset.id);
-                data.append('nonce', nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: data})
-                .then(r => r.json())
-                .then(json => {
-                    completed++;
-                    if (completed === total) {
-                        alert(`Successfully reverted ${total} transaction(s)`);
-                        location.reload();
-                    }
-                })
-                .catch(err => {
-                    console.error('Revert error:', err);
-                    completed++;
-                    if (completed === total) {
-                        alert('Revert completed with some errors. Please check and try again.');
-                        location.reload();
-                    }
-                });
-            });
-        });
-    })();
-    </script>
-    
-    <style>
-    .bntm-btn-secondary {
-        background: #6b7280;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 14px;
-    }
-    .bntm-btn-secondary:hover {
-        background: #4b5563;
-    }
-    .bntm-btn-secondary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    </style>
-    <?php
-    return ob_get_clean();
-}
-
-/* ---------- SETTINGS TAB ---------- */
-function pos_settings_tab() {
-    // Get all users with 'pos_cashier' role
-    $staff_members = get_users(['role' => 'pos_cashier']);
-    
-    // Get user limit
-    $user_limit = get_option('bntm_user_limit', 0);
-    $current_users = count(get_users(['exclude' => [1]]));
-    $limit_text = $user_limit > 0 ? " ({$current_users}/{$user_limit})" : " ({$current_users})";
-    $limit_reached = $user_limit > 0 && $current_users >= $user_limit;
-    
-    $nonce = wp_create_nonce('pos_nonce');
-    
-    ob_start();
-    ?>
-    <script>
-    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-    </script>
-    
-    <div class="bntm-form-section">
-        <h3>Staff Management</h3>
-        <p>Assign staff members who can use the POS system</p>
-        
-        <div style="margin: 20px 0;">
-            <button id="show-add-staff" class="bntm-btn-primary" <?php echo $limit_reached ? 'disabled' : ''; ?>>
-                + Add Staff<?php echo $limit_text; ?>
-            </button>
-        </div>
-        
-        <?php if ($limit_reached): ?>
-            <div style="background: #fee2e2; border: 1px solid #fca5a5; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                <strong>⚠️ User Limit Reached:</strong> Maximum of <?php echo $user_limit; ?> users allowed.
-            </div>
-        <?php endif; ?>
-        
-        <div id="add-staff-form" style="display:none; background:#f9fafb; padding:20px; border-radius:8px; margin-bottom:20px;">
-            <h4 style="margin-top:0;">Add New Staff</h4>
-            <form id="staff-form" class="bntm-form">
-                <div class="bntm-form-row">
-                    <div class="bntm-form-group">
-                        <label>Name *</label>
-                        <input type="text" name="staff_name" required>
-                    </div>
-                    <div class="bntm-form-group">
-                        <label>Username *</label>
-                        <input type="text" name="staff_username" required>
-                        <small>Unique username for login</small>
-                    </div>
-                </div>
-                <div class="bntm-form-row">
-                    <div class="bntm-form-group">
-                        <label>Email *</label>
-                        <input type="email" name="staff_email" required>
-                    </div>
-                    <div class="bntm-form-group">
-                        <label>Password *</label>
-                        <input type="password" name="staff_password" required minlength="6">
-                        <small>Minimum 6 characters</small>
-                    </div>
-                </div>
-                <div class="bntm-form-row">
-                    <div class="bntm-form-group">
-                        <label>Phone</label>
-                        <input type="tel" name="staff_phone">
-                    </div>
-                    <div class="bntm-form-group">
-                        <label>PIN Code (4-6 digits)</label>
-                        <input type="text" name="staff_pin" pattern="[0-9]{4,6}" maxlength="6">
-                        <small>Optional PIN for quick POS login</small>
-                    </div>
-                </div>
-                <button type="submit" class="bntm-btn-primary">Add Staff</button>
-                <button type="button" id="cancel-add-staff" class="bntm-btn-secondary">Cancel</button>
-                <div id="staff-message"></div>
-            </form>
-        </div>
-        
-        <table class="bntm-table">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Username</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>PIN</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($staff_members)): ?>
-                <tr><td colspan="7" style="text-align:center;">No staff members yet</td></tr>
-                <?php else: foreach ($staff_members as $staff): 
-                    $phone = get_user_meta($staff->ID, 'pos_phone', true);
-                    $pin = get_user_meta($staff->ID, 'pos_pin', true);
-                    $status = get_user_meta($staff->ID, 'pos_status', true) ?: 'active';
-                ?>
-                <tr>
-                    <td><?php echo esc_html($staff->display_name); ?></td>
-                    <td><?php echo esc_html($staff->user_login); ?></td>
-                    <td><?php echo esc_html($staff->user_email); ?></td>
-                    <td><?php echo esc_html($phone ?: '-'); ?></td>
-                    <td><?php echo $pin ? $pin : '-'; ?></td>
-                    <td>
-                        <span style="color: <?php echo $status === 'active' ? '#059669' : '#dc2626'; ?>">
-                            <?php echo ucfirst($status); ?>
-                        </span>
-                    </td>
-                    <td>
-                        <?php if ($status === 'active'): ?>
-                        <button class="bntm-btn-small bntm-btn-danger toggle-staff-status" 
-                                data-id="<?php echo $staff->ID; ?>"
-                                data-status="inactive"
-                                data-nonce="<?php echo $nonce; ?>">
-                            Deactivate
-                        </button>
-                        <?php else: ?>
-                        <button class="bntm-btn-small bntm-btn-success toggle-staff-status" 
-                                data-id="<?php echo $staff->ID; ?>"
-                                data-status="active"
-                                data-nonce="<?php echo $nonce; ?>">
-                            Activate
-                        </button>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-                <?php endforeach; endif; ?>
-            </tbody>
-        </table>
-    </div>
-    
-    <div class="bntm-form-section">
-        <h3>POS Settings</h3>
-        <form id="pos-settings-form" class="bntm-form">
-            <div class="bntm-form-group">
-                <label>Tax Rate (%)</label>
-                <input type="number" name="tax_rate" step="0.01" value="<?php echo esc_attr(bntm_get_setting('pos_tax_rate', '0')); ?>">
-                <small>Applied to all sales</small>
-            </div>
-            <div class="bntm-form-group">
-                <label>Receipt Header</label>
-                <textarea name="receipt_header" rows="3"><?php echo esc_textarea(bntm_get_setting('pos_receipt_header', '')); ?></textarea>
-                <small>Store name, address, contact info</small>
-            </div>
-            <div class="bntm-form-group">
-                <label>Receipt Footer</label>
-                <textarea name="receipt_footer" rows="2"><?php echo esc_textarea(bntm_get_setting('pos_receipt_footer', 'Thank you for your purchase!')); ?></textarea>
-            </div>
-            <button type="submit" class="bntm-btn-primary">Save Settings</button>
-            <div id="settings-message"></div>
-        </form>
-    </div>
-    
-    <script>
-    (function() {
-        // Show/hide add staff form
-        document.getElementById('show-add-staff').addEventListener('click', function() {
-            document.getElementById('add-staff-form').style.display = 'block';
-        });
-        
-        document.getElementById('cancel-add-staff').addEventListener('click', function() {
-            document.getElementById('add-staff-form').style.display = 'none';
-            document.getElementById('staff-form').reset();
-        });
-        
-        // Add staff
-        document.getElementById('staff-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            formData.append('action', 'pos_add_staff');
-            formData.append('nonce', '<?php echo $nonce; ?>');
-            
-            const btn = this.querySelector('button[type="submit"]');
-            btn.disabled = true;
-            btn.textContent = 'Adding...';
-            
-            fetch(ajaxurl, {method:'POST', body: formData})
-            .then(r => r.json())
-            .then(json => {
-                const msg = document.getElementById('staff-message');
-                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                
-                if (json.success) {
-                    setTimeout(() => location.reload(), 1500);
-                } else {
-                    btn.disabled = false;
-                    btn.textContent = 'Add Staff';
-                }
-            });
-        });
-        
-        // Toggle staff status
-        document.querySelectorAll('.toggle-staff-status').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const action = this.dataset.status === 'active' ? 'activate' : 'deactivate';
-                if (!confirm('Are you sure you want to ' + action + ' this staff member?')) return;
-                
-                const formData = new FormData();
-                formData.append('action', 'pos_toggle_staff_status');
-                formData.append('staff_id', this.dataset.id);
-                formData.append('status', this.dataset.status);
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    if (json.success) {
-                        location.reload();
-                    } else {
-                        alert(json.data.message);
-                    }
-                });
-            });
-        });
-        
-        // Save settings
-        document.getElementById('pos-settings-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            formData.append('action', 'pos_save_settings');
-            formData.append('nonce', '<?php echo $nonce; ?>');
-            
-            const btn = this.querySelector('button[type="submit"]');
-            btn.disabled = true;
-            btn.textContent = 'Saving...';
-            
-            fetch(ajaxurl, {method: 'POST', body: formData})
-            .then(r => r.json())
-            .then(json => {
-                const msg = document.getElementById('settings-message');
-                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                
-                btn.disabled = false;
-                btn.textContent = 'Save Settings';
-            });
-        });
-    })();
-    </script>
-    <?php
-    return ob_get_clean();
-}
-
-/* ---------- AJAX HANDLERS ---------- */
-
-function bntm_ajax_pos_import_products() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $pos_table = $wpdb->prefix . 'pos_products';
-    $in_table = $wpdb->prefix . 'in_products';
-    
-    $product_ids = json_decode(stripslashes($_POST['product_ids']), true);
-    
-    if (empty($product_ids) || !is_array($product_ids)) {
-        wp_send_json_error(['message' => 'No products selected']);
-    }
-    
-    $placeholders = implode(',', array_fill(0, count($product_ids), '%d'));
-    
-    $products = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM {$in_table} WHERE id IN ($placeholders)",
-        ...$product_ids
-    ));
-    
-    if (empty($products)) {
-        wp_send_json_error(['message' => 'No products found']);
-    }
-    
-    $imported = 0;
-    $skipped = 0;
-    
-    foreach ($products as $product) {
-        // Skip products without SKU
-        if (empty($product->sku)) {
-            $skipped++;
-            continue;
-        }
-        
-        // Check if already exists by SKU
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$pos_table} WHERE sku = %s",
-            $product->sku
-        ));
-        
-        if ($exists) {
-            $skipped++;
-            continue;
-        }
-        
-        $result = $wpdb->insert($pos_table, [
-            'rand_id' => $product->rand_id,
-            'name' => $product->name,
-            'sku' => $product->sku,
-            'barcode' => $product->barcode,
-            'price' => $product->selling_price,
-            'cost' => 0,
-            'stock' => $product->stock_quantity,
-            'reorder_level' => $product->reorder_level,
-            'category' => null,
-            'description' => $product->description,
-            'status' => 'active'
-        ], ['%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s', '%s']);
-        
-        if ($result) $imported++;
-    }
-    
-    $message = "Successfully imported {$imported} product(s)!";
-    if ($skipped > 0) {
-        $message .= " ({$skipped} skipped - already exists or missing SKU)";
-    }
-    
-    wp_send_json_success(['message' => $message]);
-}
-add_action('wp_ajax_pos_import_products', 'bntm_ajax_pos_import_products');
-
-function bntm_ajax_pos_sync_product() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $pos_table = $wpdb->prefix . 'pos_products';
-    $in_table = $wpdb->prefix . 'in_products';
-    $product_id = intval($_POST['product_id']);
-    
-    // Get POS product
-    $pos_product = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$pos_table} WHERE id = %d",
-        $product_id
-    ));
-    
-    if (!$pos_product) {
-        wp_send_json_error(['message' => 'Product not found']);
-    }
-    
-    // Check if product has SKU
-    if (empty($pos_product->sku)) {
-        wp_send_json_error(['message' => 'Product has no SKU. Cannot sync.']);
-    }
-    
-    // Find product in inventory by SKU
-    $in_product = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$in_table} WHERE sku = %s",
-        $pos_product->sku
-    ));
-    
-    // If product not found in inventory, delete from POS
-    if (!$in_product) {
-        $deleted = $wpdb->delete(
-            $pos_table,
-            ['id' => $product_id],
-            ['%d']
-        );
-        
-        if ($deleted) {
-            wp_send_json_success(['message' => 'Product not found in inventory. Deleted from POS.']);
-        } else {
-            wp_send_json_error(['message' => 'Failed to delete product']);
-        }
-        return;
-    }
-    
-    // Update product with inventory data
-    $result = $wpdb->update(
-        $pos_table,
-        [
-            'name' => $in_product->name,
-            'price' => $in_product->selling_price,
-            'stock' => $in_product->stock_quantity,
-            'description' => $in_product->description,
-            'barcode' => $in_product->barcode,
-            'reorder_level' => $in_product->reorder_level,
-            'rand_id' => $in_product->rand_id
-        ],
-        ['id' => $product_id],
-        ['%s', '%f', '%d', '%s', '%s', '%d', '%s'],
-        ['%d']
-    );
-    
-    if ($result !== false) {
-        wp_send_json_success(['message' => 'Product synced successfully!']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to sync product']);
-    }
-}
-add_action('wp_ajax_pos_sync_product', 'bntm_ajax_pos_sync_product');
-
-function bntm_ajax_pos_delete_product() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $table = $wpdb->prefix . 'pos_products';
-    $product_id = intval($_POST['product_id']);
-    
-    $result = $wpdb->delete(
-        $table,
-        ['id' => $product_id],
-        ['%d']
-    );
-    
-    if ($result) {
-        wp_send_json_success(['message' => 'Product deleted successfully!']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to delete product']);
-    }
-}
-add_action('wp_ajax_pos_delete_product', 'bntm_ajax_pos_delete_product');
-
-function bntm_ajax_pos_toggle_product() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $table = $wpdb->prefix . 'pos_products';
-    $product_id = intval($_POST['product_id']);
-    $status = sanitize_text_field($_POST['status']);
-    
-    $result = $wpdb->update(
-        $table,
-        ['status' => $status],
-        ['id' => $product_id],
-        ['%s'],
-        ['%d']
-    );
-    
-    if ($result !== false) {
-        wp_send_json_success(['message' => 'Status updated']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to update status']);
-    }
-}
-add_action('wp_ajax_pos_toggle_product', 'bntm_ajax_pos_toggle_product');
-/* ---------- AJAX HANDLERS ---------- */
-
-// Create POS Cashier role on activation
-function pos_create_cashier_role() {
-    if (!get_role('pos_cashier')) {
-        add_role(
-            'pos_cashier',
-            'POS Cashier',
-            [
-                'read' => true,
-                'pos_access' => true  // Custom capability
-            ]
-        );
-    }
-}
-// Hook this to your plugin/module activation
-register_activation_hook(__FILE__, 'pos_create_cashier_role');
-// Modified POS add staff function
-function bntm_ajax_pos_add_staff() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in() || !current_user_can('manage_options')) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    // Check user limit
-    $user_limit = get_option('bntm_user_limit', 0);
-    if ($user_limit > 0) {
-        $current_count = count(get_users(['exclude' => [1]]));
-        if ($current_count >= $user_limit) {
-            wp_send_json_error(['message' => "User limit reached. Maximum {$user_limit} users allowed."]);
-        }
-    }
-    
-    // Ensure role exists
-    if (!get_role('pos_cashier')) {
-        pos_create_cashier_role();
-    }
-    
-    $name = sanitize_text_field($_POST['staff_name']);
-    $username = sanitize_user($_POST['staff_username']);
-    $email = sanitize_email($_POST['staff_email']);
-    $password = $_POST['staff_password'];
-    $phone = sanitize_text_field($_POST['staff_phone']);
-    $pin = sanitize_text_field($_POST['staff_pin']);
-    
-    // Validation
-    if (empty($name) || empty($username) || empty($email) || empty($password)) {
-        wp_send_json_error(['message' => 'Name, username, email, and password are required']);
-    }
-    
-    if (username_exists($username)) {
-        wp_send_json_error(['message' => 'Username already exists']);
-    }
-    
-    if (email_exists($email)) {
-        wp_send_json_error(['message' => 'Email already exists']);
-    }
-    
-    // Check if PIN already exists
-    if (!empty($pin)) {
-        $existing_pin = get_users([
-            'meta_key' => 'pos_pin',
-            'meta_value' => $pin,
-            'number' => 1
-        ]);
-        
-        if (!empty($existing_pin)) {
-            wp_send_json_error(['message' => 'PIN code already in use']);
-        }
-    }
-    
-    // Create user
-    $user_id = wp_create_user($username, $password, $email);
-    
-    if (is_wp_error($user_id)) {
-        wp_send_json_error(['message' => 'Failed to create user: ' . $user_id->get_error_message()]);
-    }
-    
-    // Set user role to pos_cashier (WordPress role)
-    $user = new WP_User($user_id);
-    $user->set_role('pos_cashier');
-    
-    // Update user meta
-    wp_update_user([
-        'ID' => $user_id,
-        'display_name' => $name,
-        'first_name' => $name
-    ]);
-    
-    // Add custom meta for POS
-    update_user_meta($user_id, 'pos_phone', $phone);
-    update_user_meta($user_id, 'pos_pin', $pin);
-    update_user_meta($user_id, 'pos_status', 'active');
-    
-    // Add HR role meta if HR module exists
-    if (function_exists('bntm_get_hr_roles')) {
-        update_user_meta($user_id, 'bntm_role', 'pos_cashier');
-        update_user_meta($user_id, 'bntm_status', 'active');
-    }
-    
-    wp_send_json_success(['message' => 'Staff member added successfully!']);
-}
-add_action('wp_ajax_pos_add_staff', 'bntm_ajax_pos_add_staff');
-add_action('wp_ajax_pos_add_staff', 'bntm_ajax_pos_add_staff');
-
-// Toggle staff status (activate/deactivate)
-function bntm_ajax_pos_toggle_staff_status() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in() || !current_user_can('manage_options')) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    $staff_id = intval($_POST['staff_id']);
-    $status = sanitize_text_field($_POST['status']);
-    
-    if (!in_array($status, ['active', 'inactive'])) {
-        wp_send_json_error(['message' => 'Invalid status']);
-    }
-    
-    $user = get_user_by('ID', $staff_id);
-    
-    if (!$user || !in_array('pos_cashier', $user->roles)) {
-        wp_send_json_error(['message' => 'Invalid staff member']);
-    }
-    
-    update_user_meta($staff_id, 'pos_status', $status);
-    
-    $message = $status === 'active' ? 'Staff member activated' : 'Staff member deactivated';
-    wp_send_json_success(['message' => $message]);
-}
-add_action('wp_ajax_pos_toggle_staff_status', 'bntm_ajax_pos_toggle_staff_status');
-
-
-/* ---------- HELPER FUNCTIONS ---------- */
-// Check if user can access POS
-function pos_user_can_access($user_id = null) {
-    if (!$user_id) {
-        $user_id = get_current_user_id();
-    }
-    
-    if (!$user_id) {
-        return false;
-    }
-    
-    // Get user object
-    $user = get_userdata($user_id);
-    
-    if (!$user) {
-        return false;
-    }
-    
-    $is_wp_admin = current_user_can('manage_options');
-    $current_role = bntm_get_user_role($user_id);
-    $can_manage = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
-    
-    // Admins can always access
-    if ($can_manage) {
-        return true;
-    }
-    
-    // Check if user has pos_cashier role or cashier HR role and is active
-    $user_roles = $user->roles ?? [];
-    
-    if (in_array('pos_cashier', $user_roles) || in_array($current_role, ['pos_cashier', 'cashier'])) {
-        $status = get_user_meta($user_id, 'pos_status', true);
-        return $status === 'active' || empty($status); // Active by default
-    }
-    
-    return false;
-}
-
-// Get staff member by PIN (from previous artifact)
-function pos_get_staff_by_pin($pin) {
-    if (empty($pin)) {
-        return null;
-    }
-    
-    $users = get_users([
-        'role' => 'pos_cashier',
-        'meta_key' => 'pos_pin',
-        'meta_value' => $pin,
-        'number' => 1
-    ]);
-    
-    if (!empty($users)) {
-        $user = $users[0];
-        $status = get_user_meta($user->ID, 'pos_status', true);
-        
-        // Only return if active
-        if ($status === 'active' || empty($status)) {
-            return $user;
-        }
-    }
-    
-    return null;
-}
-function bntm_ajax_pos_save_settings() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    bntm_set_setting('pos_tax_rate', floatval($_POST['tax_rate']));
-    bntm_set_setting('pos_receipt_header', sanitize_textarea_field($_POST['receipt_header']));
-    bntm_set_setting('pos_receipt_footer', sanitize_textarea_field($_POST['receipt_footer']));
-    
-    wp_send_json_success(['message' => 'Settings saved successfully!']);
-}
-add_action('wp_ajax_pos_save_settings', 'bntm_ajax_pos_save_settings');
-
-function bntm_ajax_pos_import_transaction() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $fn_table = $wpdb->prefix . 'fn_transactions';
-    $trans_table = $wpdb->prefix . 'pos_transactions';
-    
-    $trans_id = intval($_POST['trans_id']);
-    $amount = floatval($_POST['amount']);
-    
-    // Check if already imported
-    $exists = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM {$fn_table} WHERE reference_type='pos_sale' AND reference_id=%d",
-        $trans_id
-    ));
-    
-    if ($exists) {
-        wp_send_json_error(['message' => 'Transaction already imported']);
-    }
-    
-    // Get transaction details
-    $trans = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$trans_table} WHERE id = %d",
-        $trans_id
-    ));
-    
-    if (!$trans) {
-        wp_send_json_error(['message' => 'Transaction not found']);
-    }
-    
-    $data = [
-        'rand_id' => bntm_rand_id(),
-        'business_id' => 0,
-        'type' => 'income',
-        'amount' => $amount,
-        'category' => 'Sales',
-        'notes' => 'POS Sale #' . $trans->transaction_number . ' - ' . $trans->staff_name,
-        'reference_type' => 'pos_sale',
-        'reference_id' => $trans_id,
-        'created_at' => $trans->created_at
-    ];
-    
-    $result = $wpdb->insert($fn_table, $data);
-    
-    if ($result) {
-        // Update cashflow summary if function exists
-        if (function_exists('bntm_fn_update_cashflow_summary')) {
-            bntm_fn_update_cashflow_summary();
-        }
-        wp_send_json_success(['message' => 'Transaction imported successfully!']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to import transaction']);
-    }
-}
-add_action('wp_ajax_pos_import_transaction', 'bntm_ajax_pos_import_transaction');
-
-function bntm_ajax_pos_revert_transaction() {
-    check_ajax_referer('pos_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $table = $wpdb->prefix . 'fn_transactions';
-    $trans_id = intval($_POST['trans_id']);
-    
-    $result = $wpdb->delete($table, [
-        'reference_type' => 'pos_sale',
-        'reference_id' => $trans_id
-    ]);
-    
-    if ($result) {
-        // Update cashflow summary if function exists
-        if (function_exists('bntm_fn_update_cashflow_summary')) {
-            bntm_fn_update_cashflow_summary();
-        }
-        wp_send_json_success(['message' => 'Transaction reverted from finance']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to revert transaction']);
-    }
-}
-add_action('wp_ajax_pos_revert_transaction', 'bntm_ajax_pos_revert_transaction');
