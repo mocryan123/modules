@@ -3,7 +3,7 @@
  * Module Name: Payments
  * Module Slug: op
  * Description: Centralized online payment processor with invoicing, PDF generation, and third-party payment APIs (PayPal, PayMaya)
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Your Name
  * Icon: 💳
  */
@@ -736,49 +736,52 @@ function op_invoices_tab($business_id) {
         <?php if (empty($invoices)): ?>
             <p>No invoices yet.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Invoice ID</th>
-                        <th>Customer</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Payment</th>
-                        <th>Date</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($invoices as $invoice): ?>
-                        <tr>
-                            <td>#<?php echo esc_html($invoice->rand_id); ?></td>
-                            <td><?php echo esc_html($invoice->customer_name); ?></td>
-                            <td><?php echo op_format_price($invoice->total); ?></td>
-                            <td>
-                                <span class="status-badge status-<?php echo esc_attr($invoice->status); ?>">
-                                    <?php echo ucfirst($invoice->status); ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="status-badge status-<?php echo esc_attr($invoice->payment_status); ?>">
-                                    <?php echo ucfirst(str_replace('_', ' ', $invoice->payment_status)); ?>
-                                </span>
-                            </td>
-                            <td><?php echo date('M d, Y', strtotime($invoice->created_at)); ?></td>
-                            <td>
-                                <a href="<?php echo get_page_link(get_page_by_path('invoice')) . '?id=' . esc_attr($invoice->rand_id); ?>" 
-                                   class="bntm-btn-small" target="_blank">View</a>
-                                <button class="bntm-btn-small update-status-btn" 
-                                        data-id="<?php echo esc_attr($invoice->rand_id); ?>"
-                                        data-status="<?php echo esc_attr($invoice->status); ?>"
-                                        data-payment="<?php echo esc_attr($invoice->payment_status); ?>">
-                                    Update
-                                </button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Invoice ID</th>
+                           <th>Customer</th>
+                           <th>Amount</th>
+                           <th>Status</th>
+                           <th>Payment</th>
+                           <th>Date</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($invoices as $invoice): ?>
+                           <tr>
+                               <td>#<?php echo esc_html($invoice->rand_id); ?></td>
+                               <td><?php echo esc_html($invoice->customer_name); ?></td>
+                               <td><?php echo op_format_price($invoice->total); ?></td>
+                               <td>
+                                   <span class="status-badge status-<?php echo esc_attr($invoice->status); ?>">
+                                       <?php echo ucfirst($invoice->status); ?>
+                                   </span>
+                               </td>
+                               <td>
+                                   <span class="status-badge status-<?php echo esc_attr($invoice->payment_status); ?>">
+                                       <?php echo ucfirst(str_replace('_', ' ', $invoice->payment_status)); ?>
+                                   </span>
+                               </td>
+                               <td><?php echo date('M d, Y', strtotime($invoice->created_at)); ?></td>
+                               <td>
+                                   <a href="<?php echo get_page_link(get_page_by_path('invoice')) . '?id=' . esc_attr($invoice->rand_id); ?>" 
+                                      class="bntm-btn-small" target="_blank">View</a>
+                                   <button class="bntm-btn-small update-status-btn" 
+                                           data-id="<?php echo esc_attr($invoice->rand_id); ?>"
+                                           data-status="<?php echo esc_attr($invoice->status); ?>"
+                                           data-payment="<?php echo esc_attr($invoice->payment_status); ?>">
+                                       Update
+                                   </button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -1485,36 +1488,39 @@ function op_payments_tab($business_id) {
         <?php if (empty($payments)): ?>
             <p>No payment history yet.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Invoice</th>
-                        <th>Customer</th>
-                        <th>Amount</th>
-                        <th>Method</th>
-                        <th>Gateway</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($payments as $payment): ?>
-                        <tr>
-                            <td>#<?php echo esc_html($payment->invoice_id); ?></td>
-                            <td><?php echo esc_html($payment->customer_name); ?></td>
-                            <td><?php echo op_format_price($payment->amount); ?></td>
-                            <td><?php echo esc_html(ucfirst($payment->payment_method)); ?></td>
-                            <td><?php echo esc_html(ucfirst($payment->payment_gateway ?? 'N/A')); ?></td>
-                            <td>
-                                <span class="status-badge status-<?php echo esc_attr($payment->status); ?>">
-                                    <?php echo ucfirst($payment->status); ?>
-                                </span>
-                            </td>
-                            <td><?php echo date('M d, Y H:i', strtotime($payment->attempted_at)); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Invoice</th>
+                           <th>Customer</th>
+                           <th>Amount</th>
+                           <th>Method</th>
+                           <th>Gateway</th>
+                           <th>Status</th>
+                           <th>Date</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($payments as $payment): ?>
+                           <tr>
+                               <td>#<?php echo esc_html($payment->invoice_id); ?></td>
+                               <td><?php echo esc_html($payment->customer_name); ?></td>
+                               <td><?php echo op_format_price($payment->amount); ?></td>
+                               <td><?php echo esc_html(ucfirst($payment->payment_method)); ?></td>
+                               <td><?php echo esc_html(ucfirst($payment->payment_gateway ?? 'N/A')); ?></td>
+                               <td>
+                                   <span class="status-badge status-<?php echo esc_attr($payment->status); ?>">
+                                       <?php echo ucfirst($payment->status); ?>
+                                   </span>
+                               </td>
+                               <td><?php echo date('M d, Y H:i', strtotime($payment->attempted_at)); ?></td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
     <?php
@@ -1564,44 +1570,46 @@ function op_import_finance_tab($business_id) {
             <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
         </div>
         
-        <table class="bntm-table">
-            <thead>
-                <tr>
-                    <th width="40"></th>
-                    <th>Invoice ID</th>
-                    <th>Customer</th>
-                    <th>Date</th>
-                    <th>Total</th>
-                    <th>Import Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($invoices)): ?>
-                <tr><td colspan="6" style="text-align:center;">No paid invoices found</td></tr>
-                <?php else: foreach ($invoices as $invoice): ?>
-                <tr>
-                    <td>
-                        <input type="checkbox" 
-                               class="invoice-checkbox <?php echo $invoice->is_imported ? 'imported-invoice' : 'not-imported-invoice'; ?>" 
-                               data-id="<?php echo $invoice->id; ?>"
-                               data-amount="<?php echo $invoice->total; ?>"
-                               data-imported="<?php echo $invoice->is_imported ? '1' : '0'; ?>">
-                    </td>
-                    <td>#<?php echo $invoice->rand_id; ?></td>
-                    <td><?php echo esc_html($invoice->customer_name); ?></td>
-                    <td><?php echo date('M d, Y', strtotime($invoice->paid_at)); ?></td>
-                    <td class="bntm-stat-income">₱<?php echo number_format($invoice->total, 2); ?></td>
-                    <td>
-                        <?php if ($invoice->is_imported): ?>
-                        <span style="color:#059669;">✓ Imported</span>
-                        <?php else: ?>
-                        <span style="color:#6b7280;">Not Imported</span>
-                        <?php endif; ?>
-                    </td>
-                </tr>
-                <?php endforeach; endif; ?>
-            </tbody>
-        </table>
+        <div class="bntm-table-wrapper">
+           <table class="bntm-table">
+               <thead>
+                   <tr>
+                       <th width="40"></th>
+                       <th>Invoice ID</th>
+                       <th>Customer</th>
+                       <th>Date</th>
+                       <th>Total</th>
+                       <th>Import Status</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   <?php if (empty($invoices)): ?>
+                   <tr><td colspan="6" style="text-align:center;">No paid invoices found</td></tr>
+                   <?php else: foreach ($invoices as $invoice): ?>
+                   <tr>
+                       <td>
+                           <input type="checkbox" 
+                                  class="invoice-checkbox <?php echo $invoice->is_imported ? 'imported-invoice' : 'not-imported-invoice'; ?>" 
+                                  data-id="<?php echo $invoice->id; ?>"
+                                  data-amount="<?php echo $invoice->total; ?>"
+                                  data-imported="<?php echo $invoice->is_imported ? '1' : '0'; ?>">
+                       </td>
+                       <td>#<?php echo $invoice->rand_id; ?></td>
+                       <td><?php echo esc_html($invoice->customer_name); ?></td>
+                       <td><?php echo date('M d, Y', strtotime($invoice->paid_at)); ?></td>
+                       <td class="bntm-stat-income">₱<?php echo number_format($invoice->total, 2); ?></td>
+                       <td>
+                           <?php if ($invoice->is_imported): ?>
+                           <span style="color:#059669;">✓ Imported</span>
+                           <?php else: ?>
+                           <span style="color:#6b7280;">Not Imported</span>
+                           <?php endif; ?>
+                       </td>
+                   </tr>
+                   <?php endforeach; endif; ?>
+               </tbody>
+           </table>
+        </div>
     </div>
     
     <script>
@@ -1777,65 +1785,68 @@ function op_import_products_tab($business_id) {
         <?php if (empty($imported_products)): ?>
             <p>No products imported yet. Import products from your inventory to get started.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>SKU</th>
-                        <th>Price</th>
-                        <th>Stock</th>
-                        <th>Imported</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($imported_products as $product): ?>
-                        <tr data-product-id="<?php echo $product->id; ?>">
-                            <td><strong><?php echo esc_html($product->product_name); ?></strong></td>
-                            <td>
-                                <?php if ($product->sku): ?>
-                                    <span class="product-sku"><?php echo esc_html($product->sku); ?></span>
-                                <?php else: ?>
-                                    <span style="color: #9ca3af;">N/A</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?php echo op_format_price($product->price); ?></td>
-                            <td>
-                                <?php echo esc_html($product->stock); ?>
-                                <?php
-                                // Get current inventory stock
-                                $current_stock = $wpdb->get_var($wpdb->prepare(
-                                    "SELECT stock_quantity FROM {$in_table} WHERE id = %d",
-                                    $product->product_id
-                                ));
-                                if ($current_stock !== null && $current_stock != $product->stock):
-                                ?>
-                                    <span style="color: #f59e0b; font-size: 12px;">
-                                        (Inventory: <?php echo $current_stock; ?>)
-                                    </span>
-                                <?php endif; ?>
-                            </td>
-                            <td style="font-size: 12px; color: #6b7280;">
-                                <?php echo date('M d, Y', strtotime($product->imported_at)); ?>
-                            </td>
-                            <td>
-                                <button class="bntm-btn-small op-sync-product" 
-                                        data-id="<?php echo $product->id; ?>"
-                                        data-nonce="<?php echo $nonce; ?>"
-                                        title="Sync with inventory">
-                                    🔄 Sync
-                                </button>
-                                <button class="bntm-btn-small bntm-btn-danger op-remove-product" 
-                                        data-id="<?php echo $product->id; ?>"
-                                        data-nonce="<?php echo $nonce; ?>"
-                                        title="Remove from imported products">
-                                    Remove
-                                </button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Name</th>
+                           <th>SKU</th>
+                           <th>Price</th>
+                           <th>Stock</th>
+                           <th>Imported</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($imported_products as $product): ?>
+                           <tr data-product-id="<?php echo $product->id; ?>">
+                               <td><strong><?php echo esc_html($product->product_name); ?></strong></td>
+                               <td>
+                                   <?php if ($product->sku): ?>
+                                       <span class="product-sku"><?php echo esc_html($product->sku); ?></span>
+                                   <?php else: ?>
+                                       <span style="color: #9ca3af;">N/A</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td><?php echo op_format_price($product->price); ?></td>
+                               <td>
+                                   <?php echo esc_html($product->stock); ?>
+                                   <?php
+                                   // Get current inventory stock
+                                   $current_stock = $wpdb->get_var($wpdb->prepare(
+                                       "SELECT stock_quantity FROM {$in_table} WHERE id = %d",
+                                       $product->product_id
+                                   ));
+                                   if ($current_stock !== null && $current_stock != $product->stock):
+                                   ?>
+                                       <span style="color: #f59e0b; font-size: 12px;">
+                                           (Inventory: <?php echo $current_stock; ?>)
+                                       </span>
+                                   <?php endif; ?>
+                               </td>
+                               <td style="font-size: 12px; color: #6b7280;">
+                                   <?php echo date('M d, Y', strtotime($product->imported_at)); ?>
+                               </td>
+                               <td>
+                                   <button class="bntm-btn-small op-sync-product" 
+                                           data-id="<?php echo $product->id; ?>"
+                                           data-nonce="<?php echo $nonce; ?>"
+                                           title="Sync with inventory">
+                                       🔄 Sync
+                                   </button>
+                                   <button class="bntm-btn-small bntm-btn-danger op-remove-product" 
+                                           data-id="<?php echo $product->id; ?>"
+                                           data-nonce="<?php echo $nonce; ?>"
+                                           title="Remove from imported products">
+                                       Remove
+                                   </button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -2073,42 +2084,45 @@ function op_settings_tab($business_id) {
                 <?php if (empty($payment_methods)): ?>
                     <p style="color: #6b7280;">No payment methods configured yet.</p>
                 <?php else: ?>
-                    <table class="bntm-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Gateway</th>
-                                <th>Mode</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($payment_methods as $method): ?>
-                            <tr>
-                                <td><strong><?php echo esc_html($method->name); ?></strong></td>
-                                <td><?php echo esc_html(ucfirst($method->gateway)); ?></td>
-                                <td>
-                                    <span class="status-badge status-<?php echo $method->mode === 'live' ? 'paid' : 'draft'; ?>">
-                                        <?php echo ucfirst($method->mode); ?>
-                                    </span>
-                                </td>
-                                <td>
-                                    <?php if ($method->is_active): ?>
-                                        <span style="color: #059669;">● Active</span>
-                                    <?php else: ?>
-                                        <span style="color: #6b7280;">● Inactive</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <button class="bntm-btn-small edit-method-btn" data-id="<?php echo $method->id; ?>">Edit</button>
-                                    <button class="bntm-btn-small delete-method-btn" data-id="<?php echo $method->id; ?>" 
-                                            style="background: #dc2626;">Delete</button>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+                
+                  <div class="bntm-table-wrapper">
+                       <table class="bntm-table">
+                           <thead>
+                               <tr>
+                                   <th>Name</th>
+                                   <th>Gateway</th>
+                                   <th>Mode</th>
+                                   <th>Status</th>
+                                   <th>Actions</th>
+                               </tr>
+                           </thead>
+                           <tbody>
+                               <?php foreach ($payment_methods as $method): ?>
+                               <tr>
+                                   <td><strong><?php echo esc_html($method->name); ?></strong></td>
+                                   <td><?php echo esc_html(ucfirst($method->gateway)); ?></td>
+                                   <td>
+                                       <span class="status-badge status-<?php echo $method->mode === 'live' ? 'paid' : 'draft'; ?>">
+                                           <?php echo ucfirst($method->mode); ?>
+                                       </span>
+                                   </td>
+                                   <td>
+                                       <?php if ($method->is_active): ?>
+                                           <span style="color: #059669;">● Active</span>
+                                       <?php else: ?>
+                                           <span style="color: #6b7280;">● Inactive</span>
+                                       <?php endif; ?>
+                                   </td>
+                                   <td>
+                                       <button class="bntm-btn-small edit-method-btn" data-id="<?php echo $method->id; ?>">Edit</button>
+                                       <button class="bntm-btn-small delete-method-btn" data-id="<?php echo $method->id; ?>" 
+                                               style="background: #dc2626;">Delete</button>
+                                   </td>
+                               </tr>
+                               <?php endforeach; ?>
+                           </tbody>
+                       </table>
+                    </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -3804,32 +3818,35 @@ function op_render_recent_invoices($business_id, $limit = 5) {
 
     ob_start();
     ?>
-    <table class="bntm-table">
-        <thead>
-            <tr>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Date</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($invoices as $invoice): ?>
-                <tr>
-                    <td>#<?php echo esc_html($invoice->rand_id); ?></td>
-                    <td><?php echo esc_html($invoice->customer_name); ?></td>
-                    <td><?php echo op_format_price($invoice->total); ?></td>
-                    <td>
-                        <span class="status-badge status-<?php echo esc_attr($invoice->payment_status); ?>">
-                            <?php echo ucfirst(str_replace('_', ' ', $invoice->payment_status)); ?>
-                        </span>
-                    </td>
-                    <td><?php echo date('M d, Y', strtotime($invoice->created_at)); ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
+    
+        <div class="bntm-table-wrapper">
+          <table class="bntm-table">
+              <thead>
+                  <tr>
+                      <th>Invoice</th>
+                      <th>Customer</th>
+                      <th>Amount</th>
+                      <th>Status</th>
+                      <th>Date</th>
+                  </tr>
+              </thead>
+              <tbody>
+                  <?php foreach ($invoices as $invoice): ?>
+                      <tr>
+                          <td>#<?php echo esc_html($invoice->rand_id); ?></td>
+                          <td><?php echo esc_html($invoice->customer_name); ?></td>
+                          <td><?php echo op_format_price($invoice->total); ?></td>
+                          <td>
+                              <span class="status-badge status-<?php echo esc_attr($invoice->payment_status); ?>">
+                                  <?php echo ucfirst(str_replace('_', ' ', $invoice->payment_status)); ?>
+                              </span>
+                          </td>
+                          <td><?php echo date('M d, Y', strtotime($invoice->created_at)); ?></td>
+                      </tr>
+                  <?php endforeach; ?>
+              </tbody>
+          </table>
+       </div>
     <?php
     return ob_get_clean();
 }

@@ -3,7 +3,7 @@
  * Module Name: Booking
  * Module Slug: bk
  * Description: Appointment booking system with calendar, time slots, and payment integration
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Your Name
  * Icon: 📅
  */
@@ -814,6 +814,8 @@ function bk_services_tab($business_id) {
         <?php if (empty($services)): ?>
             <p>No services yet. Add your first service to get started.</p>
         <?php else: ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -849,6 +851,7 @@ function bk_services_tab($business_id) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php endif; ?>
     </div>
 
@@ -1242,6 +1245,7 @@ function bk_bookings_tab($business_id) {
         <?php if (empty($bookings)): ?>
             <p>No bookings yet.</p>
         <?php else: ?>
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -1289,6 +1293,7 @@ function bk_bookings_tab($business_id) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php endif; ?>
     </div>
 
@@ -1365,6 +1370,7 @@ function bk_operating_hours_tab($business_id) {
         <h3>Operating Hours</h3>
         <p>Set your business operating hours for each day of the week.</p>
         
+        <div class="bntm-table-wrapper">
         <table class="bntm-table" style="margin-top: 20px;">
             <thead>
                 <tr>
@@ -1416,6 +1422,7 @@ function bk_operating_hours_tab($business_id) {
                 <?php endforeach; ?>
             </tbody>
         </table>
+         </div>
     </div>
 
     <div class="bntm-form-section" style="background: #f9fafb;">
@@ -1544,13 +1551,13 @@ function bk_settings_tab($business_id) {
        
        <div class="bntm-form-group">
            <label>Booking Description</label>
-           <textarea name="bk_description" id="bk-description" rows="3" placeholder="Brief description shown on booking page"><?php echo esc_textarea(bntm_get_bk_description()); ?></textarea>
+           <textarea name="bk_description" id="bk-description" rows="3" placeholder="Brief description shown on booking page"><?php echo esc_textarea( bntm_get_setting('bk_terms', '')); ?></textarea>
            <small>This appears below the title on your booking calendar.</small>
        </div>
        
        <div class="bntm-form-group">
            <label>Booking Terms & Conditions</label>
-           <textarea name="bk_terms" id="bk-terms" rows="6" placeholder="Enter your booking terms and conditions"><?php echo esc_textarea(bntm_get_bk_terms()); ?></textarea>
+           <textarea name="bk_terms" id="bk-terms" rows="6" placeholder="Enter your booking terms and conditions"><?php echo esc_textarea(bntm_get_setting('bk_description', '')); ?></textarea>
            <small>These terms appear at the bottom of the booking calendar.</small>
        </div>
        
@@ -5863,7 +5870,7 @@ function bntm_shortcode_bk_transaction() {
     </style>
     <?php
     $content = ob_get_clean();
-    return bntm_universal_container('Booking Transaction', $content);
+    return $content;
 }
 
 add_shortcode('bk_transaction', 'bntm_shortcode_bk_transaction');
@@ -7246,6 +7253,8 @@ function bk_render_recent_bookings($business_id, $limit = 10) {
     
     ob_start();
     ?>
+    
+   <div class="bntm-table-wrapper">
     <table class="bntm-table">
         <thead>
             <tr>
@@ -7284,7 +7293,7 @@ function bk_render_recent_bookings($business_id, $limit = 10) {
             <?php endif; ?>
         </tbody>
     </table>
-    
+    </div>
     <?php if ($total_pages > 1): ?>
         <div class="bk-pagination">
             <?php
@@ -7588,7 +7597,8 @@ function bntm_fn_bookings_tab() {
             <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
         </div>
         
-        <div style="overflow-x: auto;">
+       
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>

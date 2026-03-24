@@ -3,7 +3,7 @@
  * Module Name: Inventory Management
  * Module Slug: in
  * Description: Complete inventory management solution with products, batches, and cost tracking
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Your Name
  * Icon: 📦
  */
@@ -160,7 +160,8 @@ function bntm_in_shortcode_dashboard() {
     return bntm_universal_container('Inventory Management', $content);
 }
 
-/* ---------- TAB FUNCTIONS ---------- */function in_overview_tab($business_id) {
+/* ---------- TAB FUNCTIONS ---------- */
+function in_overview_tab($business_id) {
     global $wpdb;
     $products_table = $wpdb->prefix . 'in_products';
     $batches_table = $wpdb->prefix . 'in_batches';
@@ -387,34 +388,37 @@ function bntm_in_shortcode_dashboard() {
     <?php if (!empty($low_stock_products)): ?>
     <div class="in-alert-section">
         <h3>Low Stock Alerts</h3>
-        <table class="bntm-table">
-            <thead>
-                <tr>
-                    <th>Product</th>
-                    <th>Type</th>
-                    <th>Current Stock</th>
-                    <th>Reorder Level</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($low_stock_products as $product): ?>
-                    <tr>
-                        <td><?php echo esc_html($product->name); ?></td>
-                        <td><?php echo esc_html($product->inventory_type); ?></td>
-                        <td><?php echo esc_html($product->stock_quantity); ?></td>
-                        <td><?php echo esc_html($product->reorder_level); ?></td>
-                        <td>
-                            <?php if ($product->stock_quantity == 0): ?>
-                                <span style="color: #991b1b; font-weight: 500;">Out of Stock</span>
-                            <?php else: ?>
-                                <span style="color: #dc2626; font-weight: 500;">Low Stock</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+        
+        <div class="bntm-table-wrapper">
+           <table class="bntm-table">
+               <thead>
+                   <tr>
+                       <th>Product</th>
+                       <th>Type</th>
+                       <th>Current Stock</th>
+                       <th>Reorder Level</th>
+                       <th>Status</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   <?php foreach ($low_stock_products as $product): ?>
+                       <tr>
+                           <td><?php echo esc_html($product->name); ?></td>
+                           <td><?php echo esc_html($product->inventory_type); ?></td>
+                           <td><?php echo esc_html($product->stock_quantity); ?></td>
+                           <td><?php echo esc_html($product->reorder_level); ?></td>
+                           <td>
+                               <?php if ($product->stock_quantity == 0): ?>
+                                   <span style="color: #991b1b; font-weight: 500;">Out of Stock</span>
+                               <?php else: ?>
+                                   <span style="color: #dc2626; font-weight: 500;">Low Stock</span>
+                               <?php endif; ?>
+                           </td>
+                       </tr>
+                   <?php endforeach; ?>
+               </tbody>
+           </table>
+        </div>
     </div>
     <?php endif; ?>
 
@@ -423,36 +427,39 @@ function bntm_in_shortcode_dashboard() {
         <?php if (empty($recent_transactions)): ?>
             <p>No transactions recorded yet.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Reference</th>
-                        <th>Product</th>
-                        <th>Quantity</th>
-                        <th>Total Cost</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($recent_transactions as $txn): ?>
-                        <tr>
-                            <td><?php echo date('M d, Y', strtotime($txn->created_at)); ?></td>
-                            <td>
-                                <?php if ($txn->type === 'stock_in'): ?>
-                                    <span style="color: #059669; font-weight: 500;">Stock In</span>
-                                <?php else: ?>
-                                    <span style="color: #dc2626; font-weight: 500;">Stock Out</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?php echo esc_html($txn->reference_number ?: $txn->batch_code); ?></td>
-                            <td><?php echo esc_html($txn->product_name); ?></td>
-                            <td><?php echo esc_html($txn->quantity); ?></td>
-                            <td>₱<?php echo number_format($txn->total_cost, 2); ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Date</th>
+                           <th>Type</th>
+                           <th>Reference</th>
+                           <th>Product</th>
+                           <th>Quantity</th>
+                           <th>Total Cost</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($recent_transactions as $txn): ?>
+                           <tr>
+                               <td><?php echo date('M d, Y', strtotime($txn->created_at)); ?></td>
+                               <td>
+                                   <?php if ($txn->type === 'stock_in'): ?>
+                                       <span style="color: #059669; font-weight: 500;">Stock In</span>
+                                   <?php else: ?>
+                                       <span style="color: #dc2626; font-weight: 500;">Stock Out</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td><?php echo esc_html($txn->reference_number ?: $txn->batch_code); ?></td>
+                               <td><?php echo esc_html($txn->product_name); ?></td>
+                               <td><?php echo esc_html($txn->quantity); ?></td>
+                               <td>₱<?php echo number_format($txn->total_cost, 2); ?></td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
     
@@ -1077,68 +1084,71 @@ function in_products_tab($business_id) {
         <?php if (empty($products)): ?>
             <p>No products found. Add your first product above.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Image</th>
-                        <th>Type</th>
-                        <th>Name</th>
-                        <th>SKU</th>
-                        <th>Barcode</th>
-                        <th>Cost</th>
-                        <th>Selling Price</th>
-                        <th>Stock</th>
-                        <th>Reorder Level</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($products as $product): ?>
-                        <tr data-product-id="<?php echo $product->id; ?>">
-                            <td>
-                                <?php if ($product->image): ?>
-                                    <img src="<?php echo esc_url($product->image); ?>" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
-                                <?php else: ?>
-                                    <div style="width: 50px; height: 50px; background: #e5e7eb; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #9ca3af;">📦</div>
-                                <?php endif; ?>
-                            </td>
-                            <td><?php echo esc_html($product->inventory_type); ?></td>
-                            <td><?php echo esc_html($product->name); ?></td>
-                            <td><?php echo esc_html($product->sku); ?></td>
-                            <td><?php echo esc_html($product->barcode ?: 'N/A'); ?></td>
-                            <td>₱<?php echo number_format($product->cost_per_unit, 2); ?></td>
-                            <td>₱<?php echo number_format($product->selling_price, 2); ?></td>
-                            <td><?php echo esc_html($product->stock_quantity); ?></td>
-                            <td><?php echo esc_html($product->reorder_level); ?></td>
-                            <td>
-                                <?php if ($product->stock_quantity == 0): ?>
-                                    <span style="color: #991b1b; font-weight: 500;">Out of Stock</span>
-                                <?php elseif ($product->stock_quantity <= $product->reorder_level): ?>
-                                    <span style="color: #dc2626; font-weight: 500;">Low Stock</span>
-                                <?php else: ?>
-                                    <span style="color: #059669; font-weight: 500;">In Stock</span>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <button class="bntm-btn-small in-edit-product" 
-                                    data-id="<?php echo $product->id; ?>"
-                                    data-name="<?php echo esc_attr($product->name); ?>"
-                                    data-sku="<?php echo esc_attr($product->sku); ?>"
-                                    data-barcode="<?php echo esc_attr($product->barcode); ?>"
-                                    data-type="<?php echo esc_attr($product->inventory_type); ?>"
-                                    data-cost="<?php echo $product->cost_per_unit; ?>"
-                                    data-price="<?php echo $product->selling_price; ?>"
-                                    data-stock="<?php echo $product->stock_quantity; ?>"
-                                    data-reorder="<?php echo $product->reorder_level; ?>"
-                                    data-description="<?php echo esc_attr($product->description); ?>"
-                                    data-image="<?php echo esc_attr($product->image); ?>">Edit</button>
-                                <button class="bntm-btn-small bntm-btn-danger in-delete-product" data-id="<?php echo esc_attr($product->id); ?>">Delete</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Image</th>
+                           <th>Type</th>
+                           <th>Name</th>
+                           <th>SKU</th>
+                           <th>Barcode</th>
+                           <th>Cost</th>
+                           <th>Selling Price</th>
+                           <th>Stock</th>
+                           <th>Reorder Level</th>
+                           <th>Status</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($products as $product): ?>
+                           <tr data-product-id="<?php echo $product->id; ?>">
+                               <td>
+                                   <?php if ($product->image): ?>
+                                       <img src="<?php echo esc_url($product->image); ?>" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
+                                   <?php else: ?>
+                                       <div style="width: 50px; height: 50px; background: #e5e7eb; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #9ca3af;">📦</div>
+                                   <?php endif; ?>
+                               </td>
+                               <td><?php echo esc_html($product->inventory_type); ?></td>
+                               <td><?php echo esc_html($product->name); ?></td>
+                               <td><?php echo esc_html($product->sku); ?></td>
+                               <td><?php echo esc_html($product->barcode ?: 'N/A'); ?></td>
+                               <td>₱<?php echo number_format($product->cost_per_unit, 2); ?></td>
+                               <td>₱<?php echo number_format($product->selling_price, 2); ?></td>
+                               <td><?php echo esc_html($product->stock_quantity); ?></td>
+                               <td><?php echo esc_html($product->reorder_level); ?></td>
+                               <td>
+                                   <?php if ($product->stock_quantity == 0): ?>
+                                       <span style="color: #991b1b; font-weight: 500;">Out of Stock</span>
+                                   <?php elseif ($product->stock_quantity <= $product->reorder_level): ?>
+                                       <span style="color: #dc2626; font-weight: 500;">Low Stock</span>
+                                   <?php else: ?>
+                                       <span style="color: #059669; font-weight: 500;">In Stock</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td>
+                                   <button class="bntm-btn-small in-edit-product" 
+                                       data-id="<?php echo $product->id; ?>"
+                                       data-name="<?php echo esc_attr($product->name); ?>"
+                                       data-sku="<?php echo esc_attr($product->sku); ?>"
+                                       data-barcode="<?php echo esc_attr($product->barcode); ?>"
+                                       data-type="<?php echo esc_attr($product->inventory_type); ?>"
+                                       data-cost="<?php echo $product->cost_per_unit; ?>"
+                                       data-price="<?php echo $product->selling_price; ?>"
+                                       data-stock="<?php echo $product->stock_quantity; ?>"
+                                       data-reorder="<?php echo $product->reorder_level; ?>"
+                                       data-description="<?php echo esc_attr($product->description); ?>"
+                                       data-image="<?php echo esc_attr($product->image); ?>">Edit</button>
+                                   <button class="bntm-btn-small bntm-btn-danger in-delete-product" data-id="<?php echo esc_attr($product->id); ?>">Delete</button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -1929,53 +1939,56 @@ function in_batches_tab($business_id) {
         <?php if (empty($batches)): ?>
             <p>No stock movements recorded yet.</p>
         <?php else: ?>
-            <table class="bntm-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Type</th>
-                        <th>Reference</th>
-                        <th>Product</th>
-                        <th>Quantity</th>
-                        <th>Cost/Unit</th>
-                        <th>Total Cost</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($batches as $batch): ?>
-                        <tr>
-                            <td><?php echo date('M d, Y', strtotime($batch->manufacture_date ?: $batch->created_at)); ?></td>
-                            <td>
-                                <?php if ($batch->type === 'stock_in'): ?>
-                                    <span style="color: #059669; font-weight: 500;">▲ Stock In</span>
-                                <?php else: ?>
-                                    <span style="color: #dc2626; font-weight: 500;">▼ Stock Out</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?php echo esc_html($batch->reference_number ?: $batch->batch_code); ?></td>
-                            <td><?php echo esc_html($batch->product_name); ?></td>
-                            <td><?php echo esc_html($batch->quantity); ?></td>
-                            <td>₱<?php echo number_format($batch->cost_per_unit, 2); ?></td>
-                            <td>₱<?php echo number_format($batch->total_cost, 2); ?></td>
-                            <td>
-                                <button class="bntm-btn-small view-batch-details" data-details='<?php echo esc_attr(json_encode([
-                                    'type' => $batch->type,
-                                    'reference' => $batch->reference_number ?: $batch->batch_code,
-                                    'product' => $batch->product_name,
-                                    'quantity' => $batch->quantity,
-                                    'cost_per_unit' => $batch->cost_per_unit,
-                                    'total_cost' => $batch->total_cost,
-                                    'notes' => $batch->notes,
-                                    'date' => $batch->manufacture_date ?: $batch->created_at,
-                                    'created_at' => $batch->created_at
-                                ])); ?>'>View</button>
-                                <button class="bntm-btn-small bntm-btn-danger in-delete-batch" data-id="<?php echo $batch->id; ?>" data-type="<?php echo $batch->type; ?>" data-qty="<?php echo $batch->quantity; ?>">Delete</button>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+        
+           <div class="bntm-table-wrapper">
+               <table class="bntm-table">
+                   <thead>
+                       <tr>
+                           <th>Date</th>
+                           <th>Type</th>
+                           <th>Reference</th>
+                           <th>Product</th>
+                           <th>Quantity</th>
+                           <th>Cost/Unit</th>
+                           <th>Total Cost</th>
+                           <th>Actions</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       <?php foreach ($batches as $batch): ?>
+                           <tr>
+                               <td><?php echo date('M d, Y', strtotime($batch->manufacture_date ?: $batch->created_at)); ?></td>
+                               <td>
+                                   <?php if ($batch->type === 'stock_in'): ?>
+                                       <span style="color: #059669; font-weight: 500;">▲ Stock In</span>
+                                   <?php else: ?>
+                                       <span style="color: #dc2626; font-weight: 500;">▼ Stock Out</span>
+                                   <?php endif; ?>
+                               </td>
+                               <td><?php echo esc_html($batch->reference_number ?: $batch->batch_code); ?></td>
+                               <td><?php echo esc_html($batch->product_name); ?></td>
+                               <td><?php echo esc_html($batch->quantity); ?></td>
+                               <td>₱<?php echo number_format($batch->cost_per_unit, 2); ?></td>
+                               <td>₱<?php echo number_format($batch->total_cost, 2); ?></td>
+                               <td>
+                                   <button class="bntm-btn-small view-batch-details" data-details='<?php echo esc_attr(json_encode([
+                                       'type' => $batch->type,
+                                       'reference' => $batch->reference_number ?: $batch->batch_code,
+                                       'product' => $batch->product_name,
+                                       'quantity' => $batch->quantity,
+                                       'cost_per_unit' => $batch->cost_per_unit,
+                                       'total_cost' => $batch->total_cost,
+                                       'notes' => $batch->notes,
+                                       'date' => $batch->manufacture_date ?: $batch->created_at,
+                                       'created_at' => $batch->created_at
+                                   ])); ?>'>View</button>
+                                   <button class="bntm-btn-small bntm-btn-danger in-delete-batch" data-id="<?php echo $batch->id; ?>" data-type="<?php echo $batch->type; ?>" data-qty="<?php echo $batch->quantity; ?>">Delete</button>
+                               </td>
+                           </tr>
+                       <?php endforeach; ?>
+                   </tbody>
+               </table>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -2350,7 +2363,8 @@ function in_import_tab($business_id) {
             <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
         </div>
         
-        <table class="bntm-table">
+        <div class="bntm-table-wrapper">
+          <table class="bntm-table">
             <thead>
                 <tr>
                     <th width="40"></th>
@@ -2395,7 +2409,8 @@ function in_import_tab($business_id) {
                 </tr>
                 <?php endforeach; endif; ?>
             </tbody>
-        </table>
+        </table>   
+        </div>
     </div>
     
     <script>

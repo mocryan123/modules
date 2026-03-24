@@ -3,7 +3,7 @@
  * Module Name: CRM
  * Module Slug: crm
  * Description: Customer Relationship Management with sales pipeline, quotations, and automated billing
- * Version: 1.0.0
+ * Version: 1.0.2
  * Author: Your Name
  * Icon: 👥
  */
@@ -798,6 +798,8 @@ function crm_customers_tab($business_id) {
         <?php if (empty($customers)): ?>
             <p>No customers or leads yet.</p>
         <?php else: ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table" id="customers-table">
                 <thead>
                     <tr>
@@ -840,6 +842,7 @@ function crm_customers_tab($business_id) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php endif; ?>
     </div>
 

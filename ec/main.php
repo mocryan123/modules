@@ -3,7 +3,7 @@
  * Module Name: E-Commerce
  * Module Slug: ec
  * Description: Complete e-commerce solution with products, orders, and checkout
- * Version: 1.0.1
+ * Version: 1.0.3
  * Author: Your Name
  * Icon: 🛒
  */
@@ -1325,6 +1325,7 @@ $orders = $wpdb->get_results("
             <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
         </div>
         
+        <div class="bntm-table-wrapper">
         <table class="bntm-table">
             <thead>
                 <tr>
@@ -1363,6 +1364,7 @@ $orders = $wpdb->get_results("
                 <?php endforeach; endif; ?>
             </tbody>
         </table>
+        </div>
     </div>
     
     <script>
@@ -1593,21 +1595,15 @@ function ec_products_tab($business_id) {
     $ec_table = $wpdb->prefix . 'ec_products';
     $in_table = $wpdb->prefix . 'in_products';
     
-    // Get all e-commerce products
-    $products = $wpdb->get_results("SELECT * FROM {$ec_table}");
-
-    // Get available imports (SKU-based, not already imported)
-    $available_imports = $wpdb->get_results($wpdb->prepare("
-        SELECT inprod.*
-        FROM {$in_table} AS inprod
-        LEFT JOIN {$ec_table} AS ecprod 
-            ON inprod.sku = ecprod.sku AND inprod.sku IS NOT NULL AND inprod.sku != ''
-        WHERE ecprod.sku IS NULL
-          AND inprod.inventory_type = %s
-          AND inprod.sku IS NOT NULL 
-          AND inprod.sku != ''
-        ORDER BY inprod.name ASC
-    ", 'Product'));
+    // Get all e-commerce products with real-time stock from IN module
+    $products = $wpdb->get_results("
+        SELECT ec.*, 
+               COALESCE(inprod.stock_quantity, ec.stock) as current_stock,
+               inprod.image AS in_image
+        FROM {$ec_table} AS ec
+        LEFT JOIN {$in_table} AS inprod ON ec.rand_id = inprod.rand_id
+        ORDER BY ec.name ASC
+    ");
     
     $nonce = wp_create_nonce('ec_products_nonce');
 
@@ -1618,18 +1614,25 @@ function ec_products_tab($business_id) {
     </script>
     
     <div class="bntm-form-section">
-        <h3>E-Commerce Products (<?php echo count($products); ?>)</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>E-Commerce Products (<?php echo count($products); ?>)</h3>
+            <button id="add-new-product-btn" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>">
+                + Add New Product
+            </button>
+        </div>
         
         <?php if (empty($products)): ?>
-            <p>No products yet. Import products from your inventory to get started.</p>
+            <p>No products yet. Click "Add New Product" to get started.</p>
         <?php else: ?>
+        
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
                         <th>Name</th>
                         <th>SKU</th>
                         <th>Price</th>
-                        <th>Stock</th>
+                        <th>Stock (Live from Inventory)</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
@@ -1640,7 +1643,10 @@ function ec_products_tab($business_id) {
                             <td><?php echo esc_html($product->name); ?></td>
                             <td><?php echo esc_html($product->sku ?: '-'); ?></td>
                             <td><?php echo ec_format_price($product->price); ?></td>
-                            <td><?php echo esc_html($product->stock); ?></td>
+                            <td>
+                                <span class="stock-display"><?php echo esc_html($product->current_stock); ?></span>
+                                <small style="color: #6b7280; display: block; font-size: 11px;">Auto-synced</small>
+                            </td>
                             <td>
                                 <label class="ec-toggle">
                                     <input type="checkbox" 
@@ -1653,11 +1659,11 @@ function ec_products_tab($business_id) {
                                 <span class="status-text"><?php echo ucfirst($product->status); ?></span>
                             </td>
                             <td>
-                                <button class="bntm-btn-small ec-sync-product" 
+                                <button class="bntm-btn-small ec-edit-product" 
                                         data-id="<?php echo $product->id; ?>"
                                         data-nonce="<?php echo $nonce; ?>"
-                                        title="Sync with inventory">
-                                    Sync
+                                        title="Edit product">
+                                    Edit
                                 </button>
                                 <button class="bntm-btn-small bntm-btn-danger ec-delete-product" 
                                         data-id="<?php echo $product->id; ?>"
@@ -1671,105 +1677,179 @@ function ec_products_tab($business_id) {
                     <?php endforeach; ?>
                 </tbody>
             </table>
+         </div>
         <?php endif; ?>
     </div>
 
-    <?php if (!empty($available_imports)): ?>
-    <div class="bntm-form-section" style="background: #eff6ff; border-left: 4px solid #3b82f6;">
-        <h3>Import Products from Inventory</h3>
-        <p>Select products to import (<?php echo count($available_imports); ?> available)</p>
-        
-        <div style="margin: 15px 0;">
-            <label style="cursor: pointer;">
-                <input type="checkbox" id="select-all-imports"> 
-                <strong>Select All</strong>
-            </label>
-        </div>
-        
-        <div class="import-products-list">
-            <?php foreach ($available_imports as $product): ?>
-                <label class="import-product-item">
-                    <input type="checkbox" name="import_products[]" value="<?php echo $product->id; ?>">
-                    <div class="import-product-info">
-                        <strong><?php echo esc_html($product->name); ?></strong>
-                        <?php if ($product->sku): ?>
-                            <span class="product-sku">SKU: <?php echo esc_html($product->sku); ?></span>
-                        <?php endif; ?>
-                        <div class="product-details">
-                            <span class="product-price">₱<?php echo number_format($product->selling_price, 2); ?></span>
-                            <span class="product-stock"><?php echo $product->stock_quantity; ?> in stock</span>
+    <!-- Add/Edit Product Modal -->
+    <div id="product-modal" class="product-modal" style="display: none;">
+        <div class="product-modal-content">
+            <div class="product-modal-header">
+                <h2 id="modal-title">Add New Product</h2>
+                <button class="product-modal-close">&times;</button>
+            </div>
+            <div class="product-modal-body">
+                <form id="product-form" class="bntm-form">
+                    <input type="hidden" id="product-id" name="product_id" value="">
+                    
+                    <div class="bntm-form-group">
+                        <label>Product Name *</label>
+                        <input type="text" id="product-name" name="name" required>
+                    </div>
+                    
+                    <div class="bntm-form-row">
+                        <div class="bntm-form-group">
+                            <label>SKU *</label>
+                            <input type="text" id="product-sku" name="sku" required>
+                            <small>Unique product identifier</small>
+                        </div>
+                        
+                        <div class="bntm-form-group">
+                            <label>Price *</label>
+                            <input type="number" id="product-price" name="price" step="0.01" min="0" required>
                         </div>
                     </div>
-                </label>
-            <?php endforeach; ?>
+                    
+                    <div class="bntm-form-row">
+                        <div class="bntm-form-group">
+                            <label>Initial Stock *</label>
+                            <input type="number" id="product-stock" name="stock" min="0" required>
+                            <small>Starting inventory quantity</small>
+                        </div>
+                        
+                        <div class="bntm-form-group">
+                            <label>Cost per Unit</label>
+                            <input type="number" id="product-cost" name="cost" step="0.01" min="0" value="0">
+                            <small>For inventory tracking</small>
+                        </div>
+                    </div>
+                    
+                    <div class="bntm-form-group">
+                        <label>Description</label>
+                        <textarea id="product-description" name="description" rows="3"></textarea>
+                    </div>
+                    
+                    <!-- Product Image Upload -->
+                     <div class="bntm-form-group">
+                         <label>Product Image</label>
+                         
+                         <div class="ec-product-image-preview" id="product-image-preview" style="display: none;">
+                             <img src="" alt="Product Preview">
+                             <button type="button" class="bntm-btn-remove-logo" id="remove-product-image">✕</button>
+                         </div>
+                         
+                         <div class="bntm-upload-area" id="product-upload-area">
+                             <input type="file" id="product-image-upload" accept="image/*" style="display: none;">
+                             <button type="button" class="bntm-btn bntm-btn-secondary" id="product-upload-btn">
+                                 Choose Image
+                             </button>
+                             <p style="margin: 10px 0; color: #6b7280;">or drag and drop here</p>
+                             <small>Recommended: JPG or PNG, max 2MB</small>
+                         </div>
+                         
+                         <input type="hidden" id="product-image" name="image" value="">
+                     </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                        <button type="submit" class="bntm-btn-primary" style="flex: 1;">
+                            <span id="submit-text">Save Product</span>
+                        </button>
+                        <button type="button" class="bntm-btn-secondary cancel-modal" style="flex: 1;">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+                <div id="product-form-message"></div>
+            </div>
         </div>
-        
-        <button id="ec-import-selected" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>" style="margin-top: 15px;">
-            Import Selected Products
-        </button>
-        <div id="import-message"></div>
     </div>
-    <?php endif; ?>
     
     <style>
-    .import-products-list {
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 6px;
-        padding: 10px;
-        background: white;
-    }
-    .import-product-item {
+    .product-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 10000;
         display: flex;
         align-items: center;
-        padding: 12px;
-        border-bottom: 1px solid #f3f4f6;
-        cursor: pointer;
-        transition: background 0.2s;
+        justify-content: center;
+        padding: 20px;
     }
-    .import-product-item:hover {
-        background: #f9fafb;
-    }
-    .import-product-item:last-child {
-        border-bottom: none;
-    }
-    .import-product-item input[type="checkbox"] {
-        margin-right: 12px;
-        width: 18px;
-        height: 18px;
-        cursor: pointer;
-    }
-    .import-product-info {
-        flex: 1;
-    }
-    .import-product-info strong {
-        display: block;
-        color: #1f2937;
-        margin-bottom: 4px;
-    }
-    .product-sku {
-        display: inline-block;
-        font-size: 12px;
-        color: #6b7280;
-        background: #f3f4f6;
-        padding: 2px 8px;
-        border-radius: 4px;
-        margin-left: 8px;
-    }
-    .product-details {
+    
+    .product-modal-content {
+        background: white;
+        border-radius: 12px;
+        max-width: 600px;
+        width: 100%;
+        max-height: 90vh;
+        overflow: hidden;
         display: flex;
-        gap: 15px;
-        margin-top: 6px;
+        flex-direction: column;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    }
+    
+    .product-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 20px 30px;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .product-modal-header h2 {
+        margin: 0;
+        font-size: 24px;
+        color: #1f2937;
+    }
+    
+    .product-modal-close {
+        background: none;
+        border: none;
+        font-size: 32px;
+        color: #6b7280;
+        cursor: pointer;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+    
+    .product-modal-close:hover {
+        background: #f3f4f6;
+        color: #1f2937;
+    }
+    
+    .product-modal-body {
+        padding: 30px;
+        overflow-y: auto;
+    }
+    
+    .bntm-btn-secondary {
+        background: #6b7280;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 6px;
+        cursor: pointer;
         font-size: 14px;
     }
-    .product-price {
-        color: #059669;
+    
+    .bntm-btn-secondary:hover {
+        background: #4b5563;
+    }
+    
+    .stock-display {
         font-weight: 600;
+        color: #059669;
     }
-    .product-stock {
-        color: #6b7280;
-    }
+    
     .ec-toggle {
         position: relative;
         display: inline-block;
@@ -1822,54 +1902,207 @@ function ec_products_tab($business_id) {
     
     <script>
     (function() {
-        // Select all checkbox
-        const selectAllBtn = document.getElementById('select-all-imports');
-        if (selectAllBtn) {
-            selectAllBtn.addEventListener('change', function() {
-                document.querySelectorAll('input[name="import_products[]"]').forEach(cb => {
-                    cb.checked = this.checked;
-                });
-            });
-        }
+        const modal = document.getElementById('product-modal');
+        const modalTitle = document.getElementById('modal-title');
+        const productForm = document.getElementById('product-form');
+        const message = document.getElementById('product-form-message');
         
-        // Import selected products
-        const importBtn = document.getElementById('ec-import-selected');
-        if (importBtn) {
-            importBtn.addEventListener('click', function() {
-                const selected = Array.from(document.querySelectorAll('input[name="import_products[]"]:checked'))
-                    .map(cb => cb.value);
-                
-                if (selected.length === 0) {
-                    alert('Please select at least one product to import');
-                    return;
+        // Open modal for new product
+        document.getElementById('add-new-product-btn').addEventListener('click', function() {
+            modalTitle.textContent = 'Add New Product';
+            productForm.reset();
+            document.getElementById('product-id').value = '';
+            document.getElementById('submit-text').textContent = 'Save Product';
+            modal.style.display = 'flex';
+        });
+        
+       // Open modal for edit
+      document.querySelectorAll('.ec-edit-product').forEach(btn => {
+          btn.addEventListener('click', function() {
+              const productId = this.dataset.id;
+              
+              modalTitle.textContent = 'Edit Product';
+              document.getElementById('submit-text').textContent = 'Update Product';
+              
+              // Fetch product data
+              const formData = new FormData();
+              formData.append('action', 'ec_get_product_data');
+              formData.append('product_id', productId);
+              formData.append('nonce', this.dataset.nonce);
+              
+              fetch(ajaxurl, {method: 'POST', body: formData})
+              .then(r => r.json())
+              .then(json => {
+                  if (json.success) {
+                      const p = json.data;
+                      document.getElementById('product-id').value = p.id;
+                      document.getElementById('product-name').value = p.name;
+                      document.getElementById('product-sku').value = p.sku;
+                      document.getElementById('product-price').value = p.selling_price || p.price;
+                      document.getElementById('product-stock').value = p.stock_quantity || p.stock;
+                      document.getElementById('product-cost').value = p.cost_price || p.cost || 0;
+                      document.getElementById('product-description').value = p.description || '';
+                      document.getElementById('product-image').value = p.image || '';
+                      
+                      // Handle image preview
+                      const imagePreview = document.getElementById('product-image-preview');
+                      const uploadArea = document.getElementById('product-upload-area');
+                      
+                      if (p.image) {
+                          imagePreview.querySelector('img').src = p.image;
+                          imagePreview.style.display = 'inline-block';
+                          uploadArea.style.display = 'none';
+                      } else {
+                          imagePreview.style.display = 'none';
+                          uploadArea.style.display = 'block';
+                      }
+                      
+                      modal.style.display = 'flex';
+                  } else {
+                      alert('Failed to load product data');
+                  }
+              })
+              .catch(err => {
+                  alert('Error loading product: ' + err.message);
+              });
+          });
+      });
+        
+        // Close modal
+        document.querySelectorAll('.product-modal-close, .cancel-modal').forEach(btn => {
+            btn.addEventListener('click', () => {
+                modal.style.display = 'none';
+            });
+        });
+        
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+        
+        // Submit form
+        productForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('action', 'ec_save_product');
+            formData.append('nonce', '<?php echo $nonce; ?>');
+            
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const submitText = document.getElementById('submit-text');
+            const originalText = submitText.textContent;
+            
+            submitBtn.disabled = true;
+            submitText.textContent = 'Saving...';
+            
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                message.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+                if (json.success) {
+                    setTimeout(() => location.reload(), 1500);
+                } else {
+                    submitBtn.disabled = false;
+                    submitText.textContent = originalText;
                 }
-                
-                if (!confirm(`Import ${selected.length} product(s)?`)) return;
-                
-                this.disabled = true;
-                this.textContent = 'Importing...';
-                
-                const formData = new FormData();
-                formData.append('action', 'ec_import_selected_products');
-                formData.append('product_ids', JSON.stringify(selected));
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    const msg = document.getElementById('import-message');
-                    msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                    if (json.success) {
-                        setTimeout(() => location.reload(), 1500);
-                    } else {
-                        this.disabled = false;
-                        this.textContent = 'Import Selected Products';
-                    }
-                });
             });
-        }
-        
-        // Toggle product status
+        });
+        // ========== IMAGE UPLOAD SETUP ==========
+         function setupImageUpload() {
+             const uploadArea = document.getElementById('product-upload-area');
+             const uploadBtn = document.getElementById('product-upload-btn');
+             const fileInput = document.getElementById('product-image-upload');
+             const imagePreview = document.getElementById('product-image-preview');
+             const removeBtn = document.getElementById('remove-product-image');
+             const hiddenInput = document.getElementById('product-image');
+             
+             if (!uploadBtn) return;
+             
+             uploadBtn.addEventListener('click', () => fileInput.click());
+             
+             fileInput.addEventListener('change', function() {
+                 if (this.files && this.files[0]) {
+                     uploadProductImage(this.files[0]);
+                 }
+             });
+             
+             uploadArea.addEventListener('dragover', (e) => {
+                 e.preventDefault();
+                 uploadArea.classList.add('dragover');
+             });
+             
+             uploadArea.addEventListener('dragleave', () => {
+                 uploadArea.classList.remove('dragover');
+             });
+             
+             uploadArea.addEventListener('drop', (e) => {
+                 e.preventDefault();
+                 uploadArea.classList.remove('dragover');
+                 
+                 if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                     uploadProductImage(e.dataTransfer.files[0]);
+                 }
+             });
+             
+             removeBtn.addEventListener('click', function() {
+                 imagePreview.style.display = 'none';
+                 uploadArea.style.display = 'block';
+                 hiddenInput.value = '';
+             });
+         }
+         
+         function uploadProductImage(file) {
+             if (!file.type.match('image.*')) {
+                 alert('Please select an image file');
+                 return;
+             }
+             
+             if (file.size > 2 * 1024 * 1024) {
+                 alert('File size must be less than 2MB');
+                 return;
+             }
+             
+             const formData = new FormData();
+             formData.append('action', 'ec_upload_product_image');
+             formData.append('image', file);
+             formData.append('_ajax_nonce', '<?php echo wp_create_nonce('ec_products_nonce'); ?>');
+             
+             const uploadBtn = document.getElementById('product-upload-btn');
+             const uploadArea = document.getElementById('product-upload-area');
+             const imagePreview = document.getElementById('product-image-preview');
+             const hiddenInput = document.getElementById('product-image');
+             
+             uploadBtn.disabled = true;
+             uploadBtn.textContent = 'Uploading...';
+             
+             fetch(ajaxurl, {
+                 method: 'POST',
+                 body: formData
+             })
+             .then(r => r.json())
+             .then(json => {
+                 uploadBtn.disabled = false;
+                 uploadBtn.textContent = 'Choose Image';
+                 
+                 if (json.success) {
+                     imagePreview.querySelector('img').src = json.data.url;
+                     imagePreview.style.display = 'inline-block';
+                     uploadArea.style.display = 'none';
+                     hiddenInput.value = json.data.url;
+                 } else {
+                     alert('Upload failed: ' + json.data);
+                 }
+             })
+             .catch(err => {
+                 uploadBtn.disabled = false;
+                 uploadBtn.textContent = 'Choose Image';
+                 alert('Upload error: ' + err.message);
+             });
+         }
+         
+         setupImageUpload();
+        // Toggle status
         document.querySelectorAll('.ec-toggle-status').forEach(toggle => {
             toggle.addEventListener('change', function() {
                 const formData = new FormData();
@@ -1884,6 +2117,13 @@ function ec_products_tab($business_id) {
                     if (json.success) {
                         const statusText = this.closest('td').querySelector('.status-text');
                         statusText.textContent = this.checked ? 'Active' : 'Inactive';
+                        
+                        const row = this.closest('tr');
+                        if (this.checked) {
+                            row.classList.remove('product-hidden');
+                        } else {
+                            row.classList.add('product-hidden');
+                        }
                     } else {
                         alert(json.data.message);
                         this.checked = !this.checked;
@@ -1892,32 +2132,10 @@ function ec_products_tab($business_id) {
             });
         });
         
-        // Sync product
-        document.querySelectorAll('.ec-sync-product').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if (!confirm('Sync this product with inventory? Product will be deleted if not found.')) return;
-                
-                this.disabled = true;
-                this.textContent = '⏳';
-                
-                const formData = new FormData();
-                formData.append('action', 'ec_sync_product');
-                formData.append('product_id', this.dataset.id);
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    alert(json.data.message);
-                    location.reload();
-                });
-            });
-        });
-        
         // Delete product
         document.querySelectorAll('.ec-delete-product').forEach(btn => {
             btn.addEventListener('click', function() {
-                if (!confirm('Are you sure you want to delete this product? This action cannot be undone.')) return;
+                if (!confirm('Are you sure you want to delete this product? This will also remove it from inventory.')) return;
                 
                 this.disabled = true;
                 this.textContent = '⏳';
@@ -1946,8 +2164,7 @@ function ec_products_tab($business_id) {
 }
 
 /* ---------- AJAX HANDLERS ---------- */
-
-function bntm_ajax_ec_import_selected_products() {
+function bntm_ajax_ec_get_product_data() {
     check_ajax_referer('ec_products_nonce', 'nonce');
     
     if (!is_user_logged_in()) {
@@ -1957,67 +2174,238 @@ function bntm_ajax_ec_import_selected_products() {
     global $wpdb;
     $ec_table = $wpdb->prefix . 'ec_products';
     $in_table = $wpdb->prefix . 'in_products';
+    $product_id = intval($_POST['product_id']);
     
-    $product_ids = json_decode(stripslashes($_POST['product_ids']), true);
-    
-    if (empty($product_ids) || !is_array($product_ids)) {
-        wp_send_json_error(['message' => 'No products selected']);
-    }
-    
-    $placeholders = implode(',', array_fill(0, count($product_ids), '%d'));
-    
-    $products = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM {$in_table} WHERE id IN ($placeholders)",
-        ...$product_ids
+    // Query with correct field names from IN table
+    $product = $wpdb->get_row($wpdb->prepare(
+        "SELECT ec.*, 
+                inprod.image, 
+                inprod.cost_per_unit,
+                inprod.selling_price as in_selling_price,
+                inprod.stock_quantity,
+                inprod.description as in_description
+         FROM $ec_table ec
+         LEFT JOIN $in_table inprod ON ec.rand_id = inprod.rand_id
+         WHERE ec.id = %d",
+        $product_id
     ));
     
-    if (empty($products)) {
-        wp_send_json_error(['message' => 'No products found']);
+    if (!$product) {
+        wp_send_json_error(['message' => 'Product not found']);
     }
     
-    $imported = 0;
-    $skipped = 0;
+    // Use IN data if available, fallback to EC data
+    $response = [
+        'id' => $product->id,
+        'name' => $product->name,
+        'sku' => $product->sku,
+        'price' => $product->price,
+        'selling_price' => $product->in_selling_price ?: $product->price,
+        'stock' => $product->stock,
+        'stock_quantity' => $product->stock_quantity ?: $product->stock,
+        'cost' => $product->cost_per_unit ?: 0,
+        'description' => $product->in_description ?: $product->description,
+        'image' => $product->image ?: ''
+    ];
     
-    foreach ($products as $product) {
-        // Skip products without SKU
-        if (empty($product->sku)) {
-            $skipped++;
-            continue;
-        }
-        
-        // Check if already exists by SKU
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$ec_table} WHERE sku = %s",
-            $product->sku
-        ));
-        
-        if ($exists) {
-            $skipped++;
-            continue;
-        }
-        
-        $result = $wpdb->insert($ec_table, [
-            'rand_id' => $product->rand_id,
-            'business_id' => 0,
-            'name' => $product->name,
-            'sku' => $product->sku,
-            'description' => $product->description,
-            'price' => $product->selling_price,
-            'stock' => $product->stock_quantity,
-            'status' => 'active'
-        ], ['%s', '%d', '%s', '%s', '%s', '%f', '%d', '%s']);
-        
-        if ($result) $imported++;
-    }
-    
-    $message = "Successfully imported {$imported} product(s)!";
-    if ($skipped > 0) {
-        $message .= " ({$skipped} skipped - already exists or missing SKU)";
-    }
-    
-    wp_send_json_success(['message' => $message]);
+    wp_send_json_success($response);
 }
-add_action('wp_ajax_ec_import_selected_products', 'bntm_ajax_ec_import_selected_products');
+add_action('wp_ajax_ec_get_product_data', 'bntm_ajax_ec_get_product_data');
+
+function bntm_ajax_ec_save_product() {
+    check_ajax_referer('ec_products_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $ec_table = $wpdb->prefix . 'ec_products';
+    $in_table = $wpdb->prefix . 'in_products';
+    $batches_table = $wpdb->prefix . 'in_batches';
+    
+    $product_id = intval($_POST['product_id'] ?? 0);
+    $name = sanitize_text_field($_POST['name']);
+    $sku = sanitize_text_field($_POST['sku']);
+    $price = floatval($_POST['price']);
+    $stock = intval($_POST['stock']);
+    $cost = floatval($_POST['cost'] ?? 0);
+    $description = sanitize_textarea_field($_POST['description'] ?? '');
+    $image = esc_url_raw($_POST['image'] ?? '');
+    
+    // Generate SKU if empty
+    if (empty($sku)) {
+        $sku = 'EC-' . strtoupper(substr(md5(uniqid()), 0, 8));
+    }
+    
+    if (empty($name)) {
+        wp_send_json_error(['message' => 'Product name is required']);
+    }
+    
+    $wpdb->show_errors();
+    $wpdb->query('START TRANSACTION');
+    
+    try {
+        if ($product_id > 0) {
+            // UPDATE existing product
+            $existing = $wpdb->get_row($wpdb->prepare(
+                "SELECT * FROM $ec_table WHERE id = %d",
+                $product_id
+            ));
+            
+            if (!$existing) {
+                throw new Exception('Product not found');
+            }
+            
+            // Check if SKU changed and conflicts
+            if ($sku !== $existing->sku) {
+                $sku_exists = $wpdb->get_var($wpdb->prepare(
+                    "SELECT id FROM $ec_table WHERE sku = %s AND id != %d",
+                    $sku, $product_id
+                ));
+                
+                if ($sku_exists) {
+                    throw new Exception('SKU already exists');
+                }
+            }
+            
+            // Update EC product
+            $ec_updated = $wpdb->update(
+                $ec_table,
+                [
+                    'name' => $name,
+                    'sku' => $sku,
+                    'price' => $price,
+                    'description' => $description
+                ],
+                ['id' => $product_id],
+                ['%s', '%s', '%f', '%s'],
+                ['%d']
+            );
+            
+            if ($ec_updated === false) {
+                throw new Exception('Failed to update EC product. Error: ' . $wpdb->last_error);
+            }
+            
+            // Update IN product - using correct field names
+            $in_updated = $wpdb->update(
+                $in_table,
+                [
+                    'name' => $name,
+                    'sku' => $sku,
+                    'selling_price' => $price,
+                    'cost_per_unit' => $cost,
+                    'description' => $description,
+                    'image' => $image
+                ],
+                ['rand_id' => $existing->rand_id],
+                ['%s', '%s', '%f', '%f', '%s', '%s'],
+                ['%s']
+            );
+            
+            if ($in_updated === false) {
+                throw new Exception('Failed to update IN product. Error: ' . $wpdb->last_error);
+            }
+            
+            $message = 'Product updated successfully in both modules!';
+            
+        } else {
+            // CREATE new product
+            $sku_exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM $ec_table WHERE sku = %s",
+                $sku
+            ));
+            
+            if ($sku_exists) {
+                throw new Exception('SKU already exists');
+            }
+            
+            $rand_id = bntm_rand_id();
+            $business_id = get_current_user_id();
+            
+            // Insert into EC
+            $ec_inserted = $wpdb->insert($ec_table, [
+                'rand_id' => $rand_id,
+                'business_id' => $business_id,
+                'name' => $name,
+                'sku' => $sku,
+                'description' => $description,
+                'price' => $price,
+                'stock' => $stock,
+                'status' => 'active'
+            ], ['%s', '%d', '%s', '%s', '%s', '%f', '%d', '%s']);
+            
+            if (!$ec_inserted) {
+                throw new Exception('Failed to create EC product. Error: ' . $wpdb->last_error);
+            }
+            
+            $ec_id = $wpdb->insert_id;
+            
+            // Insert into IN - using exact field names from table schema
+            $in_inserted = $wpdb->insert($in_table, [
+                'rand_id' => $rand_id,
+                'business_id' => $business_id,
+                'name' => $name,
+                'sku' => $sku,
+                'barcode' => 'EC-' . $sku,
+                'inventory_type' => 'Product',
+                'cost_per_unit' => $cost,
+                'selling_price' => $price,
+                'stock_quantity' => $stock,
+                'reorder_level' => 5,
+                'description' => $description,
+                'image' => $image
+            ], ['%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s']);
+            
+            if (!$in_inserted) {
+                throw new Exception('Failed to create IN product. Error: ' . $wpdb->last_error);
+            }
+            
+            $in_id = $wpdb->insert_id;
+            
+            // Verify IN product was created
+            $verify = $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM $in_table WHERE id = %d",
+                $in_id
+            ));
+            
+            if (!$verify) {
+                throw new Exception('IN product verification failed');
+            }
+            
+            // Log initial stock batch if stock > 0
+            if ($stock > 0) {
+                $batch_inserted = $wpdb->insert($batches_table, [
+                    'rand_id' => bntm_rand_id(),
+                    'business_id' => $business_id,
+                    'product_id' => $in_id,
+                    'batch_code' => 'INITIAL-EC-' . $sku,
+                    'type' => 'stock_in',
+                    'quantity' => $stock,
+                    'cost_per_unit' => $cost,
+                    'total_cost' => $stock * $cost,
+                    'reference_number' => 'INITIAL',
+                    'notes' => 'Initial stock from E-Commerce product creation',
+                    'created_at' => current_time('mysql')
+                ], ['%s', '%d', '%d', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']);
+                
+                if (!$batch_inserted) {
+                    throw new Exception('Failed to create stock batch. Error: ' . $wpdb->last_error);
+                }
+            }
+            
+            $message = 'Product created successfully! (EC ID: ' . $ec_id . ', IN ID: ' . $in_id . ')';
+        }
+        
+        $wpdb->query('COMMIT');
+        wp_send_json_success(['message' => $message]);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
+        wp_send_json_error(['message' => $e->getMessage()]);
+    }
+}
+add_action('wp_ajax_ec_save_product', 'bntm_ajax_ec_save_product');
 
 function bntm_ajax_ec_toggle_product_status() {
     check_ajax_referer('ec_products_nonce', 'nonce');
@@ -2047,7 +2435,7 @@ function bntm_ajax_ec_toggle_product_status() {
 }
 add_action('wp_ajax_ec_toggle_product_status', 'bntm_ajax_ec_toggle_product_status');
 
-function bntm_ajax_ec_sync_product() {
+function bntm_ajax_ec_delete_product() {
     check_ajax_referer('ec_products_nonce', 'nonce');
     
     if (!is_user_logged_in()) {
@@ -2059,90 +2447,69 @@ function bntm_ajax_ec_sync_product() {
     $in_table = $wpdb->prefix . 'in_products';
     $product_id = intval($_POST['product_id']);
     
-    // Get EC product
-    $ec_product = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$ec_table} WHERE id = %d",
+    // Get product
+    $product = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $ec_table WHERE id = %d",
         $product_id
     ));
     
-    if (!$ec_product) {
+    if (!$product) {
         wp_send_json_error(['message' => 'Product not found']);
     }
     
-    // Check if product has SKU
-    if (empty($ec_product->sku)) {
-        wp_send_json_error(['message' => 'Product has no SKU. Cannot sync.']);
-    }
+    $wpdb->query('START TRANSACTION');
     
-    // Find product in inventory by SKU
-    $in_product = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$in_table} WHERE sku = %s",
-        $ec_product->sku
-    ));
-    
-    // If product not found in inventory, delete from EC
-    if (!$in_product) {
-        $deleted = $wpdb->delete(
+    try {
+        // Delete from IN module
+        $wpdb->delete(
+            $in_table,
+            ['rand_id' => $product->rand_id],
+            ['%s']
+        );
+        
+        // Delete from EC module
+        $wpdb->delete(
             $ec_table,
             ['id' => $product_id],
             ['%d']
         );
         
-        if ($deleted) {
-            wp_send_json_success(['message' => 'Product not found in inventory. Deleted from e-commerce.']);
-        } else {
-            wp_send_json_error(['message' => 'Failed to delete product']);
-        }
-        return;
-    }
-    
-    // Update product with inventory data
-    $result = $wpdb->update(
-        $ec_table,
-        [
-            'name' => $in_product->name,
-            'price' => $in_product->selling_price,
-            'stock' => $in_product->stock_quantity,
-            'description' => $in_product->description,
-            'rand_id' => $in_product->rand_id
-        ],
-        ['id' => $product_id],
-        ['%s', '%f', '%d', '%s', '%s'],
-        ['%d']
-    );
-    
-    if ($result !== false) {
-        wp_send_json_success(['message' => 'Product synced successfully!']);
-    } else {
-        wp_send_json_error(['message' => 'Failed to sync product']);
-    }
-}
-add_action('wp_ajax_ec_sync_product', 'bntm_ajax_ec_sync_product');
-
-function bntm_ajax_ec_delete_product() {
-    check_ajax_referer('ec_products_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $table = $wpdb->prefix . 'ec_products';
-    $product_id = intval($_POST['product_id']);
-    
-    $result = $wpdb->delete(
-        $table,
-        ['id' => $product_id],
-        ['%d']
-    );
-    
-    if ($result) {
-        wp_send_json_success(['message' => 'Product deleted successfully!']);
-    } else {
+        $wpdb->query('COMMIT');
+        wp_send_json_success(['message' => 'Product deleted from both E-Commerce and Inventory']);
+        
+    } catch (Exception $e) {
+        $wpdb->query('ROLLBACK');
         wp_send_json_error(['message' => 'Failed to delete product']);
     }
 }
 add_action('wp_ajax_ec_delete_product', 'bntm_ajax_ec_delete_product');
+
+function bntm_ajax_ec_upload_product_image() {
+    check_ajax_referer('ec_products_nonce', '_ajax_nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error('Unauthorized');
+    }
+
+    if (!isset($_FILES['image'])) {
+        wp_send_json_error('No file uploaded');
+    }
+
+    require_once(ABSPATH . 'wp-admin/includes/image.php');
+    require_once(ABSPATH . 'wp-admin/includes/file.php');
+    require_once(ABSPATH . 'wp-admin/includes/media.php');
+
+    $file = $_FILES['image'];
+    $upload = wp_handle_upload($file, ['test_form' => false]);
+
+    if (isset($upload['error'])) {
+        wp_send_json_error($upload['error']);
+    }
+
+    wp_send_json_success(['url' => $upload['url']]);
+}
+add_action('wp_ajax_ec_upload_product_image', 'bntm_ajax_ec_upload_product_image');
+
 function ec_settings_tab($business_id) {
     $shop_page = get_page_by_path('shop');
     $checkout_page = get_page_by_path('checkout');
@@ -2800,14 +3167,18 @@ function bntm_shortcode_ec_shop() {
     $table_in = $wpdb->prefix . 'in_products';
 
     $products = $wpdb->get_results("
-        SELECT ec.*, inprod.image AS in_image, inprod.description, inprod.sku
+        SELECT ec.*, 
+               COALESCE(inprod.stock_quantity, ec.stock) as stock,
+               inprod.image AS in_image, 
+               inprod.description, 
+               inprod.sku
         FROM {$table_ec} AS ec
         LEFT JOIN {$table_in} AS inprod 
             ON ec.rand_id = inprod.rand_id
-        WHERE ec.status = 'active' AND ec.stock > 0
+        WHERE ec.status = 'active' 
+          AND COALESCE(inprod.stock_quantity, ec.stock) > 0
         ORDER BY ec.name ASC
     ");
-
     $cart = isset($_SESSION['ec_cart']) ? $_SESSION['ec_cart'] : [];
     $cart_count = array_sum($cart);
 
@@ -3808,6 +4179,7 @@ function bntm_shortcode_ec_checkout() {
                 </button>
             </div>
             
+        <div class="bntm-table-wrapper">
             <table class="bntm-table">
                 <thead>
                     <tr>
@@ -3883,6 +4255,7 @@ function bntm_shortcode_ec_checkout() {
                     <?php endif; ?>
                 </tfoot>
             </table>
+            </div>
 
             <form id="ec-checkout-form" class="bntm-form" style="margin-top:30px;">
                 <h3>Customer Information</h3>
@@ -4260,7 +4633,6 @@ function bntm_shortcode_ec_checkout() {
     $content = ob_get_clean();
     return $content;
 }
-/* ---------- FIXED CHECKOUT AJAX (Proper Inventory Batch Logging with 0 Cost) ---------- */
 /* ---------- FIXED CHECKOUT AJAX (Proper Inventory Batch Logging with 0 Cost) ---------- */
 function bntm_ajax_ec_process_checkout() {
     check_ajax_referer('ec_checkout_nonce', 'nonce');
@@ -5654,6 +6026,8 @@ function ec_render_recent_orders($business_id, $limit = 10) {
     
     ob_start();
     ?>
+    
+   <div class="bntm-table-wrapper">
     <table class="bntm-table">
         <thead>
             <tr>
@@ -5684,6 +6058,7 @@ function ec_render_recent_orders($business_id, $limit = 10) {
             <?php endif; ?>
         </tbody>
     </table>
+    </div>
     
     <?php if ($total_pages > 1): ?>
         <div class="ec-pagination">
