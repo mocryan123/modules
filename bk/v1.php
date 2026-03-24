@@ -182,13 +182,11 @@ function bntm_shortcode_bk_dashboard() {
     }
     
     $is_admin_user = current_user_can('manage_options');
-    $current_role = function_exists('bntm_get_user_role') ? bntm_get_user_role(get_current_user_id()) : '';
-    $can_view_all_tabs = $is_admin_user || in_array($current_role, ['owner', 'manager'], true);
     
     $business_id = get_current_user_id();
     $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'overview';
     
-    if (!$can_view_all_tabs && !in_array($active_tab, ['calendar', 'bookings'], true)) {
+    if (!$is_admin_user && !in_array($active_tab, ['calendar', 'bookings'], true)) {
         $active_tab = 'calendar';
     }
     
@@ -217,101 +215,16 @@ function bntm_shortcode_bk_dashboard() {
         max-height: 90vh;
         overflow-y: auto;
     }
-    @media (max-width: 768px) {
-        .bntm-tabs {
-            display: flex;
-            flex-wrap: wrap;
-            gap: clamp(4px, 1.8vw, 8px);
-        }
-        .bntm-tab {
-            font-size: clamp(0.72rem, 2.6vw, 0.9rem);
-            padding: clamp(6px, 2vw, 10px) clamp(8px, 2.6vw, 12px);
-            line-height: 1.2;
-        }
-
-        /* Keep calendar matrix tables scrollable on mobile */
-        .bk-slots-table,
-        .bk-admin-slots-table {
-            display: block;
-            width: 100%;
-            overflow-x: auto;
-            white-space: nowrap;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        /* Convert standard dashboard tables to stacked flex cards */
-        .bntm-table {
-            display: block;
-            width: 100%;
-            border: 0;
-        }
-        .bntm-table thead {
-            display: none;
-        }
-        .bntm-table tbody {
-            display: block;
-            width: 100%;
-        }
-        .bntm-table tr {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-bottom: 12px;
-            padding: clamp(10px, 2.8vw, 14px);
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            background: #fff;
-        }
-        .bntm-table td,
-        .bntm-table th {
-            display: flex;
-            width: 100%;
-            align-items: center;
-            justify-content: space-between;
-            gap: clamp(8px, 2.2vw, 12px);
-            border: 0;
-            padding: 6px 0;
-            text-align: left;
-            white-space: normal;
-            flex-wrap: wrap;
-            font-size: clamp(0.78rem, 2.7vw, 0.95rem);
-            overflow-wrap: anywhere;
-        }
-        .bntm-table td::before {
-            content: attr(data-label);
-            font-weight: 700;
-            color: #374151;
-            flex: 0 0 clamp(92px, 42%, 150px);
-            max-width: clamp(92px, 42%, 150px);
-            font-size: clamp(0.72rem, 2.5vw, 0.88rem);
-        }
-        .bntm-table td > * {
-            min-width: 0;
-            max-width: 100%;
-        }
-        .bntm-table td select,
-        .bntm-table td input[type="text"],
-        .bntm-table td input[type="time"],
-        .bntm-table td input[type="email"],
-        .bntm-table td input[type="tel"] {
-            width: min(100%, clamp(140px, 52vw, 240px));
-            font-size: clamp(0.75rem, 2.5vw, 0.92rem);
-        }
-        .bntm-table td .bntm-btn-small {
-            font-size: clamp(0.72rem, 2.4vw, 0.86rem);
-            padding: clamp(5px, 1.8vw, 8px) clamp(8px, 2.8vw, 10px);
-        }
-    }
     </style>
     <div class="bntm-booking-container">
         <div class="bntm-tabs">
-            <?php if ($can_view_all_tabs): ?>
+            <?php if ($is_admin_user): ?>
             <a href="?tab=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
             <a href="?tab=services" class="bntm-tab <?php echo $active_tab === 'services' ? 'active' : ''; ?>">Services</a>
             <?php endif; ?>
             <a href="?tab=calendar" class="bntm-tab <?php echo $active_tab === 'calendar' ? 'active' : ''; ?>">Calendar</a>
             <a href="?tab=bookings" class="bntm-tab <?php echo $active_tab === 'bookings' ? 'active' : ''; ?>">All Bookings</a>
-            <?php if ($can_view_all_tabs): ?>
+            <?php if ($is_admin_user): ?>
             <a href="?tab=hours" class="bntm-tab <?php echo $active_tab === 'hours' ? 'active' : ''; ?>">Operating Hours</a>
              <?php if (bntm_is_module_enabled('fn') && bntm_is_module_visible('fn')): ?>
             <a href="?tab=import" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">Import to Finance</a>
@@ -338,25 +251,6 @@ function bntm_shortcode_bk_dashboard() {
             <?php endif; ?>
         </div>
     </div>
-    <script>
-    (function() {
-        if (window.innerWidth > 768) return;
-
-        document.querySelectorAll('.bntm-table').forEach(function(table) {
-            var headers = Array.from(table.querySelectorAll('thead th')).map(function(th) {
-                return (th.textContent || '').trim();
-            });
-
-            table.querySelectorAll('tbody tr').forEach(function(row) {
-                row.querySelectorAll('td').forEach(function(cell, index) {
-                    if (!cell.getAttribute('data-label')) {
-                        cell.setAttribute('data-label', headers[index] || 'Field');
-                    }
-                });
-            });
-        });
-    })();
-    </script>
     <?php
     
     $content = ob_get_clean();
@@ -412,88 +306,29 @@ function bk_overview_tab($business_id) {
     </div>
 
     <style>
-    :root {
-        --spacing-xs: clamp(0.25rem, 2vw, 0.5rem);
-        --spacing-sm: clamp(0.5rem, 3vw, 1rem);
-        --spacing-md: clamp(1rem, 4vw, 1.5rem);
-        --spacing-lg: clamp(1.5rem, 5vw, 2rem);
-        --spacing-xl: clamp(2rem, 6vw, 3rem);
-        --spacing-2xl: clamp(2.5rem, 8vw, 4rem);
-        --font-size-sm: clamp(0.75rem, 2vw, 1rem);
-        --font-size-md: clamp(1rem, 2.5vw, 1.25rem);
-        --font-size-lg: clamp(1.25rem, 3vw, 1.75rem);
-        --font-size-xl: clamp(1.75rem, 4vw, 2.5rem);
-        --font-size-2xl: clamp(2rem, 5vw, 3.5rem);
-    }
     .bntm-dashboard-stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(clamp(150px, 35vw, 250px), 1fr));
-        gap: var(--spacing-lg);
-        margin-bottom: var(--spacing-2xl);
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
     }
     .bntm-stat-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        padding: var(--spacing-lg) var(--spacing-md);
-        border-radius: 1rem;
+        background: #f9fafb;
+        padding: 20px;
+        border-radius: 8px;
         text-align: center;
-        min-height: clamp(140px, 25vw, 180px);
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        word-break: break-word;
-        overflow-wrap: break-word;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05), 
-                    0 10px 20px rgba(0, 0, 0, 0.08),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.5);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative;
-        overflow: hidden;
-    }
-    .bntm-stat-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 3px;
-        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-        opacity: 0;
-        transition: opacity 0.3s ease;
-    }
-    .bntm-stat-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 12px rgba(0, 0, 0, 0.08), 
-                    0 20px 40px rgba(0, 0, 0, 0.12),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-        border-color: #cbd5e1;
-    }
-    .bntm-stat-card:hover::before {
-        opacity: 1;
     }
     .bntm-stat-card h3 {
-        margin: 0 0 var(--spacing-md) 0;
-        font-size: var(--font-size-sm);
-        color: #64748b;
-        font-weight: 600;
-        line-height: 1.4;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
-        font-size: 0.75rem;
+        margin: 0 0 10px 0;
+        font-size: 14px;
+        color: #6b7280;
+        font-weight: 500;
     }
     .bntm-stat-number {
-        font-size: var(--font-size-lg);
-        font-weight: 800;
-        background: linear-gradient(135deg, #1f2937, #374151);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font-size: 32px;
+        font-weight: 700;
+        color: #1f2937;
         margin: 0;
-        line-height: 1.2;
-        word-break: break-word;
-        width: 100%;
-        letter-spacing: -0.02em;
     }
     </style>
     
@@ -1877,7 +1712,7 @@ function bntm_shortcode_bk_calendar() {
           }
           
           .bk-header-description {
-              font-size: var(--font-size-sm);
+              font-size: 14px;
           }
           
           .bk-header-logo {
@@ -7761,5 +7596,3 @@ function bntm_ajax_fn_revert_booking() {
     }
 }
 ?>
-
-

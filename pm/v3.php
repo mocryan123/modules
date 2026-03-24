@@ -296,14 +296,10 @@ add_action("wp_ajax_pm_update_task_status", "bntm_ajax_pm_update_task_status");
 add_action("wp_ajax_pm_delete_task", "bntm_ajax_pm_delete_task");
 add_action("wp_ajax_pm_reorder_tasks", "bntm_ajax_pm_reorder_tasks");
 add_action('wp_ajax_pm_import_tasks', 'bntm_ajax_pm_import_tasks');
-add_action('wp_ajax_pm_export_tasks', 'bntm_ajax_pm_export_tasks');
 add_action("wp_ajax_pm_create_milestone", "bntm_ajax_pm_create_milestone");
 add_action("wp_ajax_pm_update_milestone", "bntm_ajax_pm_update_milestone");
 add_action("wp_ajax_pm_delete_milestone", "bntm_ajax_pm_delete_milestone");
 add_action("wp_ajax_pm_reorder_milestones", "bntm_ajax_pm_reorder_milestones");
-add_action("wp_ajax_pm_export_to_google_calendar", "bntm_ajax_pm_export_to_google_calendar");
-add_action("wp_ajax_pm_save_google_calendar_settings", "bntm_ajax_pm_save_google_calendar_settings");
-add_action("wp_ajax_pm_get_google_calendar_auth_url", "bntm_ajax_pm_get_google_calendar_auth_url");
 add_action("wp_ajax_pm_add_team_member", "bntm_ajax_pm_add_team_member");
 add_action("wp_ajax_pm_remove_team_member", "bntm_ajax_pm_remove_team_member");
 add_action("wp_ajax_pm_add_time_log", "bntm_ajax_pm_add_time_log");
@@ -2298,6 +2294,23 @@ function pm_reports_tab( $business_id ) {
     $current_user = wp_get_current_user();
     $is_wp_admin  = current_user_can( 'manage_options' );
     $current_role = bntm_get_user_role( $current_user->ID );
+    $can_view_analytics = $is_wp_admin || in_array( $current_role, [ 'owner', 'manager' ] );
+    
+    // Restrict analytics view to manager and admin only
+    if (!$can_view_analytics) {
+        ob_start();
+        ?>
+        <div style="background: white; border-radius: 12px; padding: 60px 24px; text-align: center;">
+            <svg width="64" height="64" fill="none" stroke="#d1d5db" viewBox="0 0 24 24" style="margin: 0 auto 20px;">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+            <h3 style="margin: 0 0 8px 0; font-size: 20px; color: #374151;">Access Restricted</h3>
+            <p style="margin: 0; color: #6b7280; font-size: 15px;">Analytics and Reports are only available to Project Managers and Administrators. Contact your manager to request access.</p>
+        </div>
+        <?php
+        return ob_get_clean();
+    }
+    
     $can_view_all = $is_wp_admin || in_array( $current_role, [ 'owner', 'manager' ] );
 
     $date_from = isset( $_GET['date_from'] ) ? sanitize_text_field( $_GET['date_from'] ) : date( 'Y-m-01' );
@@ -3188,14 +3201,21 @@ function pm_logs_tab($business_id) {
     
     if (!$project) {
         return '<div class="bntm-notice bntm-notice-error">Project not found.</div>';
-    } // Get active subtab
+    }
+    
+    // Check if user has access to this project
+    $current_user = wp_get_current_user();
+    if (!pm_can_user_view_project($current_user->ID, $project_id)) {
+        return '<div class="bntm-notice bntm-notice-error">You do not have permission to access this project.</div>';
+    }
+    
+    // Get active subtab
     $subtab = isset($_GET["subtab"])
         ? sanitize_text_field($_GET["subtab"])
         : "overview";
         
         
         
-    $current_user = wp_get_current_user();
     $business_id = $current_user->ID;
     $is_wp_admin = current_user_can('manage_options');
     $current_role = bntm_get_user_role($current_user->ID);
@@ -3855,6 +3875,28 @@ function pm_logs_tab($business_id) {
     padding: 16px 24px 24px;
     border-top: 1px solid #e5e7eb;
     margin-top: 24px;
+}
+
+/* Styling for disabled form inputs */
+input[type="text"]:disabled,
+input[type="email"]:disabled,
+input[type="number"]:disabled,
+input[type="date"]:disabled,
+select:disabled,
+textarea:disabled {
+    background-color: #f3f4f6;
+    color: #6b7280;
+    cursor: not-allowed;
+    opacity: 0.7;
+    border-color: #d1d5db;
+}
+
+textarea:disabled {
+    resize: vertical;
+}
+
+select:disabled option {
+    color: #6b7280;
 }
 </style>
     <script>
@@ -4702,12 +4744,6 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                         </svg>
                         Add Milestone
                     </button>
-                    <button class="bntm-btn-secondary" onclick="pmExportTasks()">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 8l-4 4m0 0L8 8m4 4V3"/>
-                        </svg>
-                        Export Tasks
-                    </button>
                     <button class="bntm-btn-secondary" onclick="pmOpenImportModal()">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -4832,7 +4868,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
         <?php endif; ?>
     <!-- Task Modal -->
     <div id="pm-task-modal" class="bntm-modal" style="display: none;">
-        <div class="bntm-modal-content" style="max-width: 700px;">
+        <div class="bntm-modal-content" style="max-width: 850px; max-height: 95vh; overflow-y: auto;">
             <div class="bntm-modal-header">
                 <h3 id="pm-task-modal-title">Create New Task</h3>
                 <button class="bntm-modal-close" onclick="pmCloseTaskModal()">&times;</button>
@@ -4840,6 +4876,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
             <form id="pm-task-form" class="bntm-form">
                 <input type="hidden" name="task_id" id="pm-task-id">
                 <input type="hidden" name="project_id" value="<?php echo $project->id; ?>">
+                <input type="hidden" name="can_edit_task" id="pm-can-edit-task" value="1">
                 
                 <div class="bntm-form-group">
                     <label>Task Title *</label>
@@ -4847,13 +4884,14 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                 </div>
                 
                 <div class="bntm-form-group">
-                    <label>Description</label>
-                    <textarea name="description" id="pm-task-description" rows="4"></textarea>
+                    <label>Description <span id="pm-description-readonly-badge" style="display:none;color:#6b7280;font-weight:400;font-size:11px;">(View Only)</span></label>
+                    <textarea name="description" id="pm-task-description" rows="8" style="font-family: monospace; white-space: pre-wrap; resize: vertical;"></textarea>
+                    <small style="color:#6b7280;" id="pm-description-help-text">Full task description</small>
                 </div>
                 
                 <div class="bntm-form-row">
                     <div class="bntm-form-group">
-                        <label>Status</label>
+                        <label>Status <span id="pm-status-edit-access" style="color:#6b7280;font-weight:400;font-size:11px;"></span></label>
                         <select name="status" id="pm-task-status">
                             <?php if (!empty($custom_statuses)): ?>
                                 <?php foreach ($custom_statuses as $status): ?>
@@ -4869,7 +4907,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                             <?php endif; ?>
                         </select>
                     </div>
-                    <div class="bntm-form-group">
+                    <div class="bntm-form-group" id="pm-priority-group" style="display: none;">
                         <label>Priority</label>
                         <select name="priority" id="pm-task-priority">
                             <option value="low">Low</option>
@@ -4880,7 +4918,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                 </div>
                 
                 <div class="bntm-form-row">
-                    <div class="bntm-form-group">
+                    <div class="bntm-form-group" id="pm-assigned-group" style="display: none;">
                         <label>Assigned To</label>
                         <select name="assigned_to" id="pm-task-assigned">
                             <option value="">Unassigned</option>
@@ -4891,7 +4929,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="bntm-form-group">
+                    <div class="bntm-form-group" id="pm-milestone-group" style="display: none;">
                         <label>Milestone</label>
                         <select name="milestone_id" id="pm-task-milestone">
                             <option value="">No Milestone</option>
@@ -4905,17 +4943,17 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                 </div>
                 
                 <div class="bntm-form-row">
-                    <div class="bntm-form-group">
+                    <div class="bntm-form-group" id="pm-due-group" style="display: none;">
                         <label>Due Date</label>
                         <input type="date" name="due_date" id="pm-task-due">
                     </div>
-                    <div class="bntm-form-group">
+                    <div class="bntm-form-group" id="pm-estimated-group" style="display: none;">
                         <label>Estimated Hours</label>
                         <input type="number" name="estimated_hours" id="pm-task-estimated" step="0.1" min="0">
                     </div>
                 </div>
                 
-                <div class="bntm-form-group">
+                <div class="bntm-form-group" id="pm-tags-group" style="display: none;">
                     <label>Tags (comma separated)</label>
                     <input type="text" name="tags" id="pm-task-tags" placeholder="design, frontend, urgent">
                 </div>
@@ -4985,7 +5023,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                         </button>
                     </div>
                     <button type="button" class="bntm-btn-secondary" onclick="pmCloseTaskModal()">Cancel</button>
-                    <button type="submit" class="bntm-btn-primary">
+                    <button type="submit" class="bntm-btn-primary" id="pm-task-submit-btn">
                         <span id="pm-task-submit-text">Create Task</span>
                     </button>
                 </div>
@@ -4996,19 +5034,19 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
     <div id="pm-import-modal" class="bntm-modal" style="display: none;">
         <div class="bntm-modal-content" style="max-width: 800px;">
             <div class="bntm-modal-header">
-                <h3>Import Tasks from CSV</h3>
+                <h3>Import Tasks from JSON</h3>
                 <button class="bntm-modal-close" onclick="pmCloseImportModal()">&times;</button>
             </div>
             <div class="bntm-form">
                 <div class="bntm-form-group">
-                    <label>Upload CSV File</label>
-                    <input type="file" id="pm-import-file" accept=".csv,text/csv" onchange="pmLoadCsvFile(event)">
+                    <label>Upload JSON File</label>
+                    <input type="file" id="pm-import-file" accept=".json" onchange="pmLoadJsonFile(event)">
                     <small style="color: #6b7280; display: block; margin-top: 8px;">
-                        Expected CSV headers: title, description, status, priority, milestone, assigned_to, due_date, estimated_hours, tags
+                        Expected format: Array of tasks with fields: title, description, status, priority, milestone, assigned_to, due_date, estimated_hours, tags
                     </small>
                 </div>
                 
-                <div id="pm-import-preview" style="display: none; margin-top: 24px;">
+                <div id="pm-import-pReview" style="display: none; margin-top: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <h4 style="margin: 0;">Tasks to Import (<span id="pm-selected-count">0</span> selected)</h4>
                         <div style="display: flex; gap: 8px;">
@@ -5016,7 +5054,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                             <button type="button" class="bntm-btn-small bntm-btn-secondary" onclick="pmSelectAllTasks(false)">Deselect All</button>
                         </div>
                     </div>
-                    <div id="pm-tasks-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;">
+                    <div id="pm-tasks-pReview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;">
                     </div>
                 </div>
                 
@@ -5030,37 +5068,6 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
         </div>
     </div>
     
-    <!-- Google Calendar Settings Modal -->
-    <div id="pm-google-calendar-modal" class="bntm-modal" style="display: none;">
-        <div class="bntm-modal-content" style="max-width: 600px;">
-            <div class="bntm-modal-header">
-                <h3>Connect Google Calendar</h3>
-                <button class="bntm-modal-close" onclick="document.getElementById('pm-google-calendar-modal').style.display = 'none'">&times;</button>
-            </div>
-            <div class="bntm-form">
-                <div style="background: #eff6ff; border-left: 4px solid #0284c7; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
-                    <h4 style="margin: 0 0 12px 0; font-size: 16px; color: #0c4a6e;">Quick Setup</h4>
-                    <p style="margin: 0; color: #334155; font-size: 14px;">
-                        Click the button below to authorize access to your Google Calendar. You'll be redirected to Google to grant permission, then automatically returned here.
-                    </p>
-                </div>
-                
-                <div id="pm-google-auth-status" style="display: none; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
-                    <p id="pm-google-auth-message" style="margin: 0;"></p>
-                </div>
-                
-                <div class="bntm-modal-footer">
-                    <button type="button" class="bntm-btn-secondary" onclick="document.getElementById('pm-google-calendar-modal').style.display = 'none'">Close</button>
-                    <button type="button" class="bntm-btn-primary" onclick="pmStartGoogleCalendarAuth()">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.658 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
-                        </svg>
-                        Connect to Google Calendar
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- Milestone Modal -->
     <div id="pm-milestone-modal" class="bntm-modal" style="display: none;">
         <div class="bntm-modal-content" style="max-width: 500px;">
@@ -5658,6 +5665,25 @@ function pmOpenTaskModal() {
     document.getElementById('pm-export-google-calendar-btn').style.display = 'none';
     document.getElementById('pm-task-modal-title').textContent = 'Create New Task';
     document.getElementById('pm-task-submit-text').textContent = 'Create Task';
+    
+    // Enable all fields for creating new task (assumes you can create if you accessed this)
+    const form = document.getElementById('pm-task-form');
+    const inputs = form.querySelectorAll('input, select, textarea');
+    inputs.forEach(input => {
+        if (input.getAttribute('type') !== 'hidden') {
+            input.disabled = false;
+            input.readOnly = false;
+        }
+    });
+    
+    // Show all form groups for new task creation
+    document.getElementById('pm-priority-group').style.display = 'block';
+    document.getElementById('pm-assigned-group').style.display = 'block';
+    document.getElementById('pm-milestone-group').style.display = 'block';
+    document.getElementById('pm-due-group').style.display = 'block';
+    document.getElementById('pm-estimated-group').style.display = 'block';
+    document.getElementById('pm-tags-group').style.display = 'block';
+    document.getElementById('pm-description-readonly-badge').style.display = 'none';
 }
 
 function pmCloseTaskModal() {
@@ -5676,8 +5702,13 @@ function pmEditTask(taskId) {
     .then(json => {
         if (json.success) {
             const task = json.data.task;
+            const canEditTask = json.data.can_edit_task || false;
+            const canChangeStatus = json.data.can_change_status || false;
+            const userRole = json.data.user_role || 'staff';
+            
             document.getElementById('pm-task-modal').style.display = 'flex';
             document.getElementById('pm-task-id').value = taskId;
+            document.getElementById('pm-can-edit-task').value = canEditTask ? '1' : '0';
             document.getElementById('pm-task-title').value = task.title;
             document.getElementById('pm-task-description').value = task.description || '';
             document.getElementById('pm-task-status').value = task.status;
@@ -5687,8 +5718,11 @@ function pmEditTask(taskId) {
             document.getElementById('pm-task-due').value = task.due_date || '';
             document.getElementById('pm-task-estimated').value = task.estimated_hours || '';
             document.getElementById('pm-task-tags').value = task.tags || '';
-            document.getElementById('pm-task-modal-title').textContent = 'Edit Task';
+            document.getElementById('pm-task-modal-title').textContent = 'View Task';
             document.getElementById('pm-task-submit-text').textContent = 'Update Task';
+            
+            // Manage field visibility based on permissions
+            pmUpdateTaskFormPermissions(canEditTask, canChangeStatus, userRole);
             
             // Show Google Calendar export button
             document.getElementById('pm-export-google-calendar-btn').style.display = 'inline-flex';
@@ -5701,8 +5735,83 @@ function pmEditTask(taskId) {
             
             // Load comments
             pmLoadComments(task.id, json.data.comments);
+        } else {
+            alert(json.data.message || 'Failed to load task details');
         }
-    });
+    })
+    .catch(err => console.error('Error:', err));
+}
+
+function pmUpdateTaskFormPermissions(canEditTask, canChangeStatus, userRole) {
+    const description = document.getElementById('pm-task-description');
+    const titleField = document.getElementById('pm-task-title');
+    const statusField = document.getElementById('pm-task-status');
+    const priorityField = document.getElementById('pm-task-priority');
+    const assignedField = document.getElementById('pm-task-assigned');
+    const milestoneField = document.getElementById('pm-task-milestone');
+    const dueField = document.getElementById('pm-task-due');
+    const estimatedField = document.getElementById('pm-task-estimated');
+    const tagsField = document.getElementById('pm-task-tags');
+    const priorityGroup = document.getElementById('pm-priority-group');
+    const assignedGroup = document.getElementById('pm-assigned-group');
+    const milestoneGroup = document.getElementById('pm-milestone-group');
+    const dueGroup = document.getElementById('pm-due-group');
+    const estimatedGroup = document.getElementById('pm-estimated-group');
+    const tagsGroup = document.getElementById('pm-tags-group');
+    const submitBtn = document.getElementById('pm-task-submit-btn');
+    const descriptionBadge = document.getElementById('pm-description-readonly-badge');
+    const statusAccessText = document.getElementById('pm-status-edit-access');
+    
+    if (canEditTask) {
+        // Manager/Admin: Can edit everything
+        titleField.readOnly = false;
+        description.readOnly = false;
+        statusField.disabled = false;
+        priorityField.disabled = false;
+        assignedField.disabled = false;
+        milestoneField.disabled = false;
+        dueField.disabled = false;
+        estimatedField.disabled = false;
+        tagsField.readOnly = false;
+        descriptionBadge.style.display = 'none';
+        priorityGroup.style.display = 'block';
+        assignedGroup.style.display = 'block';
+        milestoneGroup.style.display = 'block';
+        dueGroup.style.display = 'block';
+        estimatedGroup.style.display = 'block';
+        tagsGroup.style.display = 'block';
+        submitBtn.style.display = 'inline-block';
+        statusAccessText.textContent = '(Editable)';
+    } else {
+        // Staff/Team Member: Can only view and change status
+        titleField.readOnly = true;
+        description.readOnly = true;
+        descriptionBadge.style.display = 'inline';
+        priorityGroup.style.display = 'none';
+        assignedGroup.style.display = 'none';
+        milestoneGroup.style.display = 'none';
+        dueGroup.style.display = 'none';
+        estimatedGroup.style.display = 'none';
+        tagsGroup.style.display = 'none';
+        
+        // Disable all hidden fields so they're not submitted
+        priorityField.disabled = true;
+        assignedField.disabled = true;
+        milestoneField.disabled = true;
+        dueField.disabled = true;
+        estimatedField.disabled = true;
+        tagsField.disabled = true;
+        
+        if (canChangeStatus) {
+            statusField.disabled = false;
+            submitBtn.style.display = 'inline-block';
+            statusAccessText.textContent = '(Editable - Status Only)';
+        } else {
+            statusField.disabled = true;
+            submitBtn.style.display = 'none';
+            statusAccessText.textContent = '(View Only)';
+        }
+    }
 }
 
 function pmDeleteTask(id, title) {
@@ -5727,12 +5836,21 @@ function pmDeleteTask(id, title) {
 document.getElementById('pm-task-form').addEventListener('submit', function(e) {
     e.preventDefault();
     
-    const formData = new FormData(this);
     const taskId = document.getElementById('pm-task-id').value;
+    const titleField = document.getElementById('pm-task-title');
+    
+    // Validate required fields based on whether editing or creating
+    if (!taskId && !titleField.value.trim()) {
+        alert('Task title is required');
+        return;
+    }
+    
+    const formData = new FormData(this);
     formData.append('action', taskId ? 'pm_update_task' : 'pm_create_task');
     formData.append('nonce', '<?php echo $nonce; ?>');
     
     const submitBtn = this.querySelector('button[type="submit"]');
+    const originalText = submitBtn.querySelector('span').textContent;
     submitBtn.disabled = true;
     submitBtn.querySelector('span').textContent = taskId ? 'Updating...' : 'Creating...';
     
@@ -5744,8 +5862,14 @@ document.getElementById('pm-task-form').addEventListener('submit', function(e) {
         } else {
             alert(json.data.message || 'Operation failed');
             submitBtn.disabled = false;
-            submitBtn.querySelector('span').textContent = taskId ? 'Update Task' : 'Create Task';
+            submitBtn.querySelector('span').textContent = originalText;
         }
+    })
+    .catch(err => {
+        console.error('Form submission error:', err);
+        alert('An error occurred while processing your request');
+        submitBtn.disabled = false;
+        submitBtn.querySelector('span').textContent = originalText;
     });
 });
 
@@ -5950,15 +6074,6 @@ document.getElementById('pm-milestone-form').addEventListener('submit', function
 // Import Tasks Functions
 let importedTasks = [];
 
-function pmExportTasks() {
-    const params = new URLSearchParams({
-        action: 'pm_export_tasks',
-        project_id: '<?php echo (int) $project->id; ?>',
-        nonce: '<?php echo esc_js($nonce); ?>'
-    });
-    window.location.href = `${ajaxurl}?${params.toString()}`;
-}
-
 function pmOpenImportModal() {
     document.getElementById('pm-import-modal').style.display = 'flex';
     document.getElementById('pm-import-file').value = '';
@@ -5971,83 +6086,17 @@ function pmCloseImportModal() {
     document.getElementById('pm-import-modal').style.display = 'none';
 }
 
-function pmNormalizeCsvHeader(header) {
-    return String(header || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '_');
-}
-
-function pmParseCsv(csvText) {
-    const rows = [];
-    let current = '';
-    let row = [];
-    let inQuotes = false;
-
-    for (let i = 0; i < csvText.length; i++) {
-        const char = csvText[i];
-        const next = csvText[i + 1];
-
-        if (char === '"') {
-            if (inQuotes && next === '"') {
-                current += '"';
-                i++;
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (char === ',' && !inQuotes) {
-            row.push(current);
-            current = '';
-        } else if ((char === '\n' || char === '\r') && !inQuotes) {
-            if (char === '\r' && next === '\n') {
-                i++;
-            }
-            row.push(current);
-            if (row.some(cell => String(cell).trim() !== '')) {
-                rows.push(row);
-            }
-            row = [];
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-
-    row.push(current);
-    if (row.some(cell => String(cell).trim() !== '')) {
-        rows.push(row);
-    }
-
-    if (rows.length === 0) {
-        return [];
-    }
-
-    const headers = rows[0].map(pmNormalizeCsvHeader);
-    const tasks = [];
-
-    for (let r = 1; r < rows.length; r++) {
-        const values = rows[r];
-        const task = {};
-        headers.forEach((h, idx) => {
-            task[h] = (values[idx] || '').trim();
-        });
-        tasks.push(task);
-    }
-
-    return tasks;
-}
-
-function pmLoadCsvFile(event) {
+function pmLoadJsonFile(event) {
     const file = event.target.files[0];
     if (!file) return;
     
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
-            const tasks = pmParseCsv(e.target.result || '');
-
-            if (!Array.isArray(tasks) || tasks.length === 0) {
-                alert('Invalid CSV format or no task rows found.');
+            const tasks = JSON.parse(e.target.result);
+            
+            if (!Array.isArray(tasks)) {
+                alert('Invalid JSON format. Expected an array of tasks.');
                 return;
             }
             
@@ -6063,7 +6112,7 @@ function pmLoadCsvFile(event) {
             pmUpdateSelectedCount();
             
         } catch (error) {
-            alert('Error parsing CSV file: ' + error.message);
+            alert('Error parsing JSON file: ' + error.message);
         }
     };
     reader.readAsText(file);
@@ -6098,10 +6147,10 @@ function pmRenderTasksPreview() {
                             ${priority.charAt(0).toUpperCase() + priority.slice(1)} Priority
                         </span>
                         ${task.status ? `<span>Status: ${task.status}</span>` : ''}
-                        ${task.milestone ? `<span>Milestone: ${task.milestone}</span>` : ''}
-                        ${task.assigned_to ? `<span>Assigned: ${task.assigned_to}</span>` : ''}
-                        ${task.due_date ? `<span>Due: ${task.due_date}</span>` : ''}
-                        ${task.estimated_hours ? `<span>Hours: ${task.estimated_hours}h</span>` : ''}
+                        ${task.milestone ? `<span>📍 ${task.milestone}</span>` : ''}
+                        ${task.assigned_to ? `<span>👤 ${task.assigned_to}</span>` : ''}
+                        ${task.due_date ? `<span>📅 ${task.due_date}</span>` : ''}
+                        ${task.estimated_hours ? `<span>⏱️ ${task.estimated_hours}h</span>` : ''}
                     </div>
                 </label>
             </div>
@@ -6367,124 +6416,34 @@ function pmAddComment() {
     });
 }
 
-// Google Calendar Export
+// Google Calendar Export - Simple redirect
 function pmExportToGoogleCalendar() {
-    const taskId = document.getElementById('pm-task-id').value;
+    const title = document.getElementById('pm-task-title').value || 'Task';
+    const description = document.getElementById('pm-task-description').value || '';
+    const dueDate = document.getElementById('pm-task-due').value;
     
-    if (!taskId) {
-        alert('Please save the task first');
-        return;
+    // Format due date for Google Calendar (YYYYMMDD)
+    let dateStr = '';
+    let endDateStr = '';
+    if (dueDate) {
+        dateStr = dueDate.replace(/-/g, '');
+        endDateStr = dateStr; // Same day event
+    } else {
+        // Use today if no due date
+        const today = new Date();
+        dateStr = today.toISOString().split('T')[0].replace(/-/g, '');
+        endDateStr = dateStr;
     }
     
-    const btn = document.getElementById('pm-export-google-calendar-btn');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Exporting...';
+    // Build Google Calendar event URL
+    const baseUrl = 'https://calendar.google.com/calendar/u/0/r/eventedit';
+    const params = new URLSearchParams();
+    params.append('text', title);
+    params.append('dates', dateStr + '/' + endDateStr);
+    params.append('details', description);
     
-    const formData = new FormData();
-    formData.append('action', 'pm_export_to_google_calendar');
-    formData.append('task_id', taskId);
-    formData.append('nonce', '<?php echo $nonce; ?>');
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        
-        if (json.success) {
-            alert('✓ Task exported to Google Calendar successfully!');
-        } else {
-            if (json.data.auth_required) {
-                if (confirm('Google Calendar not connected. Would you like to connect now?')) {
-                    pmOpenGoogleCalendarSettings();
-                }
-            } else {
-                alert('Error: ' + (json.data.message || 'Failed to export'));
-            }
-        }
-    })
-    .catch(err => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        alert('Error: ' + err.message);
-    });
-}
-
-function pmOpenGoogleCalendarSettings() {
-    document.getElementById('pm-google-calendar-modal').style.display = 'flex';
-}
-
-function pmStartGoogleCalendarAuth() {
-    // Save empty client_id first to initialize settings, then request auth URL
-    const formData = new FormData();
-    formData.append('action', 'pm_get_google_calendar_auth_url');
-    formData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-    
-    const btn = event.target;
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;"><circle cx="12" cy="12" r="10"/></svg> Connecting...';
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success && json.data.auth_url) {
-            // Redirect to Google OAuth
-            window.location.href = json.data.auth_url;
-        } else {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            alert('Error: ' + (json.data.message || 'Failed to get auth URL'));
-        }
-    })
-    .catch(err => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        alert('Error connecting to Google: ' + err.message);
-    });
-}
-
-function pmConnectGoogleCalendar() {
-    const clientId = document.getElementById('pm-google-client-id').value.trim();
-    
-    if (!clientId) {
-        alert('Please enter your Google OAuth Client ID');
-        return;
-    }
-    
-    // Save Client ID first
-    const formData = new FormData();
-    formData.append('action', 'pm_save_google_calendar_settings');
-    formData.append('client_id', clientId);
-    formData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success) {
-            // Now get the auth URL
-            const authFormData = new FormData();
-            authFormData.append('action', 'pm_get_google_calendar_auth_url');
-            authFormData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-            
-            return fetch(ajaxurl, {method: 'POST', body: authFormData}).then(r => r.json());
-        } else {
-            alert('Failed to save Client ID');
-            throw new Error('Save failed');
-        }
-    })
-    .then(json => {
-        if (json.success) {
-            window.location.href = json.data.auth_url;
-        } else {
-            alert('Error: ' + (json.data.message || 'Failed to get auth URL'));
-        }
-    })
-    .catch(err => {
-        console.error(err);
-        alert('Error connecting Google Calendar');
-    });
+    const calendarUrl = baseUrl + '?' + params.toString();
+    window.open(calendarUrl, '_blank');
 }
 
 function pmDeleteComment(commentId, taskId) {
@@ -8526,35 +8485,60 @@ function bntm_ajax_pm_update_task() {
     
     // Get existing task
     $task = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$tasks_table} WHERE id = %d ",
-        $task_id, $current_user->ID
+        "SELECT * FROM {$tasks_table} WHERE id = %d",
+        $task_id
     ));
     
     if (!$task) {
         wp_send_json_error(['message' => 'Task not found']);
     }
     
-    $data = [
-        'title' => sanitize_text_field($_POST['title']),
-        'description' => sanitize_textarea_field($_POST['description'] ?? ''),
-        'status' => sanitize_text_field($_POST['status'] ?? 'To Do'),
-        'priority' => sanitize_text_field($_POST['priority'] ?? 'medium'),
-        'assigned_to' => intval($_POST['assigned_to'] ?? 0) ?: null,
-        'milestone_id' => intval($_POST['milestone_id'] ?? 0) ?: null,
-        'due_date' => sanitize_text_field($_POST['due_date'] ?? '') ?: null,
-        'estimated_hours' => floatval($_POST['estimated_hours'] ?? 0),
-        'tags' => sanitize_text_field($_POST['tags'] ?? ''),
-    ];
+    // Check if user can view the task
+    if (!pm_can_user_view_task($current_user->ID, $task_id)) {
+        wp_send_json_error(['message' => 'You do not have permission to access this task']);
+    }
+    
+    $can_edit_full = pm_can_user_edit_task($current_user->ID, $task_id);
+    $can_change_status = pm_can_user_change_task_status($current_user->ID, $task_id);
+    
+    if (!$can_edit_full && !$can_change_status) {
+        wp_send_json_error(['message' => 'You do not have permission to update this task']);
+    }
+    
+    // Build update data based on permissions
+    $data = [];
+    
+    if ($can_edit_full) {
+        // Managers and admins can edit everything
+        $data = [
+            'title' => sanitize_text_field($_POST['title']),
+            'description' => sanitize_textarea_field($_POST['description'] ?? ''),
+            'status' => sanitize_text_field($_POST['status'] ?? 'To Do'),
+            'priority' => sanitize_text_field($_POST['priority'] ?? 'medium'),
+            'assigned_to' => intval($_POST['assigned_to'] ?? 0) ?: null,
+            'milestone_id' => intval($_POST['milestone_id'] ?? 0) ?: null,
+            'due_date' => sanitize_text_field($_POST['due_date'] ?? '') ?: null,
+            'estimated_hours' => floatval($_POST['estimated_hours'] ?? 0),
+            'tags' => sanitize_text_field($_POST['tags'] ?? ''),
+        ];
+    } elseif ($can_change_status) {
+        // Staff can only change status
+        $data = [
+            'status' => sanitize_text_field($_POST['status'] ?? 'To Do'),
+        ];
+    }
     
     // Mark as completed if status changed to completed
-    if ($data['status'] === 'completed' && $task->status !== 'completed') {
+    if (isset($data['status']) && $data['status'] === 'completed' && $task->status !== 'completed') {
         $data['completed_date'] = current_time('mysql');
     }
     
     $result = $wpdb->update($tasks_table, $data, ['id' => $task_id]);
     
     if ($result !== false) {
-        pm_log_activity($task->project_id, $task_id, $current_user->ID, 'updated_task', 'Task updated: ' . $data['title']);
+        $action = $can_edit_full ? 'updated_task' : 'status_changed';
+        $details = $can_edit_full ? 'Task updated: ' . $data['title'] : 'Status changed to: ' . ($data['status'] ?? 'N/A');
+        pm_log_activity($task->project_id, $task_id, $current_user->ID, $action, $details);
         wp_send_json_success(['message' => 'Task updated successfully']);
     } else {
         wp_send_json_error(['message' => 'Failed to update task']);
@@ -8584,6 +8568,11 @@ function bntm_ajax_pm_update_task_status() {
     
     if (!$task) {
         wp_send_json_error(['message' => 'Task not found']);
+    }
+    
+    // Check if user can change status
+    if (!pm_can_user_change_task_status($current_user->ID, $task_id)) {
+        wp_send_json_error(['message' => 'You do not have permission to change task status']);
     }
     
     $data = ['status' => $status];
@@ -8694,6 +8683,7 @@ function bntm_ajax_pm_get_task_details() {
     
     global $wpdb;
     $task_id = intval($_POST['task_id']);
+    $current_user = wp_get_current_user();
     
     // Get task
     $task = $wpdb->get_row($wpdb->prepare(
@@ -8703,6 +8693,11 @@ function bntm_ajax_pm_get_task_details() {
     
     if (!$task) {
         wp_send_json_error(['message' => 'Task not found']);
+    }
+    
+    // Check if user can view this task
+    if (!pm_can_user_view_task($current_user->ID, $task_id)) {
+        wp_send_json_error(['message' => 'You do not have permission to view this task']);
     }
     
     // Get time logs with user names
@@ -8725,77 +8720,22 @@ function bntm_ajax_pm_get_task_details() {
         $task_id
     ));
     
+    // Check permissions
+    $can_edit_task = pm_can_user_edit_task($current_user->ID, $task_id);
+    $can_change_status = pm_can_user_change_task_status($current_user->ID, $task_id);
+    $user_role = bntm_get_user_role($current_user->ID);
+    
     wp_send_json_success([
         'task' => $task,
         'time_logs' => $time_logs,
-        'comments' => $comments
+        'comments' => $comments,
+        'can_edit_task' => $can_edit_task,
+        'can_change_status' => $can_change_status,
+        'user_role' => $user_role
     ]);
 }
 /**
- * Export Tasks as CSV
- */
-function bntm_ajax_pm_export_tasks() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
-
-    if (!is_user_logged_in()) {
-        wp_die('Unauthorized', 403);
-    }
-
-    global $wpdb;
-    $project_id = intval($_GET['project_id'] ?? 0);
-
-    if ($project_id <= 0) {
-        wp_die('Invalid project ID', 400);
-    }
-
-    $tasks = $wpdb->get_results($wpdb->prepare(
-        "SELECT 
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            m.name as milestone,
-            u.display_name as assigned_to,
-            t.due_date,
-            t.estimated_hours,
-            t.tags
-         FROM {$wpdb->prefix}pm_tasks t
-         LEFT JOIN {$wpdb->prefix}pm_milestones m ON t.milestone_id = m.id
-         LEFT JOIN {$wpdb->users} u ON t.assigned_to = u.ID
-         WHERE t.project_id = %d
-         ORDER BY t.sort_order ASC, t.created_at DESC",
-        $project_id
-    ), ARRAY_A);
-
-    $filename = 'project-' . $project_id . '-tasks-' . date('Y-m-d') . '.csv';
-
-    nocache_headers();
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    $output = fopen('php://output', 'w');
-    // UTF-8 BOM for Excel compatibility.
-    fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
-
-    fputcsv($output, ['title', 'description', 'status', 'priority', 'milestone', 'assigned_to', 'due_date', 'estimated_hours', 'tags']);
-    foreach ($tasks as $task) {
-        fputcsv($output, [
-            $task['title'] ?? '',
-            $task['description'] ?? '',
-            $task['status'] ?? '',
-            $task['priority'] ?? '',
-            $task['milestone'] ?? '',
-            $task['assigned_to'] ?? '',
-            $task['due_date'] ?? '',
-            $task['estimated_hours'] ?? '',
-            $task['tags'] ?? ''
-        ]);
-    }
-    fclose($output);
-    exit;
-}
-
-/**
- * Import Tasks (CSV parsed in frontend, posted as JSON payload)
+ * Import Tasks from JSON
  */
 function bntm_ajax_pm_import_tasks() {
     check_ajax_referer('pm_project_detail_nonce', 'nonce');
@@ -8810,14 +8750,11 @@ function bntm_ajax_pm_import_tasks() {
     $team_table = $wpdb->prefix . 'pm_team_members';
     $current_user = wp_get_current_user();
     
-    $project_id = intval($_POST['project_id'] ?? 0);
-    $tasks_json = wp_unslash($_POST['tasks'] ?? '');
-    $decoded = json_decode($tasks_json, true);
-    $tasks = is_array($decoded) && isset($decoded['tasks']) && is_array($decoded['tasks'])
-        ? $decoded['tasks']
-        : $decoded;
-
-    if ($project_id <= 0 || !is_array($tasks)) {
+    $project_id = intval($_POST['project_id']);
+    $tasks_json = stripslashes($_POST['tasks']);
+    $tasks = json_decode($tasks_json, true);
+    
+    if (!is_array($tasks)) {
         wp_send_json_error(['message' => 'Invalid tasks data']);
     }
     
@@ -8840,10 +8777,6 @@ function bntm_ajax_pm_import_tasks() {
     $created_milestones = [];
     
     foreach ($tasks as $task) {
-        if (!is_array($task)) {
-            continue;
-        }
-
         $milestone_id = null;
         
         // Check if milestone exists or create new one
@@ -8910,19 +8843,6 @@ function bntm_ajax_pm_import_tasks() {
             }
         }
         
-        $priority = strtolower(sanitize_text_field($task['priority'] ?? 'medium'));
-        if (!in_array($priority, ['low', 'medium', 'high'], true)) {
-            $priority = 'medium';
-        }
-
-        $due_date = null;
-        if (!empty($task['due_date'])) {
-            $raw_due_date = sanitize_text_field($task['due_date']);
-            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw_due_date)) {
-                $due_date = $raw_due_date;
-            }
-        }
-
         $data = [
             'rand_id' => bntm_rand_id(),
             'business_id' => $current_user->ID,
@@ -8930,10 +8850,10 @@ function bntm_ajax_pm_import_tasks() {
             'title' => sanitize_text_field($task['title'] ?? 'Untitled Task'),
             'description' => sanitize_textarea_field($task['description'] ?? ''),
             'status' => sanitize_text_field($task['status'] ?? 'To Do'),
-            'priority' => $priority,
+            'priority' => sanitize_text_field($task['priority'] ?? 'medium'),
             'assigned_to' => $assigned_to,
             'milestone_id' => $milestone_id,
-            'due_date' => $due_date,
+            'due_date' => !empty($task['due_date']) ? sanitize_text_field($task['due_date']) : null,
             'estimated_hours' => floatval($task['estimated_hours'] ?? 0),
             'tags' => sanitize_text_field($task['tags'] ?? ''),
         ];
@@ -9205,6 +9125,12 @@ function bntm_ajax_pm_add_time_log() {
     $current_user = wp_get_current_user();
     
     $task_id = intval($_POST['task_id']);
+    
+    // Check if user can log time on this task
+    if (!pm_can_user_log_time($current_user->ID, $task_id)) {
+        wp_send_json_error(['message' => 'You do not have permission to log time on this task']);
+    }
+    
     $hours = floatval($_POST['hours']);
     $log_date = sanitize_text_field($_POST['log_date']);
     $notes = sanitize_textarea_field($_POST['notes'] ?? '');
@@ -9321,6 +9247,12 @@ function bntm_ajax_pm_add_comment() {
     $current_user = wp_get_current_user();
     
     $task_id = intval($_POST['task_id']);
+    
+    // Check if user can comment on this task
+    if (!pm_can_user_comment_on_task($current_user->ID, $task_id)) {
+        wp_send_json_error(['message' => 'You do not have permission to comment on this task']);
+    }
+    
     $comment = sanitize_textarea_field($_POST['comment']);
     
     if (empty($comment)) {
@@ -9821,6 +9753,171 @@ function pm_get_action_color($action) {
     return $colors[$action] ?? '#6b7280';
 }
 
+/**
+ * Check if user can view a specific project
+ */
+function pm_can_user_view_project($user_id, $project_id) {
+    global $wpdb;
+    $is_wp_admin = user_can($user_id, 'manage_options');
+    $user_role = bntm_get_user_role($user_id);
+    
+    // Admin, owner, manager can view all projects
+    if ($is_wp_admin || in_array($user_role, ['owner', 'manager'])) {
+        return true;
+    }
+    
+    // Staff and team members can only view projects they're assigned to
+    $team_table = $wpdb->prefix . 'pm_team_members';
+    $count = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$team_table} WHERE user_id = %d AND project_id = %d",
+        $user_id,
+        $project_id
+    ));
+    
+    return $count > 0;
+}
+
+/**
+ * Get user's role in a specific project
+ */
+function pm_get_user_project_role($user_id, $project_id) {
+    global $wpdb;
+    $team_table = $wpdb->prefix . 'pm_team_members';
+    
+    $role = $wpdb->get_var($wpdb->prepare(
+        "SELECT role FROM {$team_table} WHERE user_id = %d AND project_id = %d",
+        $user_id,
+        $project_id
+    ));
+    
+    return $role;
+}
+
+/**
+ * Check if user can edit task (description and date)
+ * Only manager and admin
+ */
+function pm_can_user_edit_task($user_id, $task_id) {
+    global $wpdb;
+    $is_wp_admin = user_can($user_id, 'manage_options');
+    $user_role = bntm_get_user_role($user_id);
+    
+    // Only admin and manager can edit descriptions and dates
+    if ($is_wp_admin || in_array($user_role, ['owner', 'manager'])) {
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * Check if user can change task status
+ * Assigned user or manager/admin
+ */
+function pm_can_user_change_task_status($user_id, $task_id) {
+    global $wpdb;
+    $is_wp_admin = user_can($user_id, 'manage_options');
+    $user_role = bntm_get_user_role($user_id);
+    
+    // Manager and admin can always change status
+    if ($is_wp_admin || in_array($user_role, ['owner', 'manager'])) {
+        return true;
+    }
+    
+    // Check if user is assigned to the task
+    $tasks_table = $wpdb->prefix . 'pm_tasks';
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT assigned_to FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+    
+    return $task && $task->assigned_to == $user_id;
+}
+
+/**
+ * Check if user can view task details
+ */
+function pm_can_user_view_task($user_id, $task_id) {
+    global $wpdb;
+    $tasks_table = $wpdb->prefix . 'pm_tasks';
+    
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT project_id FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+    
+    if (!$task) {
+        return false;
+    }
+    
+    // Can view if can view the project
+    return pm_can_user_view_project($user_id, $task->project_id);
+}
+
+/**
+ * Check if user can add comments to task
+ * Assigned user or team member of the project
+ */
+function pm_can_user_comment_on_task($user_id, $task_id) {
+    global $wpdb;
+    $tasks_table = $wpdb->prefix . 'pm_tasks';
+    $team_table = $wpdb->prefix . 'pm_team_members';
+    $is_wp_admin = user_can($user_id, 'manage_options');
+    $user_role = bntm_get_user_role($user_id);
+    
+    // Admin and manager can always comment
+    if ($is_wp_admin || in_array($user_role, ['owner', 'manager'])) {
+        return true;
+    }
+    
+    // Get task and check if user is assigned or in project team
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT project_id, assigned_to FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+    
+    if (!$task) {
+        return false;
+    }
+    
+    // User can comment if assigned to task or in project team
+    if ($task->assigned_to == $user_id) {
+        return true;
+    }
+    
+    $in_team = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$team_table} WHERE user_id = %d AND project_id = %d",
+        $user_id,
+        $task->project_id
+    ));
+    
+    return $in_team > 0;
+}
+
+/**
+ * Check if user can log time on task
+ * Assigned user or manager/admin
+ */
+function pm_can_user_log_time($user_id, $task_id) {
+    global $wpdb;
+    $is_wp_admin = user_can($user_id, 'manage_options');
+    $user_role = bntm_get_user_role($user_id);
+    
+    // Manager and admin can always log time
+    if ($is_wp_admin || in_array($user_role, ['owner', 'manager'])) {
+        return true;
+    }
+    
+    // Check if user is assigned to the task
+    $tasks_table = $wpdb->prefix . 'pm_tasks';
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT assigned_to FROM {$tasks_table} WHERE id = %d",
+        $task_id
+    ));
+    
+    return $task && $task->assigned_to == $user_id;
+}
+
 /* ---------- CRON JOBS FOR NOTIFICATIONS ---------- */
 function pm_setup_cron_jobs() {
     if (!wp_next_scheduled('pm_daily_task_reminders')) {
@@ -9862,7 +9959,6 @@ function pm_export_project_report($project_id) {
     global $wpdb;
     $projects_table = $wpdb->prefix . 'pm_projects';
     $tasks_table = $wpdb->prefix . 'pm_tasks';
-    $milestones_table = $wpdb->prefix . 'pm_milestones';
     
     $project = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM $projects_table WHERE id = %d",
@@ -9870,10 +9966,7 @@ function pm_export_project_report($project_id) {
     ));
     
     $tasks = $wpdb->get_results($wpdb->prepare(
-        "SELECT t.*, m.name AS milestone_name
-         FROM $tasks_table t
-         LEFT JOIN $milestones_table m ON t.milestone_id = m.id
-         WHERE t.project_id = %d",
+        "SELECT * FROM $tasks_table WHERE project_id = %d",
         $project_id
     ));
     
@@ -9891,13 +9984,12 @@ function pm_export_project_report($project_id) {
     fputcsv($output, []);
     
     // Tasks
-    fputcsv($output, ['Task ID', 'Title', 'Milestone', 'Status', 'Priority', 'Due Date', 'Estimated Hours', 'Actual Hours']);
+    fputcsv($output, ['Task ID', 'Title', 'Status', 'Priority', 'Due Date', 'Estimated Hours', 'Actual Hours']);
     
     foreach ($tasks as $task) {
         fputcsv($output, [
             $task->id,
             $task->title,
-            $task->milestone_name ?: 'No Milestone',
             $task->status,
             $task->priority,
             $task->due_date,
@@ -10313,175 +10405,3 @@ function pm_mark_notifications_seen_ajax() {
     wp_send_json_success(['message' => 'Notifications marked as seen']);
 }
 
-/* ---------- GOOGLE CALENDAR INTEGRATION ---------- */
-
-/**
- * Export Task to Google Calendar
- */
-function bntm_ajax_pm_export_to_google_calendar() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $current_user = wp_get_current_user();
-    $task_id = intval($_POST['task_id']);
-    
-    // Get task details
-    $task = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$wpdb->prefix}pm_tasks WHERE id = %d",
-        $task_id
-    ));
-    
-    if (!$task) {
-        wp_send_json_error(['message' => 'Task not found']);
-    }
-    
-    // Get Google Calendar API credentials from user meta
-    $access_token = get_user_meta($current_user->ID, 'pm_google_calendar_access_token', true);
-    
-    if (!$access_token) {
-        wp_send_json_error([
-            'message' => 'Google Calendar not configured. Please connect your Google account.',
-            'auth_required' => true
-        ]);
-        return;
-    }
-    
-    // Prepare event data
-    $event_data = [
-        'summary' => $task->title,
-        'description' => $task->description ?: '',
-        'start' => [
-            'date' => $task->due_date ?: date('Y-m-d')
-        ],
-        'end' => [
-            'date' => $task->due_date ?: date('Y-m-d')
-        ]
-    ];
-    
-    // Add time details if due_date exists
-    if ($task->due_date) {
-        $event_data['start'] = [
-            'dateTime' => $task->due_date . 'T09:00:00',
-            'timeZone' => 'UTC'
-        ];
-        $event_data['end'] = [
-            'dateTime' => $task->due_date . 'T10:00:00',
-            'timeZone' => 'UTC'
-        ];
-    }
-    
-    // Call Google Calendar API
-    $response = pm_create_google_calendar_event($access_token, $event_data);
-    
-    if (is_wp_error($response)) {
-        wp_send_json_error(['message' => 'Failed to export to Google Calendar: ' . $response->get_error_message()]);
-    } else {
-        // Update task with Google Calendar event ID
-        $wpdb->update(
-            $wpdb->prefix . 'pm_tasks',
-            ['google_calendar_event_id' => $response['id']],
-            ['id' => $task_id]
-        );
-        
-        wp_send_json_success([
-            'message' => 'Task exported to Google Calendar successfully!',
-            'event_id' => $response['id']
-        ]);
-    }
-}
-
-/**
- * Create Google Calendar Event
- */
-function pm_create_google_calendar_event($access_token, $event_data) {
-    $url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
-    
-    $response = wp_remote_post($url, [
-        'headers' => [
-            'Authorization' => 'Bearer ' . $access_token,
-            'Content-Type' => 'application/json'
-        ],
-        'body' => wp_json_encode($event_data),
-        'timeout' => 30
-    ]);
-    
-    if (is_wp_error($response)) {
-        return $response;
-    }
-    
-    $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-    if (wp_remote_retrieve_response_code($response) !== 200) {
-        return new WP_Error(
-            'google_calendar_error',
-            isset($body['error']['message']) ? $body['error']['message'] : 'Unknown error'
-        );
-    }
-    
-    return $body;
-}
-
-/**
- * Save Google Calendar Settings
- */
-function bntm_ajax_pm_save_google_calendar_settings() {
-    check_ajax_referer('pm_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    $current_user = wp_get_current_user();
-    $client_id = sanitize_text_field($_POST['client_id']);
-    $access_token = isset($_POST['access_token']) ? sanitize_text_field($_POST['access_token']) : null;
-    
-    if ($client_id) {
-        // Save Client ID as a WordPress option
-        update_option('pm_google_calendar_client_id', $client_id);
-    }
-    
-    if ($access_token) {
-        // Save Access Token in user meta
-        update_user_meta($current_user->ID, 'pm_google_calendar_access_token', $access_token);
-        update_user_meta($current_user->ID, 'pm_google_calendar_connected', true);
-    }
-    
-    wp_send_json_success(['message' => 'Google Calendar settings saved successfully!']);
-}
-
-/**
- * Get Google Calendar Auth URL
- */
-function bntm_ajax_pm_get_google_calendar_auth_url() {
-    check_ajax_referer('pm_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    // Use WP option for Google Calendar API credentials
-    $client_id = get_option('pm_google_calendar_client_id');
-    $redirect_uri = admin_url('admin-ajax.php?action=pm_google_calendar_callback');
-    
-    if (!$client_id) {
-        wp_send_json_error([
-            'message' => 'Google Calendar API not configured. Please add your credentials in settings.'
-        ]);
-        return;
-    }
-    
-    $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
-        'client_id' => $client_id,
-        'redirect_uri' => $redirect_uri,
-        'response_type' => 'code',
-        'scope' => 'https://www.googleapis.com/auth/calendar',
-        'access_type' => 'offline',
-        'prompt' => 'consent'
-    ]);
-    
-    wp_send_json_success(['auth_url' => $auth_url]);
-}

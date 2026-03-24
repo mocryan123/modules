@@ -296,7 +296,6 @@ add_action("wp_ajax_pm_update_task_status", "bntm_ajax_pm_update_task_status");
 add_action("wp_ajax_pm_delete_task", "bntm_ajax_pm_delete_task");
 add_action("wp_ajax_pm_reorder_tasks", "bntm_ajax_pm_reorder_tasks");
 add_action('wp_ajax_pm_import_tasks', 'bntm_ajax_pm_import_tasks');
-add_action('wp_ajax_pm_export_tasks', 'bntm_ajax_pm_export_tasks');
 add_action("wp_ajax_pm_create_milestone", "bntm_ajax_pm_create_milestone");
 add_action("wp_ajax_pm_update_milestone", "bntm_ajax_pm_update_milestone");
 add_action("wp_ajax_pm_delete_milestone", "bntm_ajax_pm_delete_milestone");
@@ -4702,12 +4701,6 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                         </svg>
                         Add Milestone
                     </button>
-                    <button class="bntm-btn-secondary" onclick="pmExportTasks()">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 8l-4 4m0 0L8 8m4 4V3"/>
-                        </svg>
-                        Export Tasks
-                    </button>
                     <button class="bntm-btn-secondary" onclick="pmOpenImportModal()">
                         <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -4996,19 +4989,19 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
     <div id="pm-import-modal" class="bntm-modal" style="display: none;">
         <div class="bntm-modal-content" style="max-width: 800px;">
             <div class="bntm-modal-header">
-                <h3>Import Tasks from CSV</h3>
+                <h3>Import Tasks from JSON</h3>
                 <button class="bntm-modal-close" onclick="pmCloseImportModal()">&times;</button>
             </div>
             <div class="bntm-form">
                 <div class="bntm-form-group">
-                    <label>Upload CSV File</label>
-                    <input type="file" id="pm-import-file" accept=".csv,text/csv" onchange="pmLoadCsvFile(event)">
+                    <label>Upload JSON File</label>
+                    <input type="file" id="pm-import-file" accept=".json" onchange="pmLoadJsonFile(event)">
                     <small style="color: #6b7280; display: block; margin-top: 8px;">
-                        Expected CSV headers: title, description, status, priority, milestone, assigned_to, due_date, estimated_hours, tags
+                        Expected format: Array of tasks with fields: title, description, status, priority, milestone, assigned_to, due_date, estimated_hours, tags
                     </small>
                 </div>
                 
-                <div id="pm-import-preview" style="display: none; margin-top: 24px;">
+                <div id="pm-import-pReview" style="display: none; margin-top: 24px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                         <h4 style="margin: 0;">Tasks to Import (<span id="pm-selected-count">0</span> selected)</h4>
                         <div style="display: flex; gap: 8px;">
@@ -5016,7 +5009,7 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
                             <button type="button" class="bntm-btn-small bntm-btn-secondary" onclick="pmSelectAllTasks(false)">Deselect All</button>
                         </div>
                     </div>
-                    <div id="pm-tasks-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;">
+                    <div id="pm-tasks-pReview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;">
                     </div>
                 </div>
                 
@@ -5441,12 +5434,15 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
     
     .task-row-status {
         min-width: 120px;
+        overflow: visible;
     }
     
     .task-status-dropdown {
         position: relative;
         display: inline-block;
         width: 100%;
+        overflow: visible !important;
+        z-index: 10;
     }
     
     .task-status-btn {
@@ -5465,16 +5461,14 @@ function pm_project_tasks_subtab($project, $business_id, $nonce) {
     }
     
     .task-status-menu {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
+        position: fixed;
         background: white;
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 1000;
+        z-index: 10000;
         margin-top: 4px;
         display: none;
+        min-width: 150px;
     }
     
     .task-status-menu.show {
@@ -5950,15 +5944,6 @@ document.getElementById('pm-milestone-form').addEventListener('submit', function
 // Import Tasks Functions
 let importedTasks = [];
 
-function pmExportTasks() {
-    const params = new URLSearchParams({
-        action: 'pm_export_tasks',
-        project_id: '<?php echo (int) $project->id; ?>',
-        nonce: '<?php echo esc_js($nonce); ?>'
-    });
-    window.location.href = `${ajaxurl}?${params.toString()}`;
-}
-
 function pmOpenImportModal() {
     document.getElementById('pm-import-modal').style.display = 'flex';
     document.getElementById('pm-import-file').value = '';
@@ -5971,83 +5956,17 @@ function pmCloseImportModal() {
     document.getElementById('pm-import-modal').style.display = 'none';
 }
 
-function pmNormalizeCsvHeader(header) {
-    return String(header || '')
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, '_');
-}
-
-function pmParseCsv(csvText) {
-    const rows = [];
-    let current = '';
-    let row = [];
-    let inQuotes = false;
-
-    for (let i = 0; i < csvText.length; i++) {
-        const char = csvText[i];
-        const next = csvText[i + 1];
-
-        if (char === '"') {
-            if (inQuotes && next === '"') {
-                current += '"';
-                i++;
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (char === ',' && !inQuotes) {
-            row.push(current);
-            current = '';
-        } else if ((char === '\n' || char === '\r') && !inQuotes) {
-            if (char === '\r' && next === '\n') {
-                i++;
-            }
-            row.push(current);
-            if (row.some(cell => String(cell).trim() !== '')) {
-                rows.push(row);
-            }
-            row = [];
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-
-    row.push(current);
-    if (row.some(cell => String(cell).trim() !== '')) {
-        rows.push(row);
-    }
-
-    if (rows.length === 0) {
-        return [];
-    }
-
-    const headers = rows[0].map(pmNormalizeCsvHeader);
-    const tasks = [];
-
-    for (let r = 1; r < rows.length; r++) {
-        const values = rows[r];
-        const task = {};
-        headers.forEach((h, idx) => {
-            task[h] = (values[idx] || '').trim();
-        });
-        tasks.push(task);
-    }
-
-    return tasks;
-}
-
-function pmLoadCsvFile(event) {
+function pmLoadJsonFile(event) {
     const file = event.target.files[0];
     if (!file) return;
     
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
-            const tasks = pmParseCsv(e.target.result || '');
-
-            if (!Array.isArray(tasks) || tasks.length === 0) {
-                alert('Invalid CSV format or no task rows found.');
+            const tasks = JSON.parse(e.target.result);
+            
+            if (!Array.isArray(tasks)) {
+                alert('Invalid JSON format. Expected an array of tasks.');
                 return;
             }
             
@@ -6063,7 +5982,7 @@ function pmLoadCsvFile(event) {
             pmUpdateSelectedCount();
             
         } catch (error) {
-            alert('Error parsing CSV file: ' + error.message);
+            alert('Error parsing JSON file: ' + error.message);
         }
     };
     reader.readAsText(file);
@@ -6098,10 +6017,10 @@ function pmRenderTasksPreview() {
                             ${priority.charAt(0).toUpperCase() + priority.slice(1)} Priority
                         </span>
                         ${task.status ? `<span>Status: ${task.status}</span>` : ''}
-                        ${task.milestone ? `<span>Milestone: ${task.milestone}</span>` : ''}
-                        ${task.assigned_to ? `<span>Assigned: ${task.assigned_to}</span>` : ''}
-                        ${task.due_date ? `<span>Due: ${task.due_date}</span>` : ''}
-                        ${task.estimated_hours ? `<span>Hours: ${task.estimated_hours}h</span>` : ''}
+                        ${task.milestone ? `<span>📍 ${task.milestone}</span>` : ''}
+                        ${task.assigned_to ? `<span>👤 ${task.assigned_to}</span>` : ''}
+                        ${task.due_date ? `<span>📅 ${task.due_date}</span>` : ''}
+                        ${task.estimated_hours ? `<span>⏱️ ${task.estimated_hours}h</span>` : ''}
                     </div>
                 </label>
             </div>
@@ -6643,7 +6562,16 @@ document.addEventListener('click', function(e) {
             if (m !== menu) m.classList.remove('show');
         });
         
-        menu.classList.toggle('show');
+        if (menu.classList.contains('show')) {
+            menu.classList.remove('show');
+        } else {
+            // Position the menu below the button
+            const rect = btn.getBoundingClientRect();
+            menu.style.top = (rect.bottom + 4) + 'px';
+            menu.style.left = rect.left + 'px';
+            menu.style.width = rect.width + 'px';
+            menu.classList.add('show');
+        }
         return;
     }
     
@@ -6680,6 +6608,13 @@ document.addEventListener('click', function(e) {
         });
     }
 });
+
+// Close dropdown menus when scrolling
+document.addEventListener('scroll', function() {
+    document.querySelectorAll('.task-status-menu.show').forEach(m => {
+        m.classList.remove('show');
+    });
+}, true);
 
 // Drag and drop for task reordering (optimized with event delegation)
 (function() {
@@ -8732,70 +8667,7 @@ function bntm_ajax_pm_get_task_details() {
     ]);
 }
 /**
- * Export Tasks as CSV
- */
-function bntm_ajax_pm_export_tasks() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
-
-    if (!is_user_logged_in()) {
-        wp_die('Unauthorized', 403);
-    }
-
-    global $wpdb;
-    $project_id = intval($_GET['project_id'] ?? 0);
-
-    if ($project_id <= 0) {
-        wp_die('Invalid project ID', 400);
-    }
-
-    $tasks = $wpdb->get_results($wpdb->prepare(
-        "SELECT 
-            t.title,
-            t.description,
-            t.status,
-            t.priority,
-            m.name as milestone,
-            u.display_name as assigned_to,
-            t.due_date,
-            t.estimated_hours,
-            t.tags
-         FROM {$wpdb->prefix}pm_tasks t
-         LEFT JOIN {$wpdb->prefix}pm_milestones m ON t.milestone_id = m.id
-         LEFT JOIN {$wpdb->users} u ON t.assigned_to = u.ID
-         WHERE t.project_id = %d
-         ORDER BY t.sort_order ASC, t.created_at DESC",
-        $project_id
-    ), ARRAY_A);
-
-    $filename = 'project-' . $project_id . '-tasks-' . date('Y-m-d') . '.csv';
-
-    nocache_headers();
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
-    $output = fopen('php://output', 'w');
-    // UTF-8 BOM for Excel compatibility.
-    fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
-
-    fputcsv($output, ['title', 'description', 'status', 'priority', 'milestone', 'assigned_to', 'due_date', 'estimated_hours', 'tags']);
-    foreach ($tasks as $task) {
-        fputcsv($output, [
-            $task['title'] ?? '',
-            $task['description'] ?? '',
-            $task['status'] ?? '',
-            $task['priority'] ?? '',
-            $task['milestone'] ?? '',
-            $task['assigned_to'] ?? '',
-            $task['due_date'] ?? '',
-            $task['estimated_hours'] ?? '',
-            $task['tags'] ?? ''
-        ]);
-    }
-    fclose($output);
-    exit;
-}
-
-/**
- * Import Tasks (CSV parsed in frontend, posted as JSON payload)
+ * Import Tasks from JSON
  */
 function bntm_ajax_pm_import_tasks() {
     check_ajax_referer('pm_project_detail_nonce', 'nonce');
@@ -8810,14 +8682,11 @@ function bntm_ajax_pm_import_tasks() {
     $team_table = $wpdb->prefix . 'pm_team_members';
     $current_user = wp_get_current_user();
     
-    $project_id = intval($_POST['project_id'] ?? 0);
-    $tasks_json = wp_unslash($_POST['tasks'] ?? '');
-    $decoded = json_decode($tasks_json, true);
-    $tasks = is_array($decoded) && isset($decoded['tasks']) && is_array($decoded['tasks'])
-        ? $decoded['tasks']
-        : $decoded;
-
-    if ($project_id <= 0 || !is_array($tasks)) {
+    $project_id = intval($_POST['project_id']);
+    $tasks_json = stripslashes($_POST['tasks']);
+    $tasks = json_decode($tasks_json, true);
+    
+    if (!is_array($tasks)) {
         wp_send_json_error(['message' => 'Invalid tasks data']);
     }
     
@@ -8840,10 +8709,6 @@ function bntm_ajax_pm_import_tasks() {
     $created_milestones = [];
     
     foreach ($tasks as $task) {
-        if (!is_array($task)) {
-            continue;
-        }
-
         $milestone_id = null;
         
         // Check if milestone exists or create new one
@@ -8910,19 +8775,6 @@ function bntm_ajax_pm_import_tasks() {
             }
         }
         
-        $priority = strtolower(sanitize_text_field($task['priority'] ?? 'medium'));
-        if (!in_array($priority, ['low', 'medium', 'high'], true)) {
-            $priority = 'medium';
-        }
-
-        $due_date = null;
-        if (!empty($task['due_date'])) {
-            $raw_due_date = sanitize_text_field($task['due_date']);
-            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw_due_date)) {
-                $due_date = $raw_due_date;
-            }
-        }
-
         $data = [
             'rand_id' => bntm_rand_id(),
             'business_id' => $current_user->ID,
@@ -8930,10 +8782,10 @@ function bntm_ajax_pm_import_tasks() {
             'title' => sanitize_text_field($task['title'] ?? 'Untitled Task'),
             'description' => sanitize_textarea_field($task['description'] ?? ''),
             'status' => sanitize_text_field($task['status'] ?? 'To Do'),
-            'priority' => $priority,
+            'priority' => sanitize_text_field($task['priority'] ?? 'medium'),
             'assigned_to' => $assigned_to,
             'milestone_id' => $milestone_id,
-            'due_date' => $due_date,
+            'due_date' => !empty($task['due_date']) ? sanitize_text_field($task['due_date']) : null,
             'estimated_hours' => floatval($task['estimated_hours'] ?? 0),
             'tags' => sanitize_text_field($task['tags'] ?? ''),
         ];
@@ -9862,7 +9714,6 @@ function pm_export_project_report($project_id) {
     global $wpdb;
     $projects_table = $wpdb->prefix . 'pm_projects';
     $tasks_table = $wpdb->prefix . 'pm_tasks';
-    $milestones_table = $wpdb->prefix . 'pm_milestones';
     
     $project = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM $projects_table WHERE id = %d",
@@ -9870,10 +9721,7 @@ function pm_export_project_report($project_id) {
     ));
     
     $tasks = $wpdb->get_results($wpdb->prepare(
-        "SELECT t.*, m.name AS milestone_name
-         FROM $tasks_table t
-         LEFT JOIN $milestones_table m ON t.milestone_id = m.id
-         WHERE t.project_id = %d",
+        "SELECT * FROM $tasks_table WHERE project_id = %d",
         $project_id
     ));
     
@@ -9891,13 +9739,12 @@ function pm_export_project_report($project_id) {
     fputcsv($output, []);
     
     // Tasks
-    fputcsv($output, ['Task ID', 'Title', 'Milestone', 'Status', 'Priority', 'Due Date', 'Estimated Hours', 'Actual Hours']);
+    fputcsv($output, ['Task ID', 'Title', 'Status', 'Priority', 'Due Date', 'Estimated Hours', 'Actual Hours']);
     
     foreach ($tasks as $task) {
         fputcsv($output, [
             $task->id,
             $task->title,
-            $task->milestone_name ?: 'No Milestone',
             $task->status,
             $task->priority,
             $task->due_date,
