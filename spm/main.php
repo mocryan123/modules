@@ -136,6 +136,7 @@ function bntm_spm_create_tables() {
 add_action('wp_ajax_spm_save_team',    'bntm_ajax_spm_save_team');
 add_action('wp_ajax_spm_delete_team',  'bntm_ajax_spm_delete_team');
 add_action('wp_ajax_spm_get_team',     'bntm_ajax_spm_get_team');
+add_action('wp_ajax_spm_get_team_profile', 'bntm_ajax_spm_get_team_profile');
 add_action('wp_ajax_spm_save_player',   'bntm_ajax_spm_save_player');
 add_action('wp_ajax_spm_delete_player', 'bntm_ajax_spm_delete_player');
 add_action('wp_ajax_spm_get_player',    'bntm_ajax_spm_get_player');
@@ -657,8 +658,8 @@ function bntm_shortcode_spm_dashboard() {
         justify-content: space-between;
         padding: 16px 18px;
         border-bottom: 1px solid var(--nba-gray-2);
-        flex-wrap: wrap;
-        gap: 10px;
+        gap: 16px;
+        flex-wrap: nowrap;
     }
 
     .spm-section-head h3 {
@@ -669,12 +670,22 @@ function bntm_shortcode_spm_dashboard() {
         letter-spacing: 0.8px;
         color: var(--nba-dark);
         margin: 0;
+        line-height: 1.1;
     }
 
     .spm-section-head p {
         font-size: 13px;
         color: var(--nba-gray-4);
-        margin: 0;
+        margin: 0 0 0 8px;
+        line-height: 1.2;
+    }
+
+    .spm-section-head > div {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
     }
 
     /* ===== GAME LIST ===== */
@@ -1097,11 +1108,10 @@ function bntm_shortcode_spm_dashboard() {
         overflow-y: auto;
     }
 
-    .spm-profile__header {
-        padding: 28px;
-        display: grid;
+    .spm-profile__hero {
+        padding: 28px 28px 28px 60px;
         grid-template-columns: 140px 1fr;
-        gap: 24px;
+        gap: 40px;
         align-items: flex-start;
     }
 
@@ -1111,6 +1121,7 @@ function bntm_shortcode_spm_dashboard() {
         border-radius: 8px;
         object-fit: cover;
         border: 5px solid var(--team-secondary, var(--nba-gold));
+        margin-left: 8px;
     }
 
     .spm-profile__avatar {
@@ -1127,6 +1138,7 @@ function bntm_shortcode_spm_dashboard() {
         color: var(--team-secondary, var(--nba-gold));
         border: 5px solid var(--team-secondary, var(--nba-gold));
         flex-shrink: 0;
+        margin-left: 8px;
     }
 
     .spm-profile__info h2 {
@@ -1159,7 +1171,7 @@ function bntm_shortcode_spm_dashboard() {
 
     .spm-profile__details {
         background: rgba(255,255,255,0.05);
-        padding: 28px;
+        padding: 28px 28px 28px 40px;
         margin: 0;
         border-top: 1px solid rgba(255,255,255,0.1);
     }
@@ -1200,7 +1212,7 @@ function bntm_shortcode_spm_dashboard() {
 
     .spm-profile__stats {
         background: rgba(0,0,0,0.2);
-        padding: 28px;
+        padding: 28px 28px 28px 40px;
         border-top: 1px solid rgba(255,255,255,0.1);
     }
 
@@ -1614,13 +1626,13 @@ function spm_teams_tab($business_id) {
                     <?php else: foreach ($teams as $team): ?>
                     <tr id="team-row-<?php echo $team->id; ?>">
                         <td>
-                            <div class="spm-player-cell">
+                            <div class="spm-player-cell" style="cursor:pointer;" onclick="spmOpenTeamProfile(<?php echo $team->id; ?>)">
                                 <?php if (!empty($team->logo)): ?>
                                     <img src="<?php echo esc_url($team->logo); ?>" style="width:38px;height:38px;border-radius:3px;object-fit:cover;flex-shrink:0;">
                                 <?php else: ?>
                                     <div class="spm-avatar"><?php echo strtoupper(substr($team->team_name,0,2)); ?></div>
                                 <?php endif; ?>
-                                <span style="font-weight:700;"><?php echo esc_html($team->team_name); ?></span>
+                                <span class="spm-player-cell__name spm-clickable-name" style="font-weight:700; color: var(--nba-navy);"><?php echo esc_html($team->team_name); ?></span>
                             </div>
                         </td>
                         <td><?php echo esc_html($team->city ?: '—'); ?></td>
@@ -1639,8 +1651,20 @@ function spm_teams_tab($business_id) {
     <script>
     var spmTeamNonce = '<?php echo $nonce; ?>';
     function spmOpenTeamModal(teamId) {
-        if (teamId===0){spmOpenModal('Add Team',spmTeamForm(null));}
+        if(teamId===0){spmOpenModal('Add Team',spmTeamForm(null));}
         else{spmAjax({action:'spm_get_team',id:teamId,nonce:spmTeamNonce},function(res){if(res.success)spmOpenModal('Edit Team',spmTeamForm(res.data));});}
+    }
+    function spmOpenTeamProfile(teamId) {
+        spmAjax({action:'spm_get_team_profile',id:teamId,nonce:spmTeamNonce},function(res){
+            if(res.success){
+                var html = res.data.html;
+                document.getElementById('spm-modal-body').innerHTML = html;
+                document.getElementById('spm-modal-overlay').style.display = 'flex';
+                document.querySelector('.spm-modal').classList.add('spm-modal--profile');
+            } else {
+                spmNotice('spm-teams-notice', res.data.message || 'Error loading team profile', 'error');
+            }
+        });
     }
     function spmTeamForm(data) {
         var d = data || {};
@@ -2255,7 +2279,16 @@ function spm_rankings_tab($business_id) {
                         <?php else: foreach ($rebounders as $i => $p): ?>
                         <tr>
                             <td><span class="spm-rank spm-rank--<?php echo $i<3?($i+1):'other'; ?>"><?php echo $i+1; ?></span></td>
-                            <td style="font-weight:700;"><?php echo esc_html($p->player_name); ?></td>
+                            <td>
+                                <div class="spm-player-cell">
+                                    <?php if (!empty($p->player_photo)): ?>
+                                        <img src="<?php echo esc_url($p->player_photo); ?>" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                                    <?php else: ?>
+                                        <div style="width:28px;height:28px;border-radius:50%;background:var(--nba-navy);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--font-display);font-weight:800;font-size:10px;flex-shrink:0;"><?php echo strtoupper(substr($p->player_name,0,2)); ?></div>
+                                    <?php endif; ?>
+                                    <span style="font-weight:700;font-size:13px;"><?php echo esc_html($p->player_name); ?></span>
+                                </div>
+                            </td>
                             <td style="font-size:12px;color:var(--nba-gray-4);"><?php echo esc_html($p->team_name); ?></td>
                             <td><?php echo $p->gp; ?></td>
                             <td><span class="spm-table__num" style="color:#6d28d9;"><?php echo $p->rpg; ?></span></td>
@@ -2280,7 +2313,16 @@ function spm_rankings_tab($business_id) {
                         <?php else: foreach ($assisters as $i => $p): ?>
                         <tr>
                             <td><span class="spm-rank spm-rank--<?php echo $i<3?($i+1):'other'; ?>"><?php echo $i+1; ?></span></td>
-                            <td style="font-weight:700;"><?php echo esc_html($p->player_name); ?></td>
+                            <td>
+                                <div class="spm-player-cell">
+                                    <?php if (!empty($p->player_photo)): ?>
+                                        <img src="<?php echo esc_url($p->player_photo); ?>" style="width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                                    <?php else: ?>
+                                        <div style="width:28px;height:28px;border-radius:50%;background:var(--nba-navy);display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--font-display);font-weight:800;font-size:10px;flex-shrink:0;"><?php echo strtoupper(substr($p->player_name,0,2)); ?></div>
+                                    <?php endif; ?>
+                                    <span style="font-weight:700;font-size:13px;"><?php echo esc_html($p->player_name); ?></span>
+                                </div>
+                            </td>
                             <td style="font-size:12px;color:var(--nba-gray-4);"><?php echo esc_html($p->team_name); ?></td>
                             <td><?php echo $p->gp; ?></td>
                             <td><span class="spm-table__num" style="color:#1a6b38;"><?php echo $p->apg; ?></span></td>
@@ -2439,6 +2481,90 @@ function bntm_ajax_spm_delete_team() {
     global $wpdb;
     $wpdb->delete("{$wpdb->prefix}spm_teams",['id'=>intval($_POST['id']),'business_id'=>get_current_user_id()],['%d','%d']);
     wp_send_json_success(['message'=>'Team deleted.']);
+}
+
+function bntm_ajax_spm_get_team_profile() {
+    check_ajax_referer('spm_team_nonce','nonce');
+    if(!is_user_logged_in())wp_send_json_error(['message'=>'Unauthorized']);
+    global $wpdb;
+    $team_id = intval($_POST['id']);
+    $business_id = get_current_user_id();
+
+    $team = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}spm_teams WHERE id=%d AND business_id=%d", $team_id, $business_id));
+    if(!$team) wp_send_json_error(['message'=>'Team not found']);
+
+    $players = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, player_name, COALESCE(photo,'') AS photo, jersey_number, position, status
+         FROM {$wpdb->prefix}spm_players WHERE team_id=%d AND business_id=%d ORDER BY player_name ASC",
+        $team_id, $business_id));
+
+    $record = $wpdb->get_row($wpdb->prepare(
+        "SELECT
+            SUM(CASE WHEN (team_a_id=%d AND team_a_score>team_b_score) OR (team_b_id=%d AND team_b_score>team_a_score) THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN (team_a_id=%d AND team_a_score<team_b_score) OR (team_b_id=%d AND team_b_score<team_a_score) THEN 1 ELSE 0 END) AS losses,
+            COUNT(*) AS total_games
+         FROM {$wpdb->prefix}spm_games
+         WHERE business_id=%d AND status='completed' AND (team_a_id=%d OR team_b_id=%d)",
+        $team_id,$team_id,$team_id,$team_id,$business_id,$team_id,$team_id));
+
+    $wins   = intval($record->wins ?? 0);
+    $losses = intval($record->losses ?? 0);
+    $gp     = intval($record->total_games ?? 0);
+    $pct    = $gp > 0 ? round($wins/$gp*100) : 0;
+
+    $pc = !empty($team->primary_color)   ? $team->primary_color   : '#1D428A';
+    $sc = !empty($team->secondary_color) ? $team->secondary_color : '#FFC72C';
+    $oc = !empty($team->outline_color)   ? $team->outline_color   : '#FFFFFF';
+
+    $logo_html = !empty($team->logo)
+        ? '<img src="'.esc_url($team->logo).'" class="spm-profile__photo" style="border-radius:6px;border:4px solid '.$sc.';" alt="'.esc_attr($team->team_name).'">'
+        : '<div class="spm-profile__avatar-lg" style="background:rgba(255,255,255,.1);border:4px solid '.$sc.';color:'.$sc.';">'.esc_html(strtoupper(substr($team->team_name,0,2))).'</div>';
+
+    $players_html = '';
+    if (!empty($players)) {
+        foreach ($players as $pl) {
+            $av = !empty($pl->photo)
+                ? '<img src="'.esc_url($pl->photo).'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid '.$sc.';flex-shrink:0;">'
+                : '<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.15);border:2px solid '.$sc.';display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:13px;color:'.$sc.';flex-shrink:0;">'.esc_html(strtoupper(substr($pl->player_name,0,2))).'</div>';
+            $status_badge = $pl->status === 'active'
+                ? '<span style="font-size:9px;background:rgba(46,125,50,.3);color:#a5d6a7;padding:2px 6px;border-radius:2px;font-weight:700;text-transform:uppercase;">Active</span>'
+                : '<span style="font-size:9px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.5);padding:2px 6px;border-radius:2px;font-weight:700;text-transform:uppercase;">Inactive</span>';
+            $players_html .= '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);">'.$av.'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'.$sc.';">'.esc_html($pl->player_name).'</div><div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px;">'.esc_html($pl->position?:'—').' &bull; #'.intval($pl->jersey_number).'</div></div>'.$status_badge.'</div>';
+        }
+    } else {
+        $players_html = '<p style="color:rgba(255,255,255,.4);font-style:italic;font-size:13px;padding:16px 0;">No players rostered yet.</p>';
+    }
+
+    $html = '
+    <div class="spm-profile" style="--prof-primary:'.$pc.';--prof-secondary:'.$sc.';--prof-outline:'.$oc.';background:linear-gradient(140deg,'.$pc.' 0%,color-mix(in srgb,'.$pc.' 65%,#000) 100%);">
+        <div class="spm-profile__hero">
+            '.$logo_html.'
+            <div class="spm-profile__hero-info">
+                <h2 style="-webkit-text-stroke:1.5px '.$oc.';text-stroke:1.5px '.$oc.';paint-order:stroke fill;">'.esc_html($team->team_name).'</h2>
+                '.(!empty($team->city)?'<p class="spm-profile__hero-sub">'.esc_html($team->city).'</p>':'').
+                (!empty($team->coach)?'<p class="spm-profile__hero-sub">Coach: '.esc_html($team->coach).'</p>':'').'
+                <p class="spm-profile__hero-team" style="color:'.$sc.';">'.intval(count($players)).' Players</p>
+            </div>
+        </div>
+        <div class="spm-profile__details" style="background:rgba(0,0,0,.12);border-top:1px solid rgba(255,255,255,.1);">
+            <div class="spm-profile__detail-row">
+                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Wins</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$wins.'</div></div>
+                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Losses</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$losses.'</div></div>
+                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Games</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$gp.'</div></div>
+                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Win %</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$pct.'%</div></div>
+            </div>
+        </div>
+        <div class="spm-profile__stats-section" style="background:rgba(0,0,0,.08);border-top:1px solid rgba(255,255,255,.1);">
+            <div class="spm-profile__stats-title">Roster</div>
+            '.$players_html.'
+        </div>
+        <div class="spm-profile__footer" style="background:rgba(0,0,0,.15);border-top:1px solid rgba(255,255,255,.08);">
+            <button class="spm-btn spm-btn--secondary" onclick="spmCloseModal()">Close</button>
+        </div>
+    </div>';
+
+    wp_send_json_success(['html' => $html]);
 }
 
 // ============================================================
@@ -2708,7 +2834,8 @@ function bntm_ajax_spm_get_game_players() {
     $game_id=intval($_POST['game_id']);$business_id=get_current_user_id();
     $game=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}spm_games WHERE id=%d AND business_id=%d",$game_id,$business_id));
     if(!$game)wp_send_json_error(['message'=>'Game not found']);
-    $players=$wpdb->get_results($wpdb->prepare("SELECT p.id,p.player_name,p.jersey_number,COALESCE(t.team_name,'Unassigned') AS team_name FROM {$wpdb->prefix}spm_players p LEFT JOIN {$wpdb->prefix}spm_teams t ON p.team_id=t.id WHERE p.team_id IN (%d,%d) AND p.status='active' ORDER BY t.team_name,p.player_name",$game->team_a_id,$game->team_b_id));
+    // Get ALL players from both teams, not just active ones, to allow stats for any player
+    $players=$wpdb->get_results($wpdb->prepare("SELECT p.id,p.player_name,p.jersey_number,COALESCE(t.team_name,'Unassigned') AS team_name FROM {$wpdb->prefix}spm_players p LEFT JOIN {$wpdb->prefix}spm_teams t ON p.team_id=t.id WHERE p.team_id IN (%d,%d) ORDER BY t.team_name,p.player_name",$game->team_a_id,$game->team_b_id));
     wp_send_json_success($players);
 }
 
