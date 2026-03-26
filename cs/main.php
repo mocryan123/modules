@@ -173,112 +173,580 @@ function bntm_shortcode_cs() {
     <script>var ajaxurl = '<?php echo esc_js(admin_url('admin-ajax.php')); ?>';</script>
 
     <style>
-    /* ── Shared Layout ─────────────────────────────────── */
+    @import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+
+    /* ── Design Tokens on :root so the modal (outside .cs-wrap) inherits them ── */
+    :root {
+        --cs-bg:           #f8fbff;
+        --cs-surface:      #ffffff;
+        --cs-surface-2:    #eaf4ff;
+        --cs-border:       #c4d9ef;
+        --cs-border-soft:  #dbeafc;
+        --cs-blue-dark:    #134b87;
+        --cs-blue-mid:     #1f6bbf;
+        --cs-blue-light:   #69a2e3;
+        --cs-blue-muted:   #8cb1d7;
+        --cs-accent:       #1e6bb8;
+        --cs-accent-hover: #155e9b;
+        --cs-text-primary: #102f53;
+        --cs-text-secondary:#2a4f82;
+        --cs-text-muted:   #5c7ea6;
+        --cs-shadow-sm:    0 1px 3px rgba(20,75,130,.08);
+        --cs-shadow-md:    0 4px 16px rgba(20,75,130,.12);
+        --cs-shadow-lg:    0 20px 60px rgba(20,75,130,.22);
+        --cs-radius:       10px;
+        --cs-radius-sm:    6px;
+        --cs-radius-lg:    14px;
+    }
+
+    html, body {
+        width: 100%;
+        min-height: 100%;
+        margin: 0;
+        padding: 0;
+    }
+    .cs-wrap {
+        width: 100vw;
+        max-width: 100%;
+        min-height: 100vh;
+        min-height: calc(100vh - 0px);
+        margin: 0;
+        padding: 16px;
+        font-family: 'Source Sans 3', 'Segoe UI', sans-serif;
+        color: var(--cs-text-primary);
+        background: var(--cs-bg);
+        box-sizing: border-box;
+    }
     .cs-wrap * { box-sizing: border-box; }
-    .cs-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 24px; border-bottom: 2px solid #e5e7eb; padding-bottom: 0; }
+    .cs-topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 14px;
+        margin: -16px -16px 14px;
+        border-radius: var(--cs-radius);
+        background: var(--cs-surface-2);
+        border: 1px solid var(--cs-border);
+        box-shadow: var(--cs-shadow-sm);
+    }
+    .cs-topbar-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+        color: var(--cs-blue-dark);
+        font-size: 26px;
+    }
+    .cs-topbar-icon {
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--cs-blue-mid);
+        font-size: 18px;
+    }
+    .cs-back-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 14px;
+        border-radius: 8px;
+        background: var(--cs-accent);
+        color: #fff;
+        font-weight: 600;
+        text-decoration: none;
+        box-shadow: 0 1px 8px rgba(20,75,130,.22);
+    }
+    .cs-back-btn:hover {
+        background: var(--cs-accent-hover);
+    }
+
+    /* ── Tab Navigation ────────────────────────────────── */
+    .cs-tabs {
+        display: flex; flex-wrap: wrap; gap: 12px;
+        justify-content: center;
+        margin-bottom: 24px;
+        background: var(--cs-surface-2);
+        border: 1px solid var(--cs-border);
+        border-radius: var(--cs-radius);
+        padding: 5px;
+    }
     .cs-tab-btn {
-        padding: 10px 18px; border: none; background: transparent; cursor: pointer;
-        font-size: 13.5px; font-weight: 500; color: #6b7280; border-radius: 6px 6px 0 0;
-        border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s;
+        padding: 9px 16px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 13.5px;
+        font-weight: 600;
+        color: var(--cs-text-secondary);
+        border-radius: var(--cs-radius-sm);
+        border-bottom: none;
+        margin-bottom: 0;
+        transition: all .18s ease;
+        letter-spacing: .2px;
     }
-    .cs-tab-btn:hover { color: #1d4ed8; background: #eff6ff; }
-    .cs-tab-btn.active { color: #1d4ed8; border-bottom-color: #1d4ed8; background: #eff6ff; }
+    .cs-tab-btn:hover {
+        color: var(--cs-blue-dark);
+        background: rgba(30,107,184,.10);
+    }
+    .cs-tab-btn.active {
+        color: #ffffff;
+        background: var(--cs-accent);
+        box-shadow: 0 2px 8px rgba(30,107,184,.30);
+    }
 
-    /* ── Cards & Sections ──────────────────────────────── */
-    .cs-stat-row { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 16px; margin-bottom: 28px; }
+    /* ── Stat Cards ────────────────────────────────────── */
+    .cs-stat-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 16px;
+        margin-bottom: 28px;
+    }
     .cs-stat-card {
-        background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
-        padding: 20px 18px; display: flex; align-items: center; gap: 14px;
-        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+        background: var(--cs-surface);
+        border: 1px solid var(--cs-border-soft);
+        border-radius: var(--cs-radius);
+        padding: 20px 18px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        box-shadow: var(--cs-shadow-sm);
+        transition: box-shadow .18s, transform .18s;
     }
-    .cs-stat-icon { width: 46px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .cs-stat-label { font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-    .cs-stat-num { font-size: 26px; font-weight: 700; color: #111827; line-height: 1; }
+    .cs-stat-card:hover {
+        box-shadow: var(--cs-shadow-md);
+        transform: translateY(-1px);
+    }
+    .cs-stat-icon {
+        width: 46px; height: 46px;
+        border-radius: var(--cs-radius-sm);
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .cs-stat-label {
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: .5px;
+        text-transform: uppercase;
+        color: var(--cs-text-muted);
+        margin-bottom: 4px;
+    }
+    .cs-stat-num {
+        font-family: 'Lora', Georgia, serif;
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--cs-accent);
+        line-height: 1;
+    }
 
-    .cs-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 24px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
-    .cs-panel h3 { font-size: 15px; font-weight: 600; color: #111827; margin: 0 0 16px; }
-    .cs-panel h4 { font-size: 13.5px; font-weight: 600; color: #374151; margin: 0 0 12px; }
+    /* ── Panels ────────────────────────────────────────── */
+    .cs-panel {
+        background: var(--cs-surface);
+        border: 1px solid var(--cs-border-soft);
+        border-radius: var(--cs-radius);
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: var(--cs-shadow-sm);
+    }
+    .cs-panel h3 {
+        font-family: 'Lora', Georgia, serif;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--cs-blue-dark);
+        margin: 0 0 16px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--cs-border-soft);
+    }
+    .cs-panel h4 {
+        font-family: 'Lora', Georgia, serif;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--cs-blue-mid);
+        margin: 0 0 12px;
+    }
 
     /* ── Forms ─────────────────────────────────────────── */
-    .cs-form-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 14px; }
-    .cs-field label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
-    .cs-field input, .cs-field select, .cs-field textarea {
-        width: 100%; padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 7px;
-        font-size: 13.5px; color: #111827; background: #fff; transition: border-color .15s;
+    .cs-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
     }
-    .cs-field input:focus, .cs-field select:focus, .cs-field textarea:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+    .cs-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+    .cs-field label {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--cs-blue-mid);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: .6px;
+    }
+    .cs-field input,
+    .cs-field select,
+    .cs-field textarea {
+        width: 100%;
+        padding: 9px 13px;
+        border: 1.5px solid var(--cs-border);
+        border-radius: var(--cs-radius-sm);
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 13.5px;
+        color: var(--cs-text-primary);
+        background: var(--cs-surface);
+        transition: border-color .15s, box-shadow .15s;
+        line-height: 1.4;
+    }
+    .cs-field input::placeholder,
+    .cs-field textarea::placeholder {
+        color: var(--cs-text-muted);
+    }
+    .cs-field input:focus,
+    .cs-field select:focus,
+    .cs-field textarea:focus {
+        outline: none;
+        border-color: var(--cs-accent);
+        box-shadow: 0 0 0 3px rgba(30,107,184,.16);
+        background: #fff;
+    }
     .cs-field.span2 { grid-column: span 2; }
     .cs-field.span3 { grid-column: span 3; }
 
     /* ── Buttons ────────────────────────────────────────── */
-    .cs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; border: none; cursor: pointer; transition: all .15s; }
-    .cs-btn-primary { background: #1d4ed8; color: #fff; }
-    .cs-btn-primary:hover { background: #1e40af; }
-    .cs-btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
-    .cs-btn-secondary:hover { background: #e5e7eb; }
-    .cs-btn-danger { background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; }
-    .cs-btn-danger:hover { background: #fecaca; }
-    .cs-btn-sm { padding: 5px 11px; font-size: 12px; }
-    .cs-btn:disabled { opacity: .55; cursor: not-allowed; }
-    .cs-btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+    .cs-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 9px 18px;
+        border-radius: var(--cs-radius-sm);
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 13.5px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all .16s ease;
+        letter-spacing: .1px;
+    }
+    .cs-btn-primary {
+        background: var(--cs-accent);
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(30,107,184,.25);
+    }
+    .cs-btn-primary:hover {
+        background: var(--cs-accent-hover);
+        box-shadow: 0 4px 12px rgba(30,107,184,.35);
+        transform: translateY(-1px);
+    }
+    .cs-btn-secondary {
+        background: var(--cs-surface-2);
+        color: var(--cs-blue-dark);
+        border: 1.5px solid var(--cs-border);
+    }
+    .cs-btn-secondary:hover {
+        background: var(--cs-border-soft);
+        color: var(--cs-blue-mid);
+        border-color: var(--cs-blue-muted);
+    }
+    .cs-btn-danger {
+        background: #ffe9ef;
+        color: #b11f37;
+        border: 1.5px solid #fac0cf;
+    }
+    .cs-btn-danger:hover {
+        background: #f8d4da;
+        color: #8d1b2e;
+    }
+    .cs-btn-sm { padding: 5px 12px; font-size: 12px; }
+    .cs-btn:disabled { opacity: .50; cursor: not-allowed; transform: none !important; }
+    .cs-btn-group {
+        display: flex; gap: 8px; flex-wrap: wrap;
+        margin-top: 20px; align-items: center;
+        padding-top: 16px;
+        border-top: 1px solid var(--cs-border-soft);
+    }
+
+    /* Explicit button rules repeated for .cs-modal scope (outside .cs-wrap) */
+    .cs-modal .cs-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 9px 18px;
+        border-radius: 6px;
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 13.5px;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        transition: all .16s ease;
+        letter-spacing: .1px;
+    }
+    .cs-modal .cs-btn-primary {
+        background-color: var(--cs-accent);
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(30,107,184,.25);
+    }
+    .cs-modal .cs-btn-primary:hover {
+        background-color: var(--cs-accent-hover);
+        box-shadow: 0 4px 12px rgba(30,107,184,.35);
+        transform: translateY(-1px);
+    }
+    .cs-modal .cs-btn-secondary {
+        background-color: var(--cs-surface-2);
+        color: var(--cs-blue-dark);
+        border: 1.5px solid var(--cs-border);
+    }
+    .cs-modal .cs-btn-secondary:hover {
+        background-color: var(--cs-border-soft);
+        color: var(--cs-blue-mid);
+        border-color: var(--cs-blue-muted);
+    }
+    .cs-modal .cs-btn:disabled { opacity: .50; cursor: not-allowed; transform: none !important; }
 
     /* ── Table ──────────────────────────────────────────── */
-    .cs-table-wrap { overflow-x: auto; border-radius: 10px; border: 1px solid #e5e7eb; }
-    .cs-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-    .cs-table thead th { background: #f9fafb; padding: 11px 14px; text-align: left; font-size: 11.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid #e5e7eb; }
-    .cs-table tbody td { padding: 12px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+    .cs-table-wrap {
+        overflow-x: auto;
+        border-radius: var(--cs-radius-sm);
+        border: 1px solid var(--cs-border);
+    }
+    .cs-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13.5px;
+    }
+    .cs-table thead th {
+        background: #e5f2ff;
+        padding: 11px 14px;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--cs-blue-dark);
+        text-transform: uppercase;
+        letter-spacing: .6px;
+        border-bottom: 2px solid var(--cs-border);
+    }
+    .cs-table tbody td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--cs-border-soft);
+        vertical-align: middle;
+        color: var(--cs-text-primary);
+    }
     .cs-table tbody tr:last-child td { border-bottom: none; }
-    .cs-table tbody tr:hover { background: #f9fafb; }
+    .cs-table tbody tr:hover { background: var(--cs-surface-2); }
 
     /* ── Badges ─────────────────────────────────────────── */
-    .cs-badge { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 500; }
-    .cs-badge-green { background: #d1fae5; color: #065f46; }
-    .cs-badge-gray  { background: #f3f4f6; color: #6b7280; }
-    .cs-badge-blue  { background: #dbeafe; color: #1e40af; }
-    .cs-badge-yellow { background: #fef3c7; color: #92400e; }
+    .cs-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11.5px;
+        font-weight: 600;
+        letter-spacing: .2px;
+    }
+    .cs-badge-green  { background: #e8f7ff; color: #1f6bbf; border: 1px solid #bcdff8; }
+    .cs-badge-gray   { background: var(--cs-surface-2); color: var(--cs-text-muted); border: 1px solid var(--cs-border); }
+    .cs-badge-blue   { background: #dcefff; color: #134b87; border: 1px solid #a8c4ea; }
+    .cs-badge-yellow { background: #fff6db; color: #8f7b34; border: 1px solid #f0d5a0; }
 
     /* ── Notices ─────────────────────────────────────────── */
-    .cs-notice { padding: 10px 14px; border-radius: 7px; font-size: 13.5px; margin: 12px 0; }
-    .cs-notice-success { background: #d1fae5; color: #065f46; border-left: 3px solid #10b981; }
-    .cs-notice-error   { background: #fee2e2; color: #991b1b; border-left: 3px solid #ef4444; }
-    .cs-notice-info    { background: #dbeafe; color: #1e40af; border-left: 3px solid #3b82f6; }
+    .cs-notice {
+        padding: 11px 15px;
+        border-radius: var(--cs-radius-sm);
+        font-size: 13.5px;
+        margin: 12px 0;
+        font-weight: 500;
+    }
+    .cs-notice-success { background: #e7f6ff; color: #136b9f; border-left: 3px solid #1f78bd; }
+    .cs-notice-error   { background: #ffe9ef; color: #a01f37; border-left: 3px solid #d9503e; }
+    .cs-notice-info    { background: #eaf1ff; color: #1f4e8f; border-left: 3px solid #4a6dc2; }
 
     /* ── Timetable Grid ──────────────────────────────────── */
     .cs-grid-wrap { overflow-x: auto; }
-    .cs-timetable { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 780px; }
-    .cs-timetable th { background: #1e3a5f; color: #fff; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; letter-spacing: .5px; border: 1px solid #1e3a5f; }
-    .cs-timetable td { border: 1px solid #e5e7eb; padding: 0; vertical-align: top; min-width: 100px; }
-    .cs-slot-label { background: #f8fafc; padding: 10px 12px; font-weight: 600; font-size: 12px; color: #374151; white-space: nowrap; text-align: center; border: 1px solid #e5e7eb; }
-    .cs-cell { padding: 7px 9px; min-height: 64px; }
-    .cs-cell-entry {
-        background: #dbeafe; border: 1px solid #93c5fd; border-radius: 6px;
-        padding: 6px 8px; line-height: 1.4; color: #1e3a5f;
+    .cs-timetable {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+        min-width: 780px;
     }
-    .cs-cell-entry.lab { background: #d1fae5; border-color: #6ee7b7; color: #064e3b; }
+    .cs-timetable th {
+        background: var(--cs-blue-dark);
+        color: #ffffff;
+        padding: 11px 8px;
+        text-align: center;
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: .6px;
+        text-transform: uppercase;
+        border: 1px solid var(--cs-blue-mid);
+    }
+    .cs-timetable td {
+        border: 1px solid var(--cs-border);
+        padding: 0;
+        vertical-align: top;
+        min-width: 100px;
+    }
+    .cs-slot-label {
+        background: var(--cs-surface-2);
+        padding: 10px 12px;
+        font-weight: 700;
+        font-size: 12px;
+        color: var(--cs-blue-mid);
+        white-space: nowrap;
+        text-align: center;
+        border: 1px solid var(--cs-border);
+    }
+    .cs-cell { padding: 7px 9px; min-height: 64px; background: var(--cs-surface); }
+    .cs-cell-entry {
+        background: #e5f1ff;
+        border: 1px solid #a8c9eb;
+        border-radius: var(--cs-radius-sm);
+        padding: 6px 8px;
+        line-height: 1.45;
+        color: var(--cs-blue-dark);
+    }
+    .cs-cell-entry.lab {
+        background: #eaf8f8;
+        border-color: #8fc8d6;
+        color: #136873;
+    }
     .cs-cell-entry .ce-code { font-weight: 700; font-size: 12px; display: block; }
-    .cs-cell-entry .ce-inst { font-size: 11px; color: #374151; }
-    .cs-cell-entry .ce-room { font-size: 11px; color: #374151; font-style: italic; }
-    .cs-cell-empty { background: #fafafa; }
+    .cs-cell-entry .ce-inst { font-size: 11px; color: var(--cs-text-secondary); }
+    .cs-cell-entry .ce-room { font-size: 11px; color: var(--cs-text-muted); font-style: italic; }
+    .cs-cell-empty { background: var(--cs-bg); }
 
     /* ── Modal ───────────────────────────────────────────── */
     .cs-modal-overlay {
-        display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45);
-        z-index: 9999; align-items: center; justify-content: center;
+        display: none;
+        position: fixed; inset: 0;
+        background: rgba(17,66,118,.50);
+        z-index: 9999;
+        align-items: center;
+        justify-content: center;
     }
     .cs-modal-overlay.open { display: flex; }
     .cs-modal {
-        background: #fff; border-radius: 14px; padding: 28px 30px; width: 92%;
-        max-width: 580px; max-height: 90vh; overflow-y: auto;
-        box-shadow: 0 20px 60px rgba(0,0,0,.25); position: relative;
+        /* Fully opaque — explicit fallback + var in case :root isn't enough */
+        background-color: #ffffff;
+        background-color: var(--cs-surface);
+        border-radius: var(--cs-radius-lg, 14px);
+        padding: 30px 32px;
+        width: 92%;
+        max-width: 580px;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(20,75,130,.30);
+        border: 1px solid var(--cs-border);
+        border-color: var(--cs-border, #c4d9ef);
+        position: relative;
+        /* Ensure font/color apply to all injected modal content */
+        font-family: 'Source Sans 3', 'Segoe UI', sans-serif;
+        font-size: 13.5px;
+        color: var(--cs-text-primary, #102f53);
+        box-sizing: border-box;
     }
-    .cs-modal-title { font-size: 16px; font-weight: 700; color: #111827; margin: 0 0 20px; }
+    .cs-modal * { box-sizing: border-box; }
+
+    /* Modal typography */
+    .cs-modal-title {
+        font-family: 'Lora', Georgia, serif;
+        font-size: 17px;
+        font-weight: 700;
+        color: var(--cs-blue-dark, #134b87);
+        margin: 0 0 20px;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--cs-border-soft, #dbeafc);
+    }
     .cs-modal-close {
-        position: absolute; top: 18px; right: 20px; background: #f3f4f6;
-        border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer;
-        display: flex; align-items: center; justify-content: center; color: #6b7280;
+        position: absolute; top: 18px; right: 20px;
+        background: var(--cs-surface-2, #eaf4ff);
+        border: 1px solid var(--cs-border, #c4d9ef);
+        border-radius: 50%;
+        width: 30px; height: 30px;
+        cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        color: var(--cs-text-muted, #5c7ea6);
         font-size: 16px;
+        transition: all .15s;
     }
-    .cs-modal-close:hover { background: #e5e7eb; }
+    .cs-modal-close:hover {
+        background: var(--cs-border-soft, #dbeafc);
+        color: var(--cs-blue-dark, #134b87);
+    }
+
+    /* Form fields inside the modal need explicit styling since .cs-wrap scoping may not apply */
+    .cs-modal .cs-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    .cs-modal .cs-field {
+        display: flex;
+        flex-direction: column;
+    }
+    .cs-modal .cs-field label {
+        display: block;
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--cs-blue-mid, #1f6bbf);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: .6px;
+    }
+    .cs-modal .cs-field input,
+    .cs-modal .cs-field select,
+    .cs-modal .cs-field textarea {
+        width: 100%;
+        padding: 9px 13px;
+        border: 1.5px solid var(--cs-border, #c4d9ef);
+        border-radius: 6px;
+        border-radius: var(--cs-radius-sm, 6px);
+        font-family: 'Source Sans 3', sans-serif;
+        font-size: 13.5px;
+        color: var(--cs-text-primary, #102f53);
+        background-color: var(--cs-surface, #ffffff);
+        transition: border-color .15s, box-shadow .15s;
+        line-height: 1.4;
+        -webkit-appearance: auto;
+        appearance: auto;
+    }
+    .cs-modal .cs-field input::placeholder,
+    .cs-modal .cs-field textarea::placeholder {
+        color: #9b8878;
+        color: var(--cs-text-muted, #9b8878);
+    }
+    .cs-modal .cs-field input:focus,
+    .cs-modal .cs-field select:focus,
+    .cs-modal .cs-field textarea:focus {
+        outline: none;
+        border-color: var(--cs-accent, #1e6bb8);
+        box-shadow: 0 0 0 3px rgba(30,107,184,.14);
+        background-color: #fff;
+    }
+    .cs-modal .cs-field select option {
+        background-color: #fdfaf4;
+        color: #2c1f14;
+    }
+    .cs-modal .cs-btn-group {
+        display: flex; gap: 8px; flex-wrap: wrap;
+        margin-top: 20px; align-items: center;
+        padding-top: 16px;
+        border-top: 1px solid #e8e0d0;
+        border-top-color: var(--cs-border-soft, #e8e0d0);
+    }
+    /* Notice inside modal */
+    .cs-modal .cs-notice {
+        padding: 11px 15px;
+        border-radius: 6px;
+        font-size: 13.5px;
+        margin: 12px 0;
+        font-weight: 500;
+    }
+    .cs-modal .cs-notice-error   { background: #fdf0ed; color: #82231a; border-left: 3px solid #d9503e; }
+    .cs-modal .cs-notice-success { background: #edf7f1; color: #1a5e35; border-left: 3px solid #3aaa6e; }
+    .cs-modal .cs-notice-info    { background: #edf1f9; color: #2b4480; border-left: 3px solid #4a6dc2; }
 
     /* ── Print ───────────────────────────────────────────── */
     @media print {
@@ -288,6 +756,13 @@ function bntm_shortcode_cs() {
     </style>
 
     <div class="cs-wrap">
+        <div class="cs-topbar">
+            <div class="cs-topbar-brand">
+                <span class="cs-topbar-icon">&#x1F4C5;</span>
+                <span>Class Scheduler</span>
+            </div>
+            <a class="cs-back-btn" href="<?php echo esc_url(admin_url()); ?>">← Back to Dashboard</a>
+        </div>
         <div class="cs-tabs">
             <?php foreach ($tabs as $key => $label): ?>
             <button class="cs-tab-btn <?php echo $active_tab === $key ? 'active' : ''; ?>"
@@ -365,9 +840,7 @@ function bntm_shortcode_cs() {
     </script>
     <?php
     $content = ob_get_clean();
-    return function_exists('bntm_universal_container')
-        ? bntm_universal_container('Class Scheduler', $content)
-        : $content;
+    return $content;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -391,8 +864,8 @@ function cs_overview_tab($business_id) {
     ?>
     <div class="cs-stat-row">
         <div class="cs-stat-card">
-            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#1d4ed8,#3b82f6)">
-                <svg width="22" height="22" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
+            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#1e6bb8,#85b5ef)">
+                <svg width="22" height="22" fill="none" stroke="#ffffff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0"/></svg>
             </div>
             <div>
                 <div class="cs-stat-label">Active Sections</div>
@@ -400,8 +873,8 @@ function cs_overview_tab($business_id) {
             </div>
         </div>
         <div class="cs-stat-card">
-            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa)">
-                <svg width="22" height="22" fill="none" stroke="#fff" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke-width="2"/><line x1="16" y1="2" x2="16" y2="6" stroke-width="2"/><line x1="8" y1="2" x2="8" y2="6" stroke-width="2"/><line x1="3" y1="10" x2="21" y2="10" stroke-width="2"/></svg>
+            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#134b87,#4f89c6)">
+                <svg width="22" height="22" fill="none" stroke="#ffffff" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" stroke-width="2"/><line x1="16" y1="2" x2="16" y2="6" stroke-width="2"/><line x1="8" y1="2" x2="8" y2="6" stroke-width="2"/><line x1="3" y1="10" x2="21" y2="10" stroke-width="2"/></svg>
             </div>
             <div>
                 <div class="cs-stat-label">Schedule Entries</div>
@@ -409,8 +882,8 @@ function cs_overview_tab($business_id) {
             </div>
         </div>
         <div class="cs-stat-card">
-            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#0891b2,#22d3ee)">
-                <svg width="22" height="22" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#1e6bb8,#8ec5f7)">
+                <svg width="22" height="22" fill="none" stroke="#ffffff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
             </div>
             <div>
                 <div class="cs-stat-label">Instructors</div>
@@ -418,8 +891,8 @@ function cs_overview_tab($business_id) {
             </div>
         </div>
         <div class="cs-stat-card">
-            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#059669,#34d399)">
-                <svg width="22" height="22" fill="none" stroke="#fff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+            <div class="cs-stat-icon" style="background:linear-gradient(135deg,#2b689e,#7eb1ef)">
+                <svg width="22" height="22" fill="none" stroke="#ffffff" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
             </div>
             <div>
                 <div class="cs-stat-label">Rooms</div>
@@ -430,7 +903,7 @@ function cs_overview_tab($business_id) {
 
     <div class="cs-panel">
         <h3>Quick Start Guide</h3>
-        <ol style="margin:0;padding-left:20px;line-height:2;font-size:13.5px;color:#374151;">
+        <ol style="margin:0;padding-left:20px;line-height:2;font-size:13.5px;color:#000000;">
             <li>Go to <strong>Instructors</strong> and add your faculty members.</li>
             <li>Go to <strong>Rooms</strong> and add your classrooms/labs.</li>
             <li>Go to <strong>Sections</strong> and create your class groups (e.g. CHE3 A1).</li>
@@ -566,7 +1039,7 @@ function cs_timetable_tab($business_id) {
             <h3>
                 <?php echo esc_html($sec->section_name); ?>
                 <?php if ($sec->academic_year): ?>
-                <span style="font-weight:400;color:#6b7280;font-size:13px;margin-left:8px;"><?php echo esc_html($sec->academic_year); ?> &bull; <?php echo esc_html($sec->semester); ?> Semester</span>
+                <span style="font-weight:400;color:#5c7ea6;font-size:13px;margin-left:8px;"><?php echo esc_html($sec->academic_year); ?> &bull; <?php echo esc_html($sec->semester); ?> Semester</span>
                 <?php endif; ?>
             </h3>
             <div class="cs-grid-wrap">
@@ -657,7 +1130,7 @@ function cs_sections_tab($business_id) {
 
     <div class="cs-panel">
         <?php if (empty($sections)): ?>
-        <p style="color:#6b7280;font-size:13.5px;">No sections yet. Click "Add Section" to create one.</p>
+        <p style="color:#5c7ea6;font-size:13.5px;">No sections yet. Click "Add Section" to create one.</p>
         <?php else: ?>
         <div class="cs-table-wrap">
         <table class="cs-table">
@@ -881,7 +1354,7 @@ function cs_schedule_tab($business_id) {
         <h3>Entries for Section</h3>
         <div id="cs-sched-notice"></div>
         <?php if (empty($entries)): ?>
-        <p style="color:#6b7280;font-size:13.5px;">No schedule entries for this section yet.</p>
+        <p style="color:#5c7ea6;font-size:13.5px;">No schedule entries for this section yet.</p>
         <?php else: ?>
         <div class="cs-table-wrap">
         <table class="cs-table">
@@ -905,7 +1378,7 @@ function cs_schedule_tab($business_id) {
                     <td><?php echo esc_html($e->subject_name ?: '—'); ?></td>
                     <td><?php echo esc_html($day_group_labels[$e->day_group] ?? $e->day_group); ?></td>
                     <td><?php echo esc_html($e->time_slot); ?></td>
-                    <td><?php echo esc_html($e->instructor_initials); ?> <?php if ($e->instructor_name): ?><small style="color:#6b7280;">(<?php echo esc_html($e->instructor_name); ?>)</small><?php endif; ?></td>
+                    <td><?php echo esc_html($e->instructor_initials); ?> <?php if ($e->instructor_name): ?><small style="color:#5c7ea6;">(<?php echo esc_html($e->instructor_name); ?>)</small><?php endif; ?></td>
                     <td><?php echo esc_html($e->room); ?></td>
                     <td><span class="cs-badge <?php echo $e->schedule_type === 'lab' ? 'cs-badge-green' : 'cs-badge-blue'; ?>"><?php echo ucfirst($e->schedule_type); ?></span></td>
                     <td><?php echo (int)$e->units; ?></td>
@@ -982,7 +1455,7 @@ function cs_schedule_tab($business_id) {
                     <select id="ef-slot">${slotOptions}</select>
                 </div>
                 <div class="cs-field">
-                    <label>Subject Code * <small style="color:#6b7280;">(add " L" for lab)</small></label>
+                    <label>Subject Code * <small style="color:#5c7ea6;">(add " L" for lab)</small></label>
                     <input type="text" id="ef-code" value="${data.code||''}" placeholder="e.g. MATH 89 or CHEM 86 L">
                 </div>
                 <div class="cs-field">
@@ -1002,7 +1475,7 @@ function cs_schedule_tab($business_id) {
                     <select id="ef-room-select">${roomOptions}</select>
                 </div>
                 <div class="cs-field">
-                    <label>Room Override <small style="color:#6b7280;">(overrides list)</small></label>
+                    <label>Room Override <small style="color:#5c7ea6;">(overrides list)</small></label>
                     <input type="text" id="ef-room" value="${data.room||''}" placeholder="Custom room code">
                 </div>
                 <div class="cs-field">
@@ -1128,7 +1601,7 @@ function cs_instructors_tab($business_id) {
 
     <div class="cs-panel">
         <?php if (empty($instructors)): ?>
-        <p style="color:#6b7280;font-size:13.5px;">No instructors yet.</p>
+        <p style="color:#5c7ea6;font-size:13.5px;">No instructors yet.</p>
         <?php else: ?>
         <div class="cs-table-wrap">
         <table class="cs-table">
@@ -1169,7 +1642,7 @@ function cs_instructors_tab($business_id) {
             <h2 class="cs-modal-title">${data.id ? 'Edit Instructor' : 'Add Instructor'}</h2>
             <div class="cs-form-grid">
                 <div class="cs-field">
-                    <label>Initials * <small style="color:#6b7280;">(shown on timetable)</small></label>
+                    <label>Initials * <small style="color:#5c7ea6;">(shown on timetable)</small></label>
                     <input type="text" id="if-initials" value="${data.initials||''}" placeholder="e.g. EORTIZ" maxlength="30">
                 </div>
                 <div class="cs-field">
@@ -1273,7 +1746,7 @@ function cs_rooms_tab($business_id) {
 
     <div class="cs-panel">
         <?php if (empty($rooms)): ?>
-        <p style="color:#6b7280;font-size:13.5px;">No rooms yet.</p>
+        <p style="color:#5c7ea6;font-size:13.5px;">No rooms yet.</p>
         <?php else: ?>
         <div class="cs-table-wrap">
         <table class="cs-table">
@@ -1316,7 +1789,7 @@ function cs_rooms_tab($business_id) {
             <h2 class="cs-modal-title">${data.id ? 'Edit Room' : 'Add Room'}</h2>
             <div class="cs-form-grid">
                 <div class="cs-field">
-                    <label>Room Code * <small style="color:#6b7280;">(shown on timetable)</small></label>
+                    <label>Room Code * <small style="color:#5c7ea6;">(shown on timetable)</small></label>
                     <input type="text" id="rf-code" value="${data.code||''}" placeholder="e.g. E207" maxlength="30">
                 </div>
                 <div class="cs-field">
@@ -1756,21 +2229,23 @@ function bntm_shortcode_cs_public() {
     ob_start();
     ?>
     <style>
-    .cs-pub * { box-sizing: border-box; font-family: system-ui,sans-serif; }
-    .cs-pub h2 { font-size: 18px; font-weight: 700; color: #1e3a5f; margin: 0 0 4px; }
-    .cs-pub .sub { font-size: 13px; color: #6b7280; margin-bottom: 18px; }
-    .cs-pub-wrap { overflow-x: auto; }
+    @import url('https://fonts.googleapis.com/css2?family=Lora:wght@600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap');
+    .cs-pub * { box-sizing: border-box; font-family: 'Source Sans 3', system-ui, sans-serif; }
+    .cs-pub h2 { font-family: 'Lora', Georgia, serif; font-size: 20px; font-weight: 700; color: var(--cs-blue-dark); margin: 0 0 4px; }
+    .cs-pub .sub { font-size: 13px; color: var(--cs-blue-muted); margin-bottom: 18px; font-weight: 500; }
+    .cs-pub-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--cs-border); }
     .cs-pub-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 700px; }
-    .cs-pub-table th { background: #1e3a5f; color: #fff; padding: 10px 8px; text-align: center; border: 1px solid #1e3a5f; font-size: 12px; }
-    .cs-pub-table td { border: 1px solid #e5e7eb; padding: 0; vertical-align: top; }
-    .cs-pub-slot { background: #f8fafc; padding: 10px 12px; font-weight: 600; font-size: 12px; color: #374151; text-align: center; white-space: nowrap; }
-    .cs-pub-cell { padding: 6px 8px; min-height: 60px; }
-    .cs-pub-entry { background: #dbeafe; border: 1px solid #93c5fd; border-radius: 5px; padding: 5px 7px; line-height: 1.45; }
-    .cs-pub-entry.lab { background: #d1fae5; border-color: #6ee7b7; }
-    .cs-pub-entry b { display: block; font-size: 12px; color: #1e3a5f; }
-    .cs-pub-entry span { font-size: 11px; color: #374151; display: block; }
-    .cs-pub-empty { background: #fafafa; }
-    .cs-pub-legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px; }
+    .cs-pub-table th { background: var(--cs-blue-dark); color: #ffffff; padding: 11px 8px; text-align: center; border: 1px solid var(--cs-blue-mid); font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+    .cs-pub-table td { border: 1px solid var(--cs-border-soft); padding: 0; vertical-align: top; }
+    .cs-pub-slot { background: var(--cs-surface-2); padding: 10px 12px; font-weight: 700; font-size: 12px; color: var(--cs-blue-mid); text-align: center; white-space: nowrap; }
+    .cs-pub-cell { padding: 6px 8px; min-height: 60px; background: var(--cs-surface); }
+    .cs-pub-entry { background: #e5f1ff; border: 1px solid #a8c9eb; border-radius: 5px; padding: 5px 7px; line-height: 1.45; }
+    .cs-pub-entry.lab { background: #e9f5ee; border-color: #8fc8d6; }
+    .cs-pub-entry b { display: block; font-size: 12px; color: var(--cs-blue-dark); font-weight: 700; }
+    .cs-pub-entry span { font-size: 11px; color: #4a5563; display: block; }
+    .cs-pub-entry.lab b { color: #136873; }
+    .cs-pub-empty { background: var(--cs-bg); }
+    .cs-pub-legend { display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px; font-weight: 600; color: var(--cs-blue-mid); }
     .cs-pub-legend-item { display: flex; align-items: center; gap: 6px; }
     .cs-pub-legend-box { width: 14px; height: 14px; border-radius: 3px; }
     </style>
@@ -1782,8 +2257,8 @@ function bntm_shortcode_cs_public() {
             <?php echo esc_html($section->semester); ?> Semester
         </div>
         <div class="cs-pub-legend">
-            <div class="cs-pub-legend-item"><div class="cs-pub-legend-box" style="background:#dbeafe;border:1px solid #93c5fd"></div> Lecture</div>
-            <div class="cs-pub-legend-item"><div class="cs-pub-legend-box" style="background:#d1fae5;border:1px solid #6ee7b7"></div> Lab</div>
+            <div class="cs-pub-legend-item"><div class="cs-pub-legend-box" style="background:#e8eef7;border:1px solid #c0cfe8"></div> Lecture</div>
+            <div class="cs-pub-legend-item"><div class="cs-pub-legend-box" style="background:#e9f5ee;border:1px solid #a8d8b8"></div> Lab</div>
         </div>
         <div class="cs-pub-wrap">
         <table class="cs-pub-table">
