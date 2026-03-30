@@ -174,6 +174,35 @@ add_action('wp_ajax_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_nopriv_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_bk_update_booking_status', 'bntm_ajax_bk_update_booking_status');
 
+function bk_get_current_access_role() {
+    if (!is_user_logged_in()) {
+        return 'guest';
+    }
+
+    if (current_user_can('manage_options')) {
+        return 'admin';
+    }
+
+    $current_user = wp_get_current_user();
+    $current_role = bntm_get_user_role($current_user->ID);
+
+    return $current_role ? $current_role : 'user';
+}
+
+function bk_current_user_can_manage_all() {
+    return in_array(bk_get_current_access_role(), ['admin', 'owner'], true);
+}
+
+function bk_current_user_can_access_staff_booking_tools() {
+    return in_array(bk_get_current_access_role(), ['admin', 'owner', 'manager', 'staff'], true);
+}
+
+function bk_get_allowed_dashboard_tabs() {
+    return bk_current_user_can_manage_all()
+        ? ['overview', 'services', 'calendar', 'bookings', 'hours', 'import', 'settings']
+        : ['calendar', 'bookings'];
+}
+
 /* ---------- MAIN DASHBOARD SHORTCODE ---------- */
 
 function bntm_shortcode_bk_dashboard() {
@@ -182,7 +211,14 @@ function bntm_shortcode_bk_dashboard() {
     }
     
     $business_id = get_current_user_id();
-    $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'overview';
+    $allowed_tabs = bk_get_allowed_dashboard_tabs();
+    $default_tab = bk_current_user_can_manage_all() ? 'overview' : 'calendar';
+    $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : $default_tab;
+    $dashboard_url = get_permalink();
+
+    if (!in_array($active_tab, $allowed_tabs, true)) {
+        $active_tab = $default_tab;
+    }
     
     ob_start();
     ?>
@@ -212,15 +248,27 @@ function bntm_shortcode_bk_dashboard() {
     </style>
     <div class="bntm-booking-container">
         <div class="bntm-tabs">
-            <a href="?tab=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
-            <a href="?tab=services" class="bntm-tab <?php echo $active_tab === 'services' ? 'active' : ''; ?>">Services</a>
-            <a href="?tab=calendar" class="bntm-tab <?php echo $active_tab === 'calendar' ? 'active' : ''; ?>">Calendar</a>
-            <a href="?tab=bookings" class="bntm-tab <?php echo $active_tab === 'bookings' ? 'active' : ''; ?>">All Bookings</a>
-            <a href="?tab=hours" class="bntm-tab <?php echo $active_tab === 'hours' ? 'active' : ''; ?>">Operating Hours</a>
-             <?php if (bntm_is_module_enabled('fn') && bntm_is_module_visible('fn')): ?>
-            <a href="?tab=import" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">Import to Finance</a>
-              <?php endif; ?>
-            <a href="?tab=settings" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">Settings</a>
+            <?php if (in_array('overview', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'overview', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
+            <?php endif; ?>
+            <?php if (in_array('services', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'services', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'services' ? 'active' : ''; ?>">Services</a>
+            <?php endif; ?>
+            <?php if (in_array('calendar', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'calendar', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'calendar' ? 'active' : ''; ?>">Calendar</a>
+            <?php endif; ?>
+            <?php if (in_array('bookings', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'bookings', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'bookings' ? 'active' : ''; ?>">All Bookings</a>
+            <?php endif; ?>
+            <?php if (in_array('hours', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'hours', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'hours' ? 'active' : ''; ?>">Operating Hours</a>
+            <?php endif; ?>
+            <?php if (in_array('import', $allowed_tabs, true) && bntm_is_module_enabled('fn') && bntm_is_module_visible('fn')): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'import', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">Import to Finance</a>
+            <?php endif; ?>
+            <?php if (in_array('settings', $allowed_tabs, true)): ?>
+            <a href="<?php echo esc_url(add_query_arg('tab', 'settings', $dashboard_url)); ?>" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">Settings</a>
+            <?php endif; ?>
         </div>
         
         <div class="bntm-tab-content">
@@ -1221,16 +1269,31 @@ function bk_bookings_tab($business_id) {
     global $wpdb;
     $bookings_table = $wpdb->prefix . 'bk_bookings';
     $services_table = $wpdb->prefix . 'bk_services';
-    
-    $bookings = $wpdb->get_results($wpdb->prepare(
-        "SELECT b.*, s.name as service_name 
-         FROM $bookings_table b
-         LEFT JOIN $services_table s ON b.service_id = s.id
-         ORDER BY b.booking_date DESC, b.start_time DESC",
-         
-         
+    $dashboard_url = get_permalink();
+    $filter_scope = isset($_GET['bk_filter_scope']) ? sanitize_text_field($_GET['bk_filter_scope']) : '';
+    $filter_month = isset($_GET['bk_filter_month']) ? sanitize_text_field($_GET['bk_filter_month']) : '';
+    $query = "
+        SELECT b.*, s.name as service_name
+        FROM $bookings_table b
+        LEFT JOIN $services_table s ON b.service_id = s.id
+    ";
+    $query_args = [];
 
-    ));
+    if ($filter_scope === 'today') {
+        $query .= " WHERE b.booking_date = %s";
+        $query_args[] = current_time('Y-m-d');
+    } elseif ($filter_month && preg_match('/^\d{4}-\d{2}$/', $filter_month)) {
+        $query .= " WHERE DATE_FORMAT(b.booking_date, '%%Y-%%m') = %s";
+        $query_args[] = $filter_month;
+    }
+
+    $query .= " ORDER BY b.booking_date DESC, b.start_time DESC";
+    
+    if (empty($query_args)) {
+        $bookings = $wpdb->get_results($query);
+    } else {
+        $bookings = $wpdb->get_results($wpdb->prepare($query, ...$query_args));
+    }
     
     $nonce = wp_create_nonce('bk_nonce');
     
@@ -1242,6 +1305,20 @@ function bk_bookings_tab($business_id) {
     
     <div class="bntm-form-section">
         <h3>All Bookings (<?php echo count($bookings); ?>)</h3>
+        <form method="get" class="bntm-form" style="margin-bottom: 20px;">
+            <input type="hidden" name="tab" value="bookings">
+            <div class="bntm-form-row">
+                <div class="bntm-form-group">
+                    <label for="bk-filter-month">Filter by Month</label>
+                    <input type="month" id="bk-filter-month" name="bk_filter_month" value="<?php echo esc_attr($filter_scope === 'today' ? '' : $filter_month); ?>">
+                </div>
+                <div class="bntm-form-group" style="display:flex; align-items:flex-end; gap:10px; flex-wrap: wrap;">
+                    <button type="submit" class="bntm-btn-primary">Apply Filter</button>
+                    <a href="<?php echo esc_url(add_query_arg(['tab' => 'bookings', 'bk_filter_scope' => 'today'], $dashboard_url)); ?>" class="bntm-btn-secondary">Today</a>
+                    <a href="<?php echo esc_url(add_query_arg('tab', 'bookings', $dashboard_url)); ?>" class="bntm-btn-secondary">Reset</a>
+                </div>
+            </div>
+        </form>
         <?php if (empty($bookings)): ?>
             <p>No bookings yet.</p>
         <?php else: ?>
@@ -5484,21 +5561,18 @@ function bntm_ajax_bk_update_admin_booking() {
     );
     
     if ($result !== false) {
-        // Send email notification if time changed
+        // Send email notification if schedule changed
         if ($time_changed) {
-            $customer_email = $current_booking->customer_email;
-            $customer_name = $current_booking->customer_name;
-            
-            $message = "Hello $customer_name,\n\n";
-            $message .= "Your booking has been updated.\n\n";
-            $message .= "New Date: " . date('F j, Y', strtotime($booking_date)) . "\n";
-            $message .= "New Time: " . date('g:i A', strtotime($start_time)) . " - " . date('g:i A', strtotime($end_time)) . "\n";
-            $message .= "Status: " . ucfirst($status) . "\n";
-            $message .= "Payment Status: " . ucfirst($payment_status) . "\n";
-            $message .= "Total Amount: " . bk_format_price($total) . "\n\n";
-            $message .= "Booking ID: " . $booking_id;
-            
-            wp_mail($customer_email, 'Booking Updated', $message);
+            bk_send_booking_update_email($current_booking->customer_email, [
+                'name' => $current_booking->customer_name,
+                'service' => $current_booking->service_id,
+                'date' => $booking_date,
+                'start_time' => $start_time,
+                'end_time' => $end_time,
+                'total' => $total,
+                'booking_id' => $booking_id,
+                'payment_status' => $payment_status
+            ], $service_id);
         }
         
         wp_send_json_success(['message' => 'Booking updated successfully']);
@@ -5614,19 +5688,24 @@ function bntm_ajax_bk_create_admin_booking() {
     ]);
     
     if ($result) {
-        // Send confirmation email
-        $message = "Hello $customer_name,\n\n";
-        $message .= "A booking has been created for you.\n\n";
-        $message .= "Service: " . $service->name . "\n";
-        $message .= "Quantity: " . $quantity . " slot(s)\n";
-        $message .= "Duration: " . $total_duration . " minutes\n";
-        $message .= "Date: " . date('F j, Y', strtotime($booking_date)) . "\n";
-        $message .= "Time: " . date('g:i A', strtotime($start_time)) . " - " . date('g:i A', strtotime($calculated_end_time)) . "\n";
-        $message .= "Total: " . bk_format_price($total) . "\n";
-        $message .= "Payment Status: " . ucfirst($payment_status) . "\n\n";
-        $message .= "Booking ID: " . $booking_rand_id;
-        
-        wp_mail($customer_email, 'Booking Confirmation', $message);
+        bk_send_booking_confirmation_email($customer_email, [
+            'name' => $customer_name,
+            'service' => $service->name,
+            'quantity' => $quantity,
+            'duration' => $service->duration,
+            'total_duration' => $total_duration,
+            'date' => $booking_date,
+            'start_time' => $start_time,
+            'end_time' => $calculated_end_time,
+            'unit_price' => $quantity > 0 ? ($amount / $quantity) : $amount,
+            'subtotal' => $amount,
+            'tax' => $tax,
+            'tax_rate' => floatval(bntm_get_setting('bk_tax_rate', '0')),
+            'total' => $total,
+            'booking_id' => $booking_rand_id,
+            'payment_status' => $payment_status,
+            'payment_method' => $payment_method
+        ]);
         
         wp_send_json_success(['message' => 'Booking created successfully']);
     } else {
@@ -5659,6 +5738,11 @@ function bntm_shortcode_bk_transaction() {
     
     $payment_methods = json_decode(bntm_get_setting('bk_payment_methods', '[]'), true);
     $payment_method_data = null;
+    $is_dashboard_viewer = is_user_logged_in() && bk_current_user_can_access_staff_booking_tools();
+    $dashboard_page = get_page_by_path('booking');
+    $dashboard_bookings_url = $dashboard_page ? add_query_arg('tab', 'bookings', get_permalink($dashboard_page)) : '';
+    $booking_page = get_page_by_path('book-appointment');
+    $booking_page_url = $booking_page ? get_permalink($booking_page) : '';
     
     if (is_array($payment_methods) && !empty($booking->payment_method)) {
         foreach ($payment_methods as $method) {
@@ -5672,13 +5756,61 @@ function bntm_shortcode_bk_transaction() {
     ob_start();
     ?>
     <div class="bntm-container">
-        <div class="bntm-content">
-            <div class="bk-transaction-banner status-<?php echo esc_attr($booking->status); ?>">
-                <h2>Booking Status: <?php echo esc_html(ucfirst($booking->status)); ?></h2>
-                <p class="booking-id">Booking ID: #<?php echo esc_html($booking->rand_id); ?></p>
+        <div class="bntm-content bk-transaction-page">
+            <div class="bk-transaction-actions">
+                <?php if ($is_dashboard_viewer): ?>
+                    <?php if ($dashboard_bookings_url): ?>
+                    <a href="<?php echo esc_url($dashboard_bookings_url); ?>" class="bntm-btn-secondary">← Back to All Bookings</a>
+                    <?php else: ?>
+                    <button type="button" class="bntm-btn-secondary" onclick="window.history.back();">← Back</button>
+                    <?php endif; ?>
+                <?php endif; ?>
+
+                <?php if ($booking_page_url): ?>
+                <a href="<?php echo esc_url($booking_page_url); ?>" class="bntm-btn-primary">
+                    <?php echo $is_dashboard_viewer ? 'Open Booking Page' : 'Book Again'; ?>
+                </a>
+                <?php endif; ?>
             </div>
 
-            <div class="bntm-form-section">
+            <div class="bk-transaction-banner">
+                <div class="bk-transaction-banner-header">
+                    <div>
+                        <p class="bk-transaction-eyebrow">Booking Transaction</p>
+                        <h2>Booking Details</h2>
+                        <p class="booking-id">Reference No. #<?php echo esc_html($booking->rand_id); ?></p>
+                    </div>
+                    <div class="bk-transaction-badges">
+                        <span class="bk-status-badge status-<?php echo esc_attr($booking->status); ?>">
+                            <?php echo esc_html(ucfirst($booking->status)); ?>
+                        </span>
+                        <span class="bk-payment-badge payment-<?php echo esc_attr($booking->payment_status); ?>">
+                            <?php echo esc_html(ucfirst(str_replace('_', ' ', $booking->payment_status))); ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bk-transaction-summary">
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Service</span>
+                    <strong class="bk-summary-value"><?php echo esc_html($booking->service_name); ?></strong>
+                </div>
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Appointment Date</span>
+                    <strong class="bk-summary-value"><?php echo date('F j, Y', strtotime($booking->booking_date)); ?></strong>
+                </div>
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Time Schedule</span>
+                    <strong class="bk-summary-value"><?php echo date('g:i A', strtotime($booking->start_time)); ?> - <?php echo date('g:i A', strtotime($booking->end_time)); ?></strong>
+                </div>
+                <div class="bk-summary-card bk-summary-total">
+                    <span class="bk-summary-label">Total Amount</span>
+                    <strong class="bk-summary-value"><?php echo bk_format_price($booking->total); ?></strong>
+                </div>
+            </div>
+
+            <div class="bntm-form-section bk-transaction-section">
                 <h3>Booking Information</h3>
                 <table class="bk-transaction-table">
                     <tr>
@@ -5706,7 +5838,7 @@ function bntm_shortcode_bk_transaction() {
                 </table>
             </div>
 
-            <div class="bntm-form-section">
+            <div class="bntm-form-section bk-transaction-section">
                 <h3>Customer Details</h3>
                 <table class="bk-transaction-table">
                     <tr>
@@ -5730,7 +5862,7 @@ function bntm_shortcode_bk_transaction() {
                 </table>
             </div>
 
-            <div class="bntm-form-section">
+            <div class="bntm-form-section bk-transaction-section">
                 <h3>Payment Information</h3>
                 <table class="bk-transaction-table">
                     <tr>
@@ -5768,8 +5900,8 @@ function bntm_shortcode_bk_transaction() {
                 </table>
                 
                 <?php if ($payment_method_data && $booking->payment_status === 'unpaid'): ?>
-                <div style="margin-top: 20px; padding: 15px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
-                    <strong>Payment Details:</strong><br>
+                <div class="bk-payment-instructions">
+                    <strong>Payment Instructions</strong><br>
                     <?php if (!empty($payment_method_data['account_name'])): ?>
                         Account Name: <strong><?php echo esc_html($payment_method_data['account_name']); ?></strong><br>
                     <?php endif; ?>
@@ -5777,74 +5909,157 @@ function bntm_shortcode_bk_transaction() {
                         Account Number: <strong><?php echo esc_html($payment_method_data['account_number']); ?></strong><br>
                     <?php endif; ?>
                     <?php if (!empty($payment_method_data['description'])): ?>
-                        <br><i> Comments: <?php echo nl2br(esc_html($payment_method_data['description'])); ?></i>
+                        <br><i>Instructions: <?php echo nl2br(esc_html($payment_method_data['description'])); ?></i>
                     <?php endif; ?>
                 </div>
                 <?php endif; ?>
-            </div>
-
-            <div style="margin-top: 30px; text-align: center;">
-                <a href="<?php echo get_permalink(get_page_by_path('book-appointment')); ?>" class="bntm-btn bntm-btn-primary">
-                    Book Another Appointment
-                </a>
             </div>
         </div>
     </div>
 
     <style>
+    .bk-transaction-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+    }
+
+    .bk-transaction-page {
+        max-width: 1024px;
+        margin: 0 auto;
+    }
+
     .bk-transaction-banner {
-        padding: 30px;
-        border-radius: 8px;
-        text-align: center;
-        margin-bottom: 30px;
+        padding: 28px 32px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
     }
-    
-    .bk-transaction-banner.status-pending {
-        background: #fef3c7;
-        border: 2px solid #f59e0b;
+
+    .bk-transaction-banner-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
     }
-    
-    .bk-transaction-banner.status-confirmed,
-    .bk-transaction-banner.status-completed {
-        background: #d1fae5;
-        border: 2px solid #059669;
+
+    .bk-transaction-badges {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
     }
-    
-    .bk-transaction-banner.status-cancelled {
-        background: #fee2e2;
-        border: 2px solid #dc2626;
+
+    .bk-transaction-eyebrow {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #64748b;
+        font-weight: 700;
     }
     
     .bk-transaction-banner h2 {
-        margin: 0 0 10px 0;
+        margin: 0 0 8px 0;
         color: #1f2937;
+        font-size: 30px;
     }
     
     .booking-id {
-        font-size: 18px;
-        color: #6b7280;
+        font-size: 15px;
+        color: #64748b;
         margin: 0;
+    }
+
+    .bk-transaction-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .bk-summary-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 18px 20px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+    }
+
+    .bk-summary-total {
+        background: #f0fdf4;
+        border-color: #86efac;
+    }
+
+    .bk-summary-label {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+    }
+
+    .bk-summary-value {
+        display: block;
+        color: #111827;
+        font-size: 18px;
+        line-height: 1.4;
+    }
+
+    .bk-transaction-section {
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        padding: 0;
+        overflow: hidden;
+        margin-bottom: 20px;
+        background: #ffffff;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+    }
+
+    .bk-transaction-section h3 {
+        margin: 0;
+        padding: 18px 24px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+        background: #f8fafc;
+        border-bottom: 1px solid #e5e7eb;
     }
     
     .bk-transaction-table {
         width: 100%;
+        border-collapse: collapse;
     }
     
     .bk-transaction-table td {
-        padding: 12px 0;
+        padding: 16px 24px;
         border-bottom: 1px solid #e5e7eb;
+        vertical-align: top;
     }
     
     .bk-transaction-table td:first-child {
-        width: 200px;
-        color: #6b7280;
+        width: 220px;
+        color: #64748b;
+        background: #fcfcfd;
+        font-weight: 600;
+    }
+
+    .bk-transaction-table tr:last-child td {
+        border-bottom: none;
     }
     
     .bk-status-badge,
     .bk-payment-badge {
         display: inline-block;
-        padding: 6px 12px;
-        border-radius: 12px;
+        padding: 7px 12px;
+        border-radius: 999px;
         font-size: 12px;
         font-weight: 600;
     }
@@ -5862,10 +6077,55 @@ function bntm_shortcode_bk_transaction() {
         background: #d1fae5;
         color: #065f46;
     }
-    
-    .bk-status-badge.status-cancelled {
+
+    .bk-status-badge.status-cancelled,
+    .bk-payment-badge.payment-dropped {
         background: #fee2e2;
         color: #991b1b;
+    }
+
+    .bk-payment-badge.payment-pending,
+    .bk-payment-badge.payment-waiting_payment {
+        background: #dbeafe;
+        color: #1d4ed8;
+    }
+
+    .bk-payment-instructions {
+        margin: 20px 24px 24px;
+        padding: 16px 18px;
+        background: #fff7ed;
+        border: 1px solid #fdba74;
+        border-left: 4px solid #f59e0b;
+        border-radius: 10px;
+        color: #7c2d12;
+        line-height: 1.7;
+    }
+
+    @media (max-width: 768px) {
+        .bk-transaction-actions {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .bk-transaction-banner {
+            padding: 22px 20px;
+        }
+
+        .bk-transaction-banner h2 {
+            font-size: 24px;
+        }
+
+        .bk-transaction-table td {
+            display: block;
+            width: 100%;
+            padding: 12px 16px;
+        }
+
+        .bk-transaction-table td:first-child {
+            width: 100%;
+            border-bottom: none;
+            padding-bottom: 4px;
+        }
     }
     </style>
     <?php
@@ -6983,6 +7243,58 @@ function bntm_ajax_bk_update_service() {
     }
 }
 
+add_action('wp_ajax_bk_toggle_service_status', 'bntm_ajax_bk_toggle_service_status');
+
+function bntm_ajax_bk_toggle_service_status() {
+    check_ajax_referer('bk_nonce', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+    
+    global $wpdb;
+    $table = $wpdb->prefix . 'bk_services';
+    $business_id = get_current_user_id();
+    
+    $service_id = intval($_POST['service_id'] ?? 0);
+    $status = sanitize_text_field($_POST['status'] ?? '');
+    
+    if (!$service_id) {
+        wp_send_json_error(['message' => 'Invalid service']);
+    }
+    
+    if (!in_array($status, ['active', 'inactive'], true)) {
+        wp_send_json_error(['message' => 'Invalid status']);
+    }
+    
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM $table WHERE id = %d AND business_id = %d",
+        $service_id,
+        $business_id
+    ));
+    
+    if (!$service) {
+        wp_send_json_error(['message' => 'Service not found']);
+    }
+    
+    $result = $wpdb->update(
+        $table,
+        ['status' => $status],
+        ['id' => $service_id, 'business_id' => $business_id],
+        ['%s'],
+        ['%d', '%d']
+    );
+    
+    if ($result === false) {
+        wp_send_json_error(['message' => 'Failed to update service status']);
+    }
+    
+    wp_send_json_success([
+        'message' => 'Service status updated successfully.',
+        'status' => $status
+    ]);
+}
+
 add_action('wp_ajax_bk_delete_service', 'bntm_ajax_bk_delete_service');
 
 function bntm_ajax_bk_delete_service() {
@@ -7477,6 +7789,20 @@ function bk_format_price($amount = '') {
     return $symbol . number_format($amount, 2);
 }
 
+function bk_get_booking_tracking_url($booking_id) {
+    $booking_id = trim((string) $booking_id);
+    if ($booking_id === '') {
+        return '';
+    }
+
+    $transaction_page = get_page_by_path('booking-transaction');
+    if (!$transaction_page) {
+        return '';
+    }
+
+    return add_query_arg('id', $booking_id, get_permalink($transaction_page));
+}
+
 /**
  * Send booking confirmation email
  */
@@ -7491,6 +7817,7 @@ function bk_send_booking_confirmation_email($email, $data) {
     $start_time_formatted = date('g:i A', strtotime($data['start_time']));
     $end_time_formatted = date('g:i A', strtotime($data['end_time']));
     $date_formatted = date('l, F j, Y', strtotime($data['date']));
+    $tracking_url = !empty($data['tracking_url']) ? $data['tracking_url'] : bk_get_booking_tracking_url($data['booking_id'] ?? '');
     
     $message = "Hello {$data['name']},\n\n";
     $message .= "Your booking has been received!\n\n";
@@ -7531,7 +7858,11 @@ function bk_send_booking_confirmation_email($email, $data) {
     $message .= "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
     $message .= "Booking ID: {$data['booking_id']}\n";
     $message .= "Payment Method: {$data['payment_method']}\n";
-    $message .= "Status: " . ucfirst(str_replace('_', ' ', $data['payment_status'])) . "\n\n";
+    $message .= "Status: " . ucfirst(str_replace('_', ' ', $data['payment_status'])) . "\n";
+    if ($tracking_url !== '') {
+        $message .= "Track Your Booking: {$tracking_url}\n";
+    }
+    $message .= "\n";
     
     if ($data['payment_status'] === 'unpaid' || $data['payment_status'] === 'pending') {
         $message .= "Please complete payment to confirm your booking.\n\n";
@@ -7539,6 +7870,46 @@ function bk_send_booking_confirmation_email($email, $data) {
     
     $message .= "Thank you for choosing our service!";
     
+    return wp_mail($email, $subject, $message);
+}
+
+function bk_send_booking_update_email($email, $data, $service_id = 0) {
+    global $wpdb;
+
+    $service_name = $data['service'] ?? '';
+    if ($service_id && (empty($service_name) || is_numeric($service_name))) {
+        $services_table = $wpdb->prefix . 'bk_services';
+        $resolved_service = $wpdb->get_var($wpdb->prepare(
+            "SELECT name FROM $services_table WHERE id = %d",
+            $service_id
+        ));
+
+        if ($resolved_service) {
+            $service_name = $resolved_service;
+        }
+    }
+
+    $start_time_formatted = date('g:i A', strtotime($data['start_time']));
+    $end_time_formatted = date('g:i A', strtotime($data['end_time']));
+    $date_formatted = date('l, F j, Y', strtotime($data['date']));
+    $payment_status = ucfirst(str_replace('_', ' ', $data['payment_status'] ?? 'pending'));
+    $tracking_url = !empty($data['tracking_url']) ? $data['tracking_url'] : bk_get_booking_tracking_url($data['booking_id'] ?? '');
+
+    $subject = 'Booking Updated - ' . ($service_name ?: 'Appointment');
+    $message = "Hello {$data['name']},\n\n";
+    $message .= "Your booking details have been updated.\n\n";
+    $message .= "Service: " . ($service_name ?: 'Appointment') . "\n";
+    $message .= "Date: {$date_formatted}\n";
+    $message .= "Time: {$start_time_formatted} - {$end_time_formatted}\n";
+    $message .= "Total Amount: " . bk_format_price($data['total']) . "\n";
+    $message .= "Payment Status: {$payment_status}\n";
+    $message .= "Booking ID: {$data['booking_id']}\n";
+    if ($tracking_url !== '') {
+        $message .= "Track Your Booking: {$tracking_url}\n";
+    }
+    $message .= "\n";
+    $message .= "Please keep this email for your reference.";
+
     return wp_mail($email, $subject, $message);
 }
 /* ---------- BK BOOKINGS TAB FOR FINANCE IMPORT ---------- */

@@ -40,7 +40,7 @@ function bntm_hr_get_tables() {
             total_hours DECIMAL(5,2) NULL,
             notes TEXT,
             status VARCHAR(50) DEFAULT 'pending',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMbntm_is_module_visibleP,
             INDEX idx_employee (employee_id),
             INDEX idx_business (business_id),
             INDEX idx_date (clock_in)
@@ -361,6 +361,11 @@ function bntm_hr_my_profile_view($user_id) {
         </form>
     </div>
 
+    <style>
+    .bntm-inline-radios { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; min-height: 40px; }
+    .bntm-inline-radios label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .bntm-inline-radios input[type="radio"] { accent-color: var(--bntm-primary, #2563eb); }
+    </style>
     <script>
     jQuery(document).ready(function($) {
         const bntmAjax = {
@@ -641,34 +646,193 @@ function bntm_hr_settings_view($can_manage) {
     $lunch_break_hours = bntm_get_setting('hr_lunch_break_hours', '1');
     $ot_rate = bntm_get_setting('hr_ot_rate', '1');
     $available_modules = bntm_get_available_modules();
+    $owner_modules = [];
+    foreach ($available_modules as $module_slug => $module_data) {
+        if (bntm_is_module_enabled($module_slug)) {
+            $owner_modules[] = $module_slug;
+        }
+    }
     ?>
+    <style>
+        .hr-settings-role-item {
+            overflow: hidden;
+        }
+
+        .hr-settings-role-shell {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 15px;
+        }
+
+        .hr-settings-role-main,
+        .hr-settings-deduction-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .hr-settings-role-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .hr-settings-role-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .hr-settings-role-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 15px;
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+
+        .hr-settings-role-actions,
+        .hr-settings-deduction-item {
+            display: flex;
+            gap: 8px;
+        }
+
+        .hr-settings-role-actions {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #e2e8f0;
+            justify-content: flex-end;
+        }
+
+        .hr-settings-deduction-item {
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        @media (max-width: 768px) {
+            .hr-settings-role-shell,
+            .hr-settings-deduction-item {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .hr-settings-role-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .hr-settings-role-actions {
+                width: 100%;
+                justify-content: stretch;
+            }
+
+            .hr-settings-role-actions .bntm-btn-small,
+            .hr-settings-deduction-item .bntm-btn-small {
+                width: 100%;
+            }
+        }
+    </style>
     <div class="bntm-form-section"><h3>HR Settings</h3></div>
     <div class="bntm-form-section">
         <h3>Employee Roles & Configurations</h3>
         <p>Configure custom employee roles with module access and payroll settings</p>
+        <div class="role-item hr-settings-role-item" style="background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%); padding: 20px; border-radius: 14px; margin-bottom: 15px; border: 1px solid #bfdbfe; box-shadow: 0 10px 30px rgba(37, 99, 235, 0.08);">
+            <div class="hr-settings-role-shell">
+                <div class="hr-settings-role-main">
+                    <div class="hr-settings-role-title">
+                        <strong style="font-size: 16px; color: #1e3a8a;">Owner</strong>
+                        <span style="background: #dbeafe; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em;">owner</span>
+                    </div>
+                    <div style="margin-bottom: 14px; padding: 14px; background: rgba(255, 255, 255, 0.7); border: 1px solid #dbeafe; border-radius: 12px;">
+                        <?php
+                        $owner_module_names = [];
+                        if (!empty($owner_modules)) {
+                            foreach ($owner_modules as $module_slug) {
+                                if (isset($available_modules[$module_slug])) {
+                                    $owner_module_names[] = $available_modules[$module_slug]['name'];
+                                }
+                            }
+                        }
+                        ?>
+                        <div class="hr-settings-role-meta">
+                            <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #1d4ed8;">Module Access</div>
+                            <span style="background: #dbeafe; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;">
+                                <?php echo count($owner_module_names); ?> Enabled Module<?php echo count($owner_module_names) !== 1 ? 's' : ''; ?>
+                            </span>
+                        </div>
+                        <?php if (!empty($owner_module_names)): ?>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                <?php foreach ($owner_module_names as $module_name): ?>
+                                    <span style="display: inline-flex; align-items: center; padding: 6px 10px; background: #ffffff; border: 1px solid #bfdbfe; border-radius: 999px; color: #1e40af; font-size: 12px; font-weight: 600;">
+                                        <?php echo esc_html($module_name); ?>
+                                    </span>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <span style="display: inline-flex; align-items: center; padding: 6px 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; color: #64748b; font-size: 12px; font-weight: 600;">No enabled modules</span>
+                        <?php endif; ?>
+                    </div>
+                    <p style="margin: 0; font-size: 13px; color: #475569; line-height: 1.6;">
+                        Owners automatically receive access to every module that is currently enabled in Module Manager.
+                    </p>
+                </div>
+            </div>
+        </div>
         <div id="roles-list">
             <?php if ($roles_array): foreach ($roles_array as $key => $role): ?>
-                <div class="role-item" style="background: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 15px; border: 2px solid #e5e7eb;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                        <div style="flex: 1;">
-                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                <div class="role-item hr-settings-role-item" style="background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); padding: 20px; border-radius: 14px; margin-bottom: 15px; border: 1px solid #dbe3ef; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);">
+                    <div class="hr-settings-role-shell">
+                        <div class="hr-settings-role-main">
+                            <div class="hr-settings-role-title">
                                 <strong style="font-size: 16px; color: #1f2937;"><?php echo esc_html($role['label']); ?></strong>
-                                <span style="background: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;"><?php echo esc_html($key); ?></span>
+                                <span style="background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em;"><?php echo esc_html($key); ?></span>
                             </div>
-                            <div style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">
-                                <strong>📱 Modules:</strong>
-                                <?php $modules = isset($role['modules']) ? $role['modules'] : [];
-                                if (!empty($modules)) { $module_names = []; foreach ($modules as $module_slug) { if (isset($available_modules[$module_slug])) $module_names[] = $available_modules[$module_slug]['name']; } echo esc_html(implode(', ', $module_names)); } else { echo '<span style="color: #ef4444;">No modules assigned</span>'; } ?>
+                            <div style="margin-bottom: 14px; padding: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+                                <?php
+                                $modules = isset($role['modules']) ? $role['modules'] : [];
+                                $module_names = [];
+                                if (!empty($modules)) {
+                                    foreach ($modules as $module_slug) {
+                                        if (isset($available_modules[$module_slug])) {
+                                            $module_names[] = $available_modules[$module_slug]['name'];
+                                        }
+                                    }
+                                }
+                                ?>
+                                <div class="hr-settings-role-meta">
+                                    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">Module Access</div>
+                                    <span style="background: #ecfeff; color: #0f766e; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;">
+                                        <?php echo count($module_names); ?> Module<?php echo count($module_names) !== 1 ? 's' : ''; ?>
+                                    </span>
+                                </div>
+                                <?php if (!empty($module_names)): ?>
+                                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                                        <?php foreach ($module_names as $module_name): ?>
+                                            <span style="display: inline-flex; align-items: center; padding: 6px 10px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 999px; color: #334155; font-size: 12px; font-weight: 600;">
+                                                <?php echo esc_html($module_name); ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span style="display: inline-flex; align-items: center; padding: 6px 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 999px; color: #b91c1c; font-size: 12px; font-weight: 600;">No modules assigned</span>
+                                <?php endif; ?>
                             </div>
-                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; background: white; padding: 12px; border-radius: 6px; margin-top: 10px;">
+                            <div class="hr-settings-role-stats">
                                 <div><div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">💰 Hourly Rate</div><div style="font-size: 16px; font-weight: 700; color: #059669;">₱<?php echo number_format(floatval($role['hourly_rate'] ?? $hourly_rate), 2); ?></div></div>
                                 <div><div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">⏰ Max Daily Hours</div><div style="font-size: 16px; font-weight: 700; color: #2563eb;"><?php echo floatval($role['work_hours'] ?? $work_hours); ?>h</div></div>
                                 <div><div style="font-size: 11px; color: #6b7280; text-transform: uppercase;">☕ Lunch Break</div><div style="font-size: 16px; font-weight: 700; color: #f59e0b;"><?php echo floatval($role['lunch_break_hours'] ?? $lunch_break_hours); ?>h</div></div>
                             </div>
-                        </div>
-                        <div style="display: flex; gap: 8px;">
-                            <button class="bntm-btn-small edit-role" data-key="<?php echo esc_attr($key); ?>">Edit</button>
-                            <button class="bntm-btn-small bntm-btn-danger delete-role" data-key="<?php echo esc_attr($key); ?>">Delete</button>
+                            <div class="hr-settings-role-actions">
+                                <button class="bntm-btn-small edit-role" data-key="<?php echo esc_attr($key); ?>">Edit</button>
+                                <button class="bntm-btn-small bntm-btn-danger delete-role" data-key="<?php echo esc_attr($key); ?>">Delete</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -683,10 +847,11 @@ function bntm_hr_settings_view($can_manage) {
             </div>
             <div class="bntm-form-group">
                 <label>Module Access *</label>
-                <p style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">Select which modules this role can access:</p>
+                <p style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">Select which enabled modules this role can access:</p>
                 <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px;">
                     <?php foreach ($available_modules as $module_slug => $module_data): ?>
-                        <label style="display: flex; align-items: center; padding: 8px; background: #f9fafb; border-radius: 4px; cursor: pointer;"><input type="checkbox" class="role-module" value="<?php echo esc_attr($module_slug); ?>" style="margin-right: 8px; width: unset;" /><span><?php echo esc_html($module_data['name']); ?></span></label>
+                        <?php if (!bntm_is_module_enabled($module_slug)) { continue; } ?>
+                        <label style="display: flex; align-items: center; padding: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 4px; cursor: pointer;"><input type="checkbox" class="role-module" value="<?php echo esc_attr($module_slug); ?>" style="margin-right: 8px; width: unset;" /><span><?php echo esc_html($module_data['name']); ?> <small style="color: #15803d;">(Enabled)</small></span></label>
                     <?php endforeach; ?>
                 </div>
             </div>
@@ -734,8 +899,8 @@ function bntm_hr_settings_view($can_manage) {
             $deductions = bntm_get_setting('hr_deductions', '');
             $deductions_array = $deductions ? json_decode($deductions, true) : [];
             if ($deductions_array): foreach ($deductions_array as $key => $deduction): ?>
-                <div class="role-item" style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-                    <div>
+                <div class="role-item hr-settings-deduction-item" style="background: #f9fafb; padding: 15px; border-radius: 6px; margin-bottom: 10px;">
+                    <div class="hr-settings-deduction-main">
                         <strong><?php echo esc_html($deduction['name']); ?></strong>
                         <div style="font-size: 13px; color: #6b7280; margin-top: 5px;">
                             Type: <?php echo esc_html(ucfirst($deduction['type'])); ?> | 
@@ -1098,6 +1263,18 @@ function bntm_hr_employees_view($can_manage) {
                     <div class="bntm-form-group"><label>Address</label><textarea name="address" rows="2"></textarea></div>
                     <div class="bntm-form-row"><div class="bntm-form-group"><label>Department</label><input type="text" name="department" placeholder="e.g., Sales, IT, HR" /></div><div class="bntm-form-group"><label>Position</label><input type="text" name="position" placeholder="e.g., Sales Manager" /></div></div>
                     <div class="bntm-form-row"><div class="bntm-form-group"><label>Hire Date</label><input type="date" name="hire_date" value="<?php echo current_time('Y-m-d'); ?>" /></div><div class="bntm-form-group"><label>Hourly Rate (₱)</label><input type="number" name="hourly_rate" id="add-hourly-rate" step="0.01" placeholder="Auto-filled from role" /><small>Leave empty to use role default</small></div></div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 12px 0;">Government & Benefit Details</h4>
+                        <div class="bntm-form-group"><label>TIN Number</label><input type="text" name="tin_number" placeholder="e.g., 123-456-789-000" /></div>
+                        <div class="bntm-form-row"><div class="bntm-form-group"><label>SSS Number</label><input type="text" name="sss_number" placeholder="Enter SSS number" /></div><div class="bntm-form-group"><label>PhilHealth Number</label><input type="text" name="philhealth_number" placeholder="Enter PhilHealth number" /></div></div>
+                        <div class="bntm-form-group"><label>Pag-IBIG Number</label><input type="text" name="pagibig_number" placeholder="Enter Pag-IBIG number" /></div>
+                    </div>
+                    <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 12px 0;">Specific Employee Deduction</h4>
+                        <p style="margin: 0 0 12px 0; color: #9a3412; font-size: 13px;">Use this when a specific employee has payables to the company.</p>
+                        <div class="bntm-form-row"><div class="bntm-form-group"><label>Deduction Label</label><input type="text" name="personal_deduction_label" placeholder="e.g., Company Payable" /></div><div class="bntm-form-group"><label>Deduction Amount (PHP)</label><input type="number" name="personal_deduction_amount" step="0.01" min="0" placeholder="0.00" /></div></div>
+                        <div class="bntm-form-group"><label>Deduction Notes</label><textarea name="personal_deduction_notes" rows="2" placeholder="Optional remarks about the payable or deduction"></textarea></div>
+                    </div>
                     <div class="bntm-form-group"><label>Employee PIN (for Kiosk)</label><input type="text" name="pin" maxlength="6" placeholder="4-6 digit PIN" /><small>Used for clock in/out at kiosk</small></div>
                     <div class="bntm-form-group"><label>Emergency Contact Name</label><input type="text" name="emergency_name" /></div>
                     <div class="bntm-form-group"><label>Emergency Contact Phone</label><input type="tel" name="emergency_phone" /></div>
@@ -1123,6 +1300,18 @@ function bntm_hr_employees_view($can_manage) {
                     <div class="bntm-form-group"><label>Address</label><textarea name="address" rows="2"></textarea></div>
                     <div class="bntm-form-row"><div class="bntm-form-group"><label>Department</label><input type="text" name="department" /></div><div class="bntm-form-group"><label>Position</label><input type="text" name="position" /></div></div>
                     <div class="bntm-form-row"><div class="bntm-form-group"><label>Hire Date</label><input type="date" name="hire_date" /></div><div class="bntm-form-group"><label>Hourly Rate (₱)</label><input type="number" name="hourly_rate" id="edit-hourly-rate" step="0.01" /><small>Leave empty to use role default</small></div></div>
+                    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 12px 0;">Government & Benefit Details</h4>
+                        <div class="bntm-form-group"><label>TIN Number</label><input type="text" name="tin_number" /></div>
+                        <div class="bntm-form-row"><div class="bntm-form-group"><label>SSS Number</label><input type="text" name="sss_number" /></div><div class="bntm-form-group"><label>PhilHealth Number</label><input type="text" name="philhealth_number" /></div></div>
+                        <div class="bntm-form-group"><label>Pag-IBIG Number</label><input type="text" name="pagibig_number" /></div>
+                    </div>
+                    <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 12px 0;">Specific Employee Deduction</h4>
+                        <p style="margin: 0 0 12px 0; color: #9a3412; font-size: 13px;">Use this when a specific employee has payables to the company.</p>
+                        <div class="bntm-form-row"><div class="bntm-form-group"><label>Deduction Label</label><input type="text" name="personal_deduction_label" /></div><div class="bntm-form-group"><label>Deduction Amount (PHP)</label><input type="number" name="personal_deduction_amount" step="0.01" min="0" /></div></div>
+                        <div class="bntm-form-group"><label>Deduction Notes</label><textarea name="personal_deduction_notes" rows="2"></textarea></div>
+                    </div>
                     <div class="bntm-form-group"><label>Employee PIN (for Kiosk)</label><input type="text" name="pin" maxlength="6" /></div>
                     <div class="bntm-form-group"><label>Emergency Contact Name</label><input type="text" name="emergency_name" /></div>
                     <div class="bntm-form-group"><label>Emergency Contact Phone</label><input type="tel" name="emergency_phone" /></div>
@@ -1152,7 +1341,7 @@ function bntm_hr_employees_view($can_manage) {
         const bntmAjax = { ajax_url: '<?php echo admin_url('admin-ajax.php'); ?>', nonce: '<?php echo wp_create_nonce('bntm_hr_nonce'); ?>' };
         const roleSettings = <?php echo json_encode($role_settings); ?>;
         function serializeForm(form) { const formData = new FormData(form); const data = {}; for (let [key, value] of formData.entries()) { data[key] = value; } return data; }
-        function populateForm(form, data) { for (let key in data) { const input = form.querySelector('[name="' + key + '"]'); if (input) { if (input.type === 'checkbox') input.checked = data[key]; else input.value = data[key] || ''; } } }
+        function populateForm(form, data) { for (let key in data) { const inputs = form.querySelectorAll('[name="' + key + '"]'); if (!inputs.length) continue; const firstInput = inputs[0]; if (firstInput.type === 'radio') { inputs.forEach(input => { input.checked = input.value === String(data[key] || ''); }); } else if (firstInput.type === 'checkbox') { firstInput.checked = !!data[key]; } else { firstInput.value = data[key] || ''; } } }
         function updateRoleInfo(roleKey, prefix) { const settings = roleSettings[roleKey]; if (settings) { document.getElementById(prefix + '-role-info').style.display = 'block'; document.getElementById(prefix + '-info-rate').textContent = parseFloat(settings.hourly_rate).toFixed(2); document.getElementById(prefix + '-info-hours').textContent = settings.work_hours; document.getElementById(prefix + '-info-lunch').textContent = settings.lunch_break_hours; if (prefix === 'add') { const hourlyRateInput = document.getElementById(prefix + '-hourly-rate'); if (!hourlyRateInput.value) hourlyRateInput.placeholder = '₱' + parseFloat(settings.hourly_rate).toFixed(2) + ' (Role default)'; } } else { document.getElementById(prefix + '-role-info').style.display = 'none'; } }
         function checkPasswordMatch(passwordId, confirmId, messageId, submitBtnId) { const password = document.getElementById(passwordId); const confirmPassword = document.getElementById(confirmId); const message = document.getElementById(messageId); const submitBtn = document.getElementById(submitBtnId); if (password && confirmPassword && message && submitBtn) { const checkMatch = () => { if (confirmPassword.value === '') { message.style.display = 'none'; submitBtn.disabled = false; return; } if (password.value !== confirmPassword.value) { message.style.display = 'block'; submitBtn.disabled = true; } else { message.style.display = 'none'; submitBtn.disabled = false; } }; password.addEventListener('input', checkMatch); confirmPassword.addEventListener('input', checkMatch); } }
         async function makeAjaxRequest(action, data = {}) { const formData = new FormData(); formData.append('action', action); formData.append('nonce', bntmAjax.nonce); for (let key in data) { if (Array.isArray(data[key])) data[key].forEach(val => formData.append(key + '[]', val)); else formData.append(key, data[key]); } try { const response = await fetch(bntmAjax.ajax_url, { method: 'POST', body: formData }); const text = await response.text(); try { return JSON.parse(text); } catch (e) { console.error('JSON Parse Error:', text); throw new Error('Invalid JSON response from server'); } } catch (error) { console.error('AJAX Error:', error); throw error; } }
@@ -1201,6 +1390,19 @@ function bntm_get_employee_payroll_settings($employee_id) {
     return ['hourly_rate' => $hourly_rate, 'work_hours' => $work_hours, 'lunch_break_hours' => $lunch_break_hours];
 }
 
+function bntm_hr_normalize_yes_no($value, $default = 'no') {
+    $value = strtolower(trim((string) $value));
+    return in_array($value, ['yes', 'no'], true) ? $value : $default;
+}
+
+function bntm_hr_has_value($value) {
+    if (is_numeric($value)) {
+        return (float) $value > 0;
+    }
+
+    return trim((string) $value) !== '';
+}
+
 /* ---------- AJAX HANDLERS ---------- */
 add_action('wp_ajax_bntm_hr_add_employee', 'bntm_ajax_hr_add_employee');
 function bntm_ajax_hr_add_employee() {
@@ -1213,7 +1415,8 @@ function bntm_ajax_hr_add_employee() {
     $user_id = wp_create_user($username, $password, $email);
     if (is_wp_error($user_id)) { wp_send_json_error(['message' => $user_id->get_error_message()]); }
     wp_update_user(['ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name, 'display_name' => $first_name . ' ' . $last_name]);
-    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', 'active');
+    $sss_number = sanitize_text_field($_POST['sss_number'] ?? ''); $philhealth_number = sanitize_text_field($_POST['philhealth_number'] ?? ''); $pagibig_number = sanitize_text_field($_POST['pagibig_number'] ?? ''); $personal_deduction_label = sanitize_text_field($_POST['personal_deduction_label'] ?? ''); $personal_deduction_amount = floatval($_POST['personal_deduction_amount'] ?? 0); $personal_deduction_notes = sanitize_textarea_field($_POST['personal_deduction_notes'] ?? '');
+    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_tin_number', sanitize_text_field($_POST['tin_number'] ?? '')); update_user_meta($user_id, 'bntm_has_sss', bntm_hr_has_value($sss_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_sss_number', $sss_number); update_user_meta($user_id, 'bntm_has_philhealth', bntm_hr_has_value($philhealth_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_philhealth_number', $philhealth_number); update_user_meta($user_id, 'bntm_has_pagibig', bntm_hr_has_value($pagibig_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_pagibig_number', $pagibig_number); update_user_meta($user_id, 'bntm_has_personal_deduction', (bntm_hr_has_value($personal_deduction_label) || bntm_hr_has_value($personal_deduction_amount) || bntm_hr_has_value($personal_deduction_notes)) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_personal_deduction_label', $personal_deduction_label); update_user_meta($user_id, 'bntm_personal_deduction_amount', $personal_deduction_amount); update_user_meta($user_id, 'bntm_personal_deduction_notes', $personal_deduction_notes); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', 'active');
     if ($role === 'pos_cashier') { $user = new WP_User($user_id); $user->set_role('pos_cashier'); }
     wp_send_json_success(['message' => 'Employee added successfully!']);
 }
@@ -1223,7 +1426,7 @@ function bntm_ajax_hr_get_employee() {
     check_ajax_referer('bntm_hr_nonce', 'nonce');
     $user_id = intval($_POST['user_id']); $user = get_userdata($user_id);
     if (!$user) { wp_send_json_error(['message' => 'Employee not found.']); }
-    wp_send_json_success(['first_name' => $user->first_name, 'last_name' => $user->last_name, 'email' => $user->user_email, 'role' => get_user_meta($user_id, 'bntm_role', true), 'phone' => get_user_meta($user_id, 'bntm_phone', true), 'dob' => get_user_meta($user_id, 'bntm_dob', true), 'address' => get_user_meta($user_id, 'bntm_address', true), 'department' => get_user_meta($user_id, 'bntm_department', true), 'position' => get_user_meta($user_id, 'bntm_position', true), 'hire_date' => get_user_meta($user_id, 'bntm_hire_date', true), 'hourly_rate' => get_user_meta($user_id, 'bntm_hourly_rate', true), 'pin' => get_user_meta($user_id, 'bntm_hr_pin', true), 'emergency_name' => get_user_meta($user_id, 'bntm_emergency_contact_name', true), 'emergency_phone' => get_user_meta($user_id, 'bntm_emergency_contact_phone', true), 'status' => get_user_meta($user_id, 'bntm_status', true) ?: 'active']);
+    wp_send_json_success(['first_name' => $user->first_name, 'last_name' => $user->last_name, 'email' => $user->user_email, 'role' => get_user_meta($user_id, 'bntm_role', true), 'phone' => get_user_meta($user_id, 'bntm_phone', true), 'dob' => get_user_meta($user_id, 'bntm_dob', true), 'address' => get_user_meta($user_id, 'bntm_address', true), 'department' => get_user_meta($user_id, 'bntm_department', true), 'position' => get_user_meta($user_id, 'bntm_position', true), 'hire_date' => get_user_meta($user_id, 'bntm_hire_date', true), 'hourly_rate' => get_user_meta($user_id, 'bntm_hourly_rate', true), 'tin_number' => get_user_meta($user_id, 'bntm_tin_number', true), 'has_sss' => get_user_meta($user_id, 'bntm_has_sss', true) ?: 'no', 'sss_number' => get_user_meta($user_id, 'bntm_sss_number', true), 'has_philhealth' => get_user_meta($user_id, 'bntm_has_philhealth', true) ?: 'no', 'philhealth_number' => get_user_meta($user_id, 'bntm_philhealth_number', true), 'has_pagibig' => get_user_meta($user_id, 'bntm_has_pagibig', true) ?: 'no', 'pagibig_number' => get_user_meta($user_id, 'bntm_pagibig_number', true), 'has_personal_deduction' => get_user_meta($user_id, 'bntm_has_personal_deduction', true) ?: 'no', 'personal_deduction_label' => get_user_meta($user_id, 'bntm_personal_deduction_label', true), 'personal_deduction_amount' => get_user_meta($user_id, 'bntm_personal_deduction_amount', true), 'personal_deduction_notes' => get_user_meta($user_id, 'bntm_personal_deduction_notes', true), 'pin' => get_user_meta($user_id, 'bntm_hr_pin', true), 'emergency_name' => get_user_meta($user_id, 'bntm_emergency_contact_name', true), 'emergency_phone' => get_user_meta($user_id, 'bntm_emergency_contact_phone', true), 'status' => get_user_meta($user_id, 'bntm_status', true) ?: 'active']);
 }
 
 add_action('wp_ajax_bntm_hr_delete_employee', 'bntm_ajax_hr_delete_employee');
@@ -1252,7 +1455,8 @@ function bntm_ajax_hr_update_employee() {
     if (!empty($password)) $update_data['user_pass'] = $password;
     $updated = wp_update_user($update_data);
     if (is_wp_error($updated)) { wp_send_json_error(['message' => $updated->get_error_message()]); }
-    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', sanitize_text_field($_POST['status'] ?? 'active'));
+    $sss_number = sanitize_text_field($_POST['sss_number'] ?? ''); $philhealth_number = sanitize_text_field($_POST['philhealth_number'] ?? ''); $pagibig_number = sanitize_text_field($_POST['pagibig_number'] ?? ''); $personal_deduction_label = sanitize_text_field($_POST['personal_deduction_label'] ?? ''); $personal_deduction_amount = floatval($_POST['personal_deduction_amount'] ?? 0); $personal_deduction_notes = sanitize_textarea_field($_POST['personal_deduction_notes'] ?? '');
+    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_tin_number', sanitize_text_field($_POST['tin_number'] ?? '')); update_user_meta($user_id, 'bntm_has_sss', bntm_hr_has_value($sss_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_sss_number', $sss_number); update_user_meta($user_id, 'bntm_has_philhealth', bntm_hr_has_value($philhealth_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_philhealth_number', $philhealth_number); update_user_meta($user_id, 'bntm_has_pagibig', bntm_hr_has_value($pagibig_number) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_pagibig_number', $pagibig_number); update_user_meta($user_id, 'bntm_has_personal_deduction', (bntm_hr_has_value($personal_deduction_label) || bntm_hr_has_value($personal_deduction_amount) || bntm_hr_has_value($personal_deduction_notes)) ? 'yes' : 'no'); update_user_meta($user_id, 'bntm_personal_deduction_label', $personal_deduction_label); update_user_meta($user_id, 'bntm_personal_deduction_amount', $personal_deduction_amount); update_user_meta($user_id, 'bntm_personal_deduction_notes', $personal_deduction_notes); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', sanitize_text_field($_POST['status'] ?? 'active'));
     if ($role === 'pos_cashier') { $user = new WP_User($user_id); $user->set_role('pos_cashier'); }
     wp_send_json_success(['message' => 'Employee updated successfully!']);
 }
@@ -1696,6 +1900,9 @@ function bntm_ajax_hr_generate_payslip() {
         $gross_pay = $basic_pay + $overtime_pay;
         $total_deductions = 0; $deductions_data = [];
         foreach ($deductions_array as $key => $deduction) { $amount = ($deduction['type'] === 'percentage') ? ($gross_pay * $deduction['value']) / 100 : $deduction['value']; $total_deductions += $amount; $deductions_data[$key] = ['name' => $deduction['name'], 'type' => $deduction['type'], 'value' => $deduction['value'], 'amount' => $amount]; }
+        $has_personal_deduction = get_user_meta($employee_id, 'bntm_has_personal_deduction', true);
+        $personal_deduction_amount = floatval(get_user_meta($employee_id, 'bntm_personal_deduction_amount', true));
+        if ($has_personal_deduction === 'yes' && $personal_deduction_amount > 0) { $personal_deduction_label = get_user_meta($employee_id, 'bntm_personal_deduction_label', true) ?: 'Company Payable'; $personal_deduction_notes = get_user_meta($employee_id, 'bntm_personal_deduction_notes', true); $total_deductions += $personal_deduction_amount; $deductions_data['personal_company_payable'] = ['name' => $personal_deduction_label, 'type' => 'fixed', 'value' => $personal_deduction_amount, 'amount' => $personal_deduction_amount, 'notes' => $personal_deduction_notes, 'is_personal' => 1]; }
         $total_adj_increase = 0; $total_adj_deduction = 0; $adjustments_data = [];
         foreach ($adjustments as $adj) { $adj_amount = floatval($adj['amount']); $adjustments_data[] = ['description' => sanitize_text_field($adj['description']), 'amount' => $adj_amount, 'type' => $adj['type']]; if ($adj['type'] === 'increase') $total_adj_increase += $adj_amount; else $total_adj_deduction += $adj_amount; }
         $net_pay = $gross_pay - $total_deductions + $total_adj_increase - $total_adj_deduction;
@@ -1767,6 +1974,12 @@ function bntm_generate_payslip_pdf_html($payslip, $employee, $position, $departm
     $period_start = date('F d, Y', strtotime($payslip->period_start)); $period_end = date('F d, Y', strtotime($payslip->period_end)); $period_short = date('M d', strtotime($payslip->period_start)) . ' - ' . date('M d, Y', strtotime($payslip->period_end)); $generated_date = date('F d, Y h:i A'); $payslip_number = 'PS-' . str_pad($payslip->id, 6, '0', STR_PAD_LEFT); $ot_rate_default = floatval(bntm_get_setting('hr_ot_rate', '1'));
     $basic_pay = floatval($payslip->basic_pay); $overtime_pay = floatval($payslip->overtime_pay); $total_deductions = floatval($payslip->total_deductions); $adjustments_data = json_decode($payslip->adjustments_data ?? '[]', true) ?: []; $gross_pay = $basic_pay + $overtime_pay; $net_pay = floatval($payslip->net_pay); $total_hours = floatval($payslip->total_hours ?? 0); $hourly_rate = $total_hours > 0 ? ($basic_pay / $total_hours) : 0;
     $hours_breakdown = bntm_get_detailed_hours_breakdown($payslip->employee_id, $payslip->period_start, $payslip->period_end); $approved_overtime = bntm_get_approved_overtime($payslip->employee_id, $payslip->period_start, $payslip->period_end);
+    $government_details = [
+        'TIN Number' => get_user_meta($employee_int, 'bntm_tin_number', true),
+        'SSS Number' => get_user_meta($employee_int, 'bntm_sss_number', true),
+        'PhilHealth Number' => get_user_meta($employee_int, 'bntm_philhealth_number', true),
+        'Pag-IBIG Number' => get_user_meta($employee_int, 'bntm_pagibig_number', true),
+    ];
     $total_adj_increase = 0; $total_adj_deduction = 0; foreach ($adjustments_data as $adjustment) { $adj_amount = floatval($adjustment['amount'] ?? 0); if ($adjustment['type'] === 'increase') $total_adj_increase += $adj_amount; else $total_adj_deduction += $adj_amount; }
     $logo_html = (!empty($logo)) ? '<img src="' . esc_url($logo) . '" alt="' . $site_name . '" style="max-height: 50px; max-width: 150px;">' : '';
     ob_start();
@@ -1776,7 +1989,7 @@ function bntm_generate_payslip_pdf_html($payslip, $employee, $position, $departm
     <body>
     <div class="header"><div class="header-top"><div><?php if ($logo_html): ?><?php echo $logo_html; ?><?php endif; ?><div class="company-name"><?php echo $site_name; ?></div></div><div class="document-title">PAYSLIP</div></div><div class="header-info"><div><strong>Payslip #:</strong> <?php echo $payslip_number; ?></div><div><strong>Pay Period:</strong> <?php echo $period_short; ?></div><div><strong>Generated:</strong> <?php echo date('M d, Y', strtotime($payslip->created_at ?? 'now')); ?></div></div></div>
     <div class="content">
-        <div class="employee-section"><div class="info-label">Employee Name</div><div class="info-value"><?php echo $employee_name; ?></div><div class="info-label">Employee ID</div><div class="info-value"><?php echo $employee_id; ?></div><div class="info-label">Position</div><div class="info-value"><?php echo $position_text; ?></div><div class="info-label">Department</div><div class="info-value"><?php echo $department_text; ?></div><div class="info-label">Pay Period</div><div class="info-value"><?php echo $period_start; ?><br>to<br><?php echo $period_end; ?></div></div>
+        <div class="employee-section"><div class="info-label">Employee Name</div><div class="info-value"><?php echo $employee_name; ?></div><div class="info-label">Employee ID</div><div class="info-value"><?php echo $employee_id; ?></div><div class="info-label">Position</div><div class="info-value"><?php echo $position_text; ?></div><div class="info-label">Department</div><div class="info-value"><?php echo $department_text; ?></div><div class="info-label">Pay Period</div><div class="info-value"><?php echo $period_start; ?><br>to<br><?php echo $period_end; ?></div><div class="info-label">Government &amp; Benefits</div><div class="info-value"><?php foreach ($government_details as $label => $value): ?><div style="margin-bottom: 8px;"><div><strong><?php echo esc_html($label); ?>:</strong></div><div><?php echo esc_html($value ?: 'N/A'); ?></div></div><?php endforeach; ?></div></div>
         <div class="calculation-section">
             <?php if ($hours_breakdown && !empty($hours_breakdown['breakdown'])): ?>
             <table><thead><tr><th colspan="8" class="section-header">Work Hours Summary</th></tr><tr><th>Date</th><th class="text-right">Day</th><th class="text-right">Clocked</th><th class="text-right">Lunch</th><th class="text-right">After Lunch</th><th class="text-right">Capped</th><th class="text-right">Payable</th></tr></thead><tbody>
