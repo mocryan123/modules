@@ -3,7 +3,7 @@
  * Module Name: Basketball Teams & Player Statistics
  * Module Slug: spm
  * Description: Manages basketball teams, players, games, and player performance statistics including automatic leaderboard calculations.
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: Development Team
  * Icon: 🏀
  */
@@ -152,6 +152,7 @@ add_action('wp_ajax_spm_get_season',    'bntm_ajax_spm_get_season');
 add_action('wp_ajax_nopriv_spm_get_season',    'bntm_ajax_spm_get_season');
 add_action('wp_ajax_spm_save_stat',   'bntm_ajax_spm_save_stat');
 add_action('wp_ajax_spm_delete_stat', 'bntm_ajax_spm_delete_stat');
+add_action('wp_ajax_spm_get_stat',    'bntm_ajax_spm_get_stat'); // FIX: moved to top-level hook block
 add_action('wp_ajax_spm_get_game_players', 'bntm_ajax_spm_get_game_players');
 add_action('wp_ajax_nopriv_spm_public_data', 'bntm_ajax_spm_public_data');
 add_action('wp_ajax_spm_public_data',        'bntm_ajax_spm_public_data');
@@ -1097,90 +1098,149 @@ function bntm_shortcode_spm_dashboard() {
         margin: 0;
     }
 
-    /* ===== PLAYER PROFILE ===== */
+    /* ===== PROFILE PANEL (player & team) ===== */
     .spm-profile {
-        background: linear-gradient(135deg, var(--team-primary, var(--nba-navy)) 0%, color-mix(in srgb, var(--team-primary, var(--nba-navy)) 80%, black) 100%);
         color: #fff;
-        padding: 0;
-        border-radius: 6px;
+        border-radius: 8px;
         overflow: hidden;
-        max-height: 85vh;
-        overflow-y: auto;
+        font-family: var(--font-body);
     }
 
+    /* ── HERO STRIP ── */
     .spm-profile__hero {
-        padding: 28px 28px 28px 60px;
-        grid-template-columns: 140px 1fr;
-        gap: 40px;
+        display: flex;
         align-items: flex-start;
+        gap: 18px;
+        padding: 20px 22px 18px;
+        background: rgba(0,0,0,0.20);
     }
 
+    /* Player photo — large square, white border like reference image */
     .spm-profile__photo {
-        width: 140px;
-        height: 140px;
-        border-radius: 8px;
+        width: 100px;
+        height: 100px;
+        border-radius: 6px;
         object-fit: cover;
-        border: 5px solid var(--team-secondary, var(--nba-gold));
-        margin-left: 8px;
+        flex-shrink: 0;
+        border: 3px solid #ffffff;
     }
 
+    /* Initials fallback */
     .spm-profile__avatar {
-        width: 140px;
-        height: 140px;
-        border-radius: 8px;
-        background: rgba(255,255,255,0.1);
+        width: 100px;
+        height: 100px;
+        border-radius: 6px;
+        background: rgba(255,255,255,0.12);
         display: flex;
         align-items: center;
         justify-content: center;
         font-family: var(--font-display);
-        font-size: 56px;
+        font-size: 36px;
         font-weight: 900;
-        color: var(--team-secondary, var(--nba-gold));
-        border: 5px solid var(--team-secondary, var(--nba-gold));
+        color: #fff;
+        border: 3px solid #ffffff;
         flex-shrink: 0;
-        margin-left: 8px;
     }
 
-    .spm-profile__info h2 {
+    /* Team logo in team-profile hero — dark bg fallback for initials */
+    .spm-profile__avatar-lg {
+        width: 100px;
+        height: 100px;
+        border-radius: 6px;
+        background: rgba(0,0,0,0.25);
+        display: flex;
+        align-items: center;
+        justify-content: center;
         font-family: var(--font-display);
-        font-size: 42px;
+        font-size: 32px;
+        font-weight: 900;
+        color: var(--team-secondary, #FFC72C);
+        border: 3px solid rgba(255,255,255,0.4);
+        flex-shrink: 0;
+    }
+
+    /* Text column in hero */
+    .spm-profile__hero-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    /* Player/team name — bold uppercase with visible white outline */
+    .spm-profile__hero-info h2 {
+        font-family: var(--font-display);
+        font-size: 28px;
         font-weight: 900;
         margin: 0 0 8px 0;
         text-transform: uppercase;
-        letter-spacing: 1.5px;
-        line-height: 1.1;
-        -webkit-text-stroke: 1.5px var(--team-outline, white);
-        text-stroke: 1.5px var(--team-outline, white);
+        letter-spacing: 0.8px;
+        line-height: 1.05;
+        color: #ffffff;
+        -webkit-text-stroke: 1px rgba(255,255,255,0.6);
         paint-order: stroke fill;
+        word-break: break-word;
     }
 
-    .spm-profile__info p {
-        font-size: 17px;
-        margin: 4px 0;
-        opacity: 0.95;
+    /* Team logo block — large box below player name (ref image 1) */
+    .spm-profile__player-team-block {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
+
+    /* The logo badge in player hero — compact, fitted, no white frame */
+    .spm-profile__team-logo {
+        width: 40px;
+        height: 40px;
+        border-radius: 5px;
+        object-fit: cover;
+        background: transparent;
+        flex-shrink: 0;
+        border: 2px solid rgba(255,255,255,0.35);
+        padding: 0;
+        display: block;
+    }
+
+    /* Team name text beside logo */
+    .spm-profile__team-label {
+        font-family: var(--font-body);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--team-secondary, #FFC72C);
+        letter-spacing: 0.2px;
+    }
+
+    /* Position • Jersey line */
+    .spm-profile__position-jersey {
+        font-size: 13px;
+        font-weight: 600;
+        color: rgba(255,255,255,0.80);
+        margin: 0;
+        letter-spacing: 0.3px;
+    }
+
+    /* Sub-lines (city / coach) in team hero */
+    .spm-profile__hero-sub {
+        font-size: 13px;
+        color: rgba(255,255,255,0.80);
+        margin: 4px 0 0 0;
         font-weight: 500;
     }
 
-    .spm-profile__info .spm-profile__team {
-        font-size: 19px;
-        font-weight: 700;
-        color: var(--team-secondary, var(--nba-gold));
-        margin-top: 10px;
-        font-family: var(--font-display);
-    }
-
+    /* ── DETAILS GRID ── */
     .spm-profile__details {
-        background: rgba(255,255,255,0.05);
-        padding: 28px 28px 28px 40px;
-        margin: 0;
-        border-top: 1px solid rgba(255,255,255,0.1);
+        padding: 14px 22px;
+        border-top: 1px solid rgba(255,255,255,0.12);
+        background: rgba(0,0,0,0.12);
     }
 
-    .spm-profile__detail-grid {
+    .spm-profile__detail-row {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 16px;
-        margin-bottom: 20px;
+        gap: 10px;
     }
 
     .spm-profile__detail-item {
@@ -1188,109 +1248,143 @@ function bntm_shortcode_spm_dashboard() {
         flex-direction: column;
         align-items: center;
         text-align: center;
+        background: rgba(255,255,255,0.08);
+        border-radius: 6px;
+        padding: 12px 6px 10px;
+        border: 1px solid rgba(255,255,255,0.12);
     }
 
+    /* Label: all-caps, muted white */
     .spm-profile__detail-label {
-        font-size: 13px;
+        font-family: var(--font-display);
+        font-size: 10px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1.2px;
-        color: rgba(255,255,255,0.8);
-        margin-bottom: 8px;
+        color: rgba(255,255,255,0.70);
+        margin-bottom: 6px;
     }
 
+    /* Value: secondary color + white outline for legibility */
     .spm-profile__detail-value {
         font-family: var(--font-display);
-        font-size: 36px;
+        font-size: 26px;
         font-weight: 900;
-        color: var(--team-secondary, var(--nba-gold));
+        color: var(--team-secondary, #FFC72C);
         line-height: 1;
-        -webkit-text-stroke: 0.8px var(--team-outline, white);
-        text-stroke: 0.8px var(--team-outline, white);
+        -webkit-text-stroke: 1px #ffffff;
         paint-order: stroke fill;
     }
 
-    .spm-profile__stats {
-        background: rgba(0,0,0,0.2);
-        padding: 28px 28px 28px 40px;
-        border-top: 1px solid rgba(255,255,255,0.1);
+    /* ── CAREER STATS / ROSTER SECTION ── */
+    .spm-profile__stats-section {
+        padding: 16px 22px 20px;
+        border-top: 1px solid rgba(255,255,255,0.12);
+        background: rgba(0,0,0,0.14);
     }
 
+    /* Section title: secondary color with outline */
     .spm-profile__stats-title {
         font-family: var(--font-display);
-        font-size: 18px;
+        font-size: 12px;
         font-weight: 800;
         text-transform: uppercase;
-        letter-spacing: 1.5px;
-        margin-bottom: 18px;
-        color: var(--team-secondary, var(--nba-gold));
-        -webkit-text-stroke: 0.6px var(--team-outline, white);
-        text-stroke: 0.6px var(--team-outline, white);
+        letter-spacing: 2px;
+        margin-bottom: 12px;
+        color: var(--team-secondary, #FFC72C);
+        -webkit-text-stroke: 0.4px rgba(255,255,255,0.5);
         paint-order: stroke fill;
     }
 
     .spm-profile__stats-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 12px;
+        gap: 8px;
     }
 
     .spm-profile__stat-box {
         background: rgba(255,255,255,0.08);
-        padding: 20px 16px;
+        padding: 14px 8px 11px;
         border-radius: 6px;
         text-align: center;
-        border: 1.5px solid rgba(255,255,255,0.15);
+        border: 1px solid rgba(255,255,255,0.12);
     }
 
+    /* Stat number: white + subtle white outline */
     .spm-profile__stat-value {
         font-family: var(--font-display);
-        font-size: 32px;
+        font-size: 24px;
         font-weight: 900;
         display: block;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
         line-height: 1;
         color: #ffffff;
+        -webkit-text-stroke: 0.8px rgba(255,255,255,0.4);
+        paint-order: stroke fill;
     }
 
+    /* Stat label */
     .spm-profile__stat-label {
-        font-size: 12px;
+        font-family: var(--font-display);
+        font-size: 10px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 1px;
-        color: rgba(255,255,255,0.85);
+        color: rgba(255,255,255,0.65);
     }
 
+    /* Roster list (team profile) */
+    .spm-profile__roster-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .spm-profile__roster-item:last-child { border-bottom: none; }
+
+    /* ── FOOTER ── */
     .spm-profile__footer {
-        padding: 16px 24px;
+        padding: 12px 22px;
         display: flex;
         justify-content: flex-end;
         gap: 8px;
+        border-top: 1px solid rgba(255,255,255,0.10);
+        background: rgba(0,0,0,0.18);
     }
 
-    .spm-modal--profile .spm-modal {
-        max-width: 700px;
-        background: transparent;
-        box-shadow: none;
-        padding: 0;
+    /* ── MODAL PROFILE MODE ── */
+    .spm-modal--profile {
+        max-width: 580px !important;
+        background: transparent !important;
+        box-shadow: 0 24px 72px rgba(0,0,0,0.55) !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        border-radius: 8px !important;
     }
 
     .spm-modal--profile .spm-modal__head {
-        display: none;
+        display: none !important;
     }
 
     .spm-modal--profile .spm-modal__body {
-        padding: 0;
-        background: transparent;
-        border-radius: 6px;
-        overflow: hidden;
+        padding: 0 !important;
+        background: transparent !important;
+        max-height: 90vh;
+        overflow-y: auto;
     }
 
     @media (max-width: 900px) {
-        .spm-profile__detail-grid,
-        .spm-profile__stats-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
+        .spm-profile__detail-row,
+        .spm-profile__stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 560px) {
+        .spm-profile__hero { flex-direction: column; align-items: center; text-align: center; }
+        .spm-profile__player-team-block { justify-content: center; }
+        .spm-profile__detail-row { grid-template-columns: repeat(2, 1fr); }
+        .spm-profile__hero-info h2 { word-break: break-word; }
     }
 
     /* ===== MODAL ===== */
@@ -1438,16 +1532,18 @@ function bntm_shortcode_spm_dashboard() {
         document.getElementById('spm-modal-title').textContent = title;
         document.getElementById('spm-modal-body').innerHTML = html;
         document.getElementById('spm-modal-overlay').style.display = 'flex';
-        document.querySelector('.spm-modal').classList.remove('spm-modal--profile');
+        var modal = document.getElementById('spm-modal');
+        modal.classList.remove('spm-modal--profile');
+        modal.style.maxWidth = '';
     }
 
     function spmOpenPlayerProfile(playerId) {
         spmAjax({action:'spm_get_player_profile',id:playerId,nonce:spmPlayerNonce}, function(res){
             if(res.success) {
-                var html = res.data.html;
-                document.getElementById('spm-modal-body').innerHTML = html;
+                document.getElementById('spm-modal-body').innerHTML = res.data.html;
                 document.getElementById('spm-modal-overlay').style.display = 'flex';
-                document.querySelector('.spm-modal').classList.add('spm-modal--profile');
+                var modal = document.getElementById('spm-modal');
+                modal.classList.add('spm-modal--profile');
             } else {
                 spmNotice('spm-players-notice', res.data.message || 'Error loading player profile', 'error');
             }
@@ -1456,7 +1552,9 @@ function bntm_shortcode_spm_dashboard() {
 
     function spmCloseModal() {
         document.getElementById('spm-modal-overlay').style.display = 'none';
-        document.querySelector('.spm-modal').classList.remove('spm-modal--profile');
+        var modal = document.getElementById('spm-modal');
+        modal.classList.remove('spm-modal--profile');
+        modal.style.maxWidth = '';
     }
 
     document.getElementById('spm-modal-close').addEventListener('click', spmCloseModal);
@@ -1466,22 +1564,12 @@ function bntm_shortcode_spm_dashboard() {
 
     // AJAX helper with file support
     function spmAjax(data, callback) {
-        var hasFile = Object.values(data).some(function(v) { return v instanceof File; });
-        if (hasFile) {
-            var fd = new FormData();
-            Object.keys(data).forEach(function(k) { fd.append(k, data[k]); });
-            fetch(ajaxurl, { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(callback)
-                .catch(function(e) { console.error(e); });
-        } else {
-            var fd = new FormData();
-            Object.keys(data).forEach(function(k) { fd.append(k, data[k]); });
-            fetch(ajaxurl, { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(callback)
-                .catch(function(e) { console.error(e); });
-        }
+        var fd = new FormData();
+        Object.keys(data).forEach(function(k) { fd.append(k, data[k]); });
+        fetch(ajaxurl, { method: 'POST', body: fd })
+            .then(function(r) { return r.json(); })
+            .then(callback)
+            .catch(function(e) { console.error(e); });
     }
 
     // Notice helper
@@ -1570,14 +1658,12 @@ function spm_seasons_tab($business_id) {
                 spmCloseModal();
                 setTimeout(function() { location.reload(); }, 300);
             } else {
-                console.error('Error saving season:', res);
                 spmNotice('spm-season-form-notice', (res.data && res.data.message) ? res.data.message : 'Error saving season', 'error');
             }
         });
     }
     function spmDeleteSeason(id, nonce) { spmConfirmDelete('Delete season and unassign games from it?', function(){ spmAjax({action:'spm_delete_season',id:id,nonce:nonce}, function(res){ if(res.success){var r=document.getElementById('season-row-'+id);if(r)r.remove();spmNotice('spm-seasons-notice',res.data.message,'success');}else spmNotice('spm-seasons-notice',res.data.message,'error'); }); }); }
     
-    // Search functionality
     (function(){
         var ss=document.getElementById('spm-seasons-search');
         if(ss)ss.addEventListener('input',function(){
@@ -1657,10 +1743,9 @@ function spm_teams_tab($business_id) {
     function spmOpenTeamProfile(teamId) {
         spmAjax({action:'spm_get_team_profile',id:teamId,nonce:spmTeamNonce},function(res){
             if(res.success){
-                var html = res.data.html;
-                document.getElementById('spm-modal-body').innerHTML = html;
+                document.getElementById('spm-modal-body').innerHTML = res.data.html;
                 document.getElementById('spm-modal-overlay').style.display = 'flex';
-                document.querySelector('.spm-modal').classList.add('spm-modal--profile');
+                document.getElementById('spm-modal').classList.add('spm-modal--profile');
             } else {
                 spmNotice('spm-teams-notice', res.data.message || 'Error loading team profile', 'error');
             }
@@ -1786,16 +1871,12 @@ function spm_players_tab($business_id) {
         else{spmAjax({action:'spm_get_player',id:playerId,nonce:spmPlayerNonce},function(res){if(res.success)spmOpenModal('Edit Player',spmPlayerForm(res.data));});}
     }
 
-    // Parse stored height string (e.g. "6 ft 2 in" or "6'2\"") into {ft, in}
     function spmParseHeight(h) {
         if (!h) return {ft:'', in:''};
-        // Match "6 ft 2 in" format
         var m = h.match(/(\d+)\s*ft\s*(\d*)/i);
         if (m) return {ft: m[1], in: m[2]||''};
-        // Match "6'2" or "6'2\"" format
         m = h.match(/(\d+)['"'](\d*)/);
         if (m) return {ft: m[1], in: m[2]||''};
-        // Just a number
         m = h.match(/^(\d+)$/);
         if (m) return {ft: m[1], in:''};
         return {ft:'', in:''};
@@ -1804,7 +1885,6 @@ function spm_players_tab($business_id) {
     function spmPlayerForm(data){
         var d=data||{};
         var hp = spmParseHeight(d.height||'');
-        // jersey: only show if not 0 or empty
         var jerseyVal = (d.jersey_number !== undefined && d.jersey_number !== null && d.jersey_number !== 0 && d.jersey_number !== '0') ? d.jersey_number : '';
         var weightVal = (d.weight && parseInt(d.weight) > 0) ? parseInt(d.weight) : '';
         var photoHtml = d.photo
@@ -1837,7 +1917,6 @@ function spm_players_tab($business_id) {
     function spmSavePlayer(id){
         var name=document.getElementById('bp-name').value.trim();
         if(!name){spmNotice('spm-player-form-notice','Player name is required.','error');return;}
-        // Build height string from ft/in fields
         var ftVal = document.getElementById('bp-height-ft').value.trim();
         var inVal = document.getElementById('bp-height-in').value.trim();
         var heightStr = '';
@@ -1847,7 +1926,6 @@ function spm_players_tab($business_id) {
         var jerseyVal = jerseyRaw === '' ? '' : parseInt(jerseyRaw);
         var weightRaw = document.getElementById('bp-weight').value;
         var photoFile=document.getElementById('bp-photo-file') ? document.getElementById('bp-photo-file').files[0] : null;
-        // Get the current preview image src to preserve existing photo if no new file is selected
         var photoPreview = document.getElementById('bp-photo-preview');
         var existingPhotoUrl = photoPreview && photoPreview.src && !photoPreview.src.startsWith('blob:') ? photoPreview.src : '';
         var payload={action:'spm_save_player',nonce:spmPlayerNonce,id:id,player_name:name,
@@ -1857,7 +1935,6 @@ function spm_players_tab($business_id) {
             height:heightStr,
             weight:weightRaw===''?'0':weightRaw,
             status:document.getElementById('bp-status').value};
-        // Include existing photo URL if no new file is selected
         if(!photoFile && existingPhotoUrl) { payload.photo_url = existingPhotoUrl; }
         if(photoFile)payload.photo_file=photoFile;
         spmAjax(payload,function(res){
@@ -1865,7 +1942,6 @@ function spm_players_tab($business_id) {
                 spmCloseModal();
                 setTimeout(function() { location.reload(); }, 300);
             } else {
-                console.error('Error saving player:', res);
                 spmNotice('spm-player-form-notice', (res.data && res.data.message) ? res.data.message : 'Error saving player', 'error');
             }
         });
@@ -1977,7 +2053,6 @@ function spm_games_tab($business_id) {
     function spmGameForm(data){
         var d=data||{};
         var today=new Date().toISOString().split('T')[0];
-        // For editing: show stored score (could be 0). For new: empty placeholder
         var isEdit = d.id && d.id > 0;
         var scoreA = isEdit ? d.team_a_score : '';
         var scoreB = isEdit ? d.team_b_score : '';
@@ -2072,7 +2147,6 @@ function spm_stats_tab($business_id) {
                         <td><?php echo $s->blocks; ?></td>
                         <td><?php echo $s->turnovers; ?></td>
                         <td style="display:flex;gap:6px;">
-
                             <button class="spm-btn spm-btn--sm spm-btn--edit" onclick="spmOpenStatModal(<?php echo $s->id; ?>)">Edit</button>
                             <button class="spm-btn spm-btn--sm spm-btn--danger" onclick="spmDeleteStat(<?php echo $s->id; ?>, '<?php echo esc_js($nonce); ?>')">Delete</button>
                         </td>
@@ -2101,7 +2175,6 @@ function spm_stats_tab($business_id) {
     function spmStatFields(d){
         d=d||{};
         var isEdit = d.id && parseInt(d.id) > 0;
-        // For new entries show empty; for edits show stored value (even if 0)
         function sv(val){ return isEdit ? val : ''; }
         return '<div class="spm-form-row spm-form-row--3">'+
                '<div class="spm-form-group"><label>Minutes</label><input type="number" id="bs-min" value="'+sv(d.minutes)+'" min="0" placeholder="0"></div>'+
@@ -2114,7 +2187,7 @@ function spm_stats_tab($business_id) {
     }
     function spmBindGameChange(preselectedGame,preselectedPlayer){
         var sel=document.getElementById('bs-game');if(!sel)return;
-        sel.addEventListener('change',function(){spmLoadGamePlayers(this.value,preselectedPlayer);});
+        sel.addEventListener('change',function(){spmLoadGamePlayers(this.value,null);});
         if(preselectedGame)spmLoadGamePlayers(preselectedGame,preselectedPlayer);
     }
     function spmLoadGamePlayers(gameId,preselectedPlayer){
@@ -2129,11 +2202,10 @@ function spm_stats_tab($business_id) {
         var gid=document.getElementById('bs-game').value,pid=document.getElementById('bs-player').value;
         if(!gid){spmNotice('spm-stat-form-notice','Please select a game.','error');return;}
         if(!pid){spmNotice('spm-stat-form-notice','Please select a player.','error');return;}
-        spmAjax({action:'spm_save_stat',nonce:spmStatNonce,id:id,game_id:gid,player_id:pid,minutes:document.getElementById('bs-min').value,points:document.getElementById('bs-pts').value,rebounds:document.getElementById('bs-reb').value,assists:document.getElementById('bs-ast').value,steals:document.getElementById('bs-stl').value,blocks:document.getElementById('bs-blk').value,turnovers:document.getElementById('bs-to').value},function(res){if(res.success){spmCloseModal();location.reload();}else spmNotice('spm-stat-form-notice',res.data.message,'error');});
+        spmAjax({action:'spm_save_stat',nonce:spmStatNonce,id:id,game_id:gid,player_id:pid,minutes:document.getElementById('bs-min').value||0,points:document.getElementById('bs-pts').value||0,rebounds:document.getElementById('bs-reb').value||0,assists:document.getElementById('bs-ast').value||0,steals:document.getElementById('bs-stl').value||0,blocks:document.getElementById('bs-blk').value||0,turnovers:document.getElementById('bs-to').value||0},function(res){if(res.success){spmCloseModal();location.reload();}else spmNotice('spm-stat-form-notice',res.data.message,'error');});
     }
     function spmDeleteStat(id,nonce){spmConfirmDelete('Delete this stat entry?',function(){spmAjax({action:'spm_delete_stat',id:id,nonce:nonce},function(res){if(res.success){var row=document.getElementById('stat-row-'+id);if(row)row.remove();spmNotice('spm-stats-notice',res.data.message,'success');}else spmNotice('spm-stats-notice',res.data.message,'error');});});}
     
-    // Search functionality
     (function(){
         var ss=document.getElementById('spm-stats-search');
         if(ss)ss.addEventListener('input',function(){
@@ -2483,6 +2555,7 @@ function bntm_ajax_spm_delete_team() {
     wp_send_json_success(['message'=>'Team deleted.']);
 }
 
+// FIX: Team profile - uses correct CSS class names, consistent sizing, proper layout
 function bntm_ajax_spm_get_team_profile() {
     check_ajax_referer('spm_team_nonce','nonce');
     if(!is_user_logged_in())wp_send_json_error(['message'=>'Unauthorized']);
@@ -2517,10 +2590,13 @@ function bntm_ajax_spm_get_team_profile() {
     $sc = !empty($team->secondary_color) ? $team->secondary_color : '#FFC72C';
     $oc = !empty($team->outline_color)   ? $team->outline_color   : '#FFFFFF';
 
+    // Team logo: fills the frame edge-to-edge, no white background or padding
     $logo_html = !empty($team->logo)
-        ? '<img src="'.esc_url($team->logo).'" class="spm-profile__photo" style="border-radius:6px;border:4px solid '.$sc.';" alt="'.esc_attr($team->team_name).'">'
-        : '<div class="spm-profile__avatar-lg" style="background:rgba(255,255,255,.1);border:4px solid '.$sc.';color:'.$sc.';">'.esc_html(strtoupper(substr($team->team_name,0,2))).'</div>';
+        ? '<img src="'.esc_url($team->logo).'" class="spm-profile__photo"
+               style="object-fit:cover;" alt="'.esc_attr($team->team_name).'">'
+        : '<div class="spm-profile__avatar-lg">'.esc_html(strtoupper(substr($team->team_name,0,2))).'</div>';
 
+    // Roster items
     $players_html = '';
     if (!empty($players)) {
         foreach ($players as $pl) {
@@ -2528,38 +2604,68 @@ function bntm_ajax_spm_get_team_profile() {
                 ? '<img src="'.esc_url($pl->photo).'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid '.$sc.';flex-shrink:0;">'
                 : '<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.15);border:2px solid '.$sc.';display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:13px;color:'.$sc.';flex-shrink:0;">'.esc_html(strtoupper(substr($pl->player_name,0,2))).'</div>';
             $status_badge = $pl->status === 'active'
-                ? '<span style="font-size:9px;background:rgba(46,125,50,.3);color:#a5d6a7;padding:2px 6px;border-radius:2px;font-weight:700;text-transform:uppercase;">Active</span>'
-                : '<span style="font-size:9px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.5);padding:2px 6px;border-radius:2px;font-weight:700;text-transform:uppercase;">Inactive</span>';
-            $players_html .= '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07);">'.$av.'<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'.$sc.';">'.esc_html($pl->player_name).'</div><div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px;">'.esc_html($pl->position?:'—').' &bull; #'.intval($pl->jersey_number).'</div></div>'.$status_badge.'</div>';
+                ? '<span style="font-size:10px;background:rgba(46,125,50,.35);color:#a5d6a7;padding:3px 8px;border-radius:3px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;">Active</span>'
+                : '<span style="font-size:10px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.5);padding:3px 8px;border-radius:3px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;">Inactive</span>';
+            $players_html .= '
+            <div class="spm-profile__roster-item">
+                '.$av.'
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:700;font-size:13px;color:'.$sc.';
+                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+                         -webkit-text-stroke:0.5px rgba(255,255,255,0.5);paint-order:stroke fill;">'.esc_html($pl->player_name).'</div>
+                    <div style="font-size:11px;color:rgba(255,255,255,.60);margin-top:2px;">'.esc_html($pl->position ?: '—').' &bull; #'.intval($pl->jersey_number).'</div>
+                </div>
+                '.$status_badge.'
+            </div>';
         }
     } else {
-        $players_html = '<p style="color:rgba(255,255,255,.4);font-style:italic;font-size:13px;padding:16px 0;">No players rostered yet.</p>';
+        $players_html = '<p style="color:rgba(255,255,255,.4);font-style:italic;font-size:13px;padding:8px 0;">No players rostered yet.</p>';
     }
 
     $html = '
-    <div class="spm-profile" style="--prof-primary:'.$pc.';--prof-secondary:'.$sc.';--prof-outline:'.$oc.';background:linear-gradient(140deg,'.$pc.' 0%,color-mix(in srgb,'.$pc.' 65%,#000) 100%);">
+    <div class="spm-profile" style="--team-primary:'.$pc.';--team-secondary:'.$sc.';--team-outline:'.$oc.';
+         background:linear-gradient(150deg,'.$pc.' 0%, color-mix(in srgb,'.$pc.' 55%,#000) 100%);">
+
+        <!-- ── HERO: logo left | name / city / coach right ── -->
         <div class="spm-profile__hero">
             '.$logo_html.'
             <div class="spm-profile__hero-info">
-                <h2 style="-webkit-text-stroke:1.5px '.$oc.';text-stroke:1.5px '.$oc.';paint-order:stroke fill;">'.esc_html($team->team_name).'</h2>
-                '.(!empty($team->city)?'<p class="spm-profile__hero-sub">'.esc_html($team->city).'</p>':'').
-                (!empty($team->coach)?'<p class="spm-profile__hero-sub">Coach: '.esc_html($team->coach).'</p>':'').'
-                <p class="spm-profile__hero-team" style="color:'.$sc.';">'.intval(count($players)).' Players</p>
+                <h2 style="color:'.$sc.';-webkit-text-stroke:1px #fff;paint-order:stroke fill;">'.esc_html($team->team_name).'</h2>
+                '.(!empty($team->city)  ? '<p class="spm-profile__hero-sub">📍 '.esc_html($team->city).'</p>'           : '').'
+                '.(!empty($team->coach) ? '<p class="spm-profile__hero-sub">Coach: '.esc_html($team->coach).'</p>' : '').'
             </div>
         </div>
-        <div class="spm-profile__details" style="background:rgba(0,0,0,.12);border-top:1px solid rgba(255,255,255,.1);">
+
+        <!-- ── WIN / LOSS RECORD ── -->
+        <div class="spm-profile__details">
             <div class="spm-profile__detail-row">
-                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Wins</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$wins.'</div></div>
-                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Losses</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$losses.'</div></div>
-                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Games</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$gp.'</div></div>
-                <div class="spm-profile__detail-item"><div class="spm-profile__detail-label">Win %</div><div class="spm-profile__detail-value" style="color:'.$sc.';">'.$pct.'%</div></div>
+                <div class="spm-profile__detail-item">
+                    <div class="spm-profile__detail-label">Wins</div>
+                    <div class="spm-profile__detail-value">'.$wins.'</div>
+                </div>
+                <div class="spm-profile__detail-item">
+                    <div class="spm-profile__detail-label">Losses</div>
+                    <div class="spm-profile__detail-value">'.$losses.'</div>
+                </div>
+                <div class="spm-profile__detail-item">
+                    <div class="spm-profile__detail-label">Games</div>
+                    <div class="spm-profile__detail-value">'.$gp.'</div>
+                </div>
+                <div class="spm-profile__detail-item">
+                    <div class="spm-profile__detail-label">Win %</div>
+                    <div class="spm-profile__detail-value" style="font-size:20px;">'.$pct.'%</div>
+                </div>
             </div>
         </div>
-        <div class="spm-profile__stats-section" style="background:rgba(0,0,0,.08);border-top:1px solid rgba(255,255,255,.1);">
+
+        <!-- ── ROSTER ── -->
+        <div class="spm-profile__stats-section">
             <div class="spm-profile__stats-title">Roster</div>
             '.$players_html.'
         </div>
-        <div class="spm-profile__footer" style="background:rgba(0,0,0,.15);border-top:1px solid rgba(255,255,255,.08);">
+
+        <!-- ── FOOTER ── -->
+        <div class="spm-profile__footer">
             <button class="spm-btn spm-btn--secondary" onclick="spmCloseModal()">Close</button>
         </div>
     </div>';
@@ -2580,6 +2686,7 @@ function bntm_ajax_spm_get_player() {
     wp_send_json_success($row);
 }
 
+// FIX: Player profile - adds team logo, uses correct CSS classes, proper layout sizing
 function bntm_ajax_spm_get_player_profile() {
     check_ajax_referer('spm_player_nonce','nonce');
     if(!is_user_logged_in())wp_send_json_error(['message'=>'Unauthorized']);
@@ -2587,16 +2694,17 @@ function bntm_ajax_spm_get_player_profile() {
     $player_id = intval($_POST['id']);
     $business_id = get_current_user_id();
     
-    // Get player data with team info
+    // FIX: Include t.logo in the query so we can show the team logo
     $player = $wpdb->get_row($wpdb->prepare("
-        SELECT p.*, t.team_name, t.primary_color, t.secondary_color, t.outline_color FROM {$wpdb->prefix}spm_players p
+        SELECT p.*, t.team_name, t.primary_color, t.secondary_color, t.outline_color,
+               COALESCE(t.logo,'') AS team_logo
+        FROM {$wpdb->prefix}spm_players p
         LEFT JOIN {$wpdb->prefix}spm_teams t ON p.team_id = t.id
         WHERE p.id=%d AND p.business_id=%d
     ", $player_id, $business_id));
     
     if(!$player) wp_send_json_error(['message'=>'Player not found']);
     
-    // Get player stats aggregated
     $stats = $wpdb->get_row($wpdb->prepare("
         SELECT 
             COUNT(*) as games_played,
@@ -2612,105 +2720,128 @@ function bntm_ajax_spm_get_player_profile() {
     
     if (!$stats) $stats = (object)['games_played'=>0,'ppg'=>0,'rpg'=>0,'apg'=>0,'spg'=>0,'bpg'=>0,'total_points'=>0];
     
-    // Determine if secondary text should be light or dark based on primary color
-    $primary_color = !empty($player->primary_color) ? $player->primary_color : '#1F2D6D';
+    $primary_color   = !empty($player->primary_color)   ? $player->primary_color   : '#1F2D6D';
     $secondary_color = !empty($player->secondary_color) ? $player->secondary_color : '#FFD700';
-    $outline_color = !empty($player->outline_color) ? $player->outline_color : '#FFFFFF';
+    $outline_color   = !empty($player->outline_color)   ? $player->outline_color   : '#FFFFFF';
     
-    // Calculate luminance to determine text color contrast
-    $rgb = sscanf($secondary_color, "#%02x%02x%02x");
-    $luminance = (0.299 * $rgb[0] + 0.587 * $rgb[1] + 0.114 * $rgb[2]) / 255;
-    $secondary_text_color = $luminance > 0.5 ? '#000000' : '#FFFFFF';
-    
-    // Build profile HTML with team colors
-    $photo_html = !empty($player->photo) 
+    // Player photo (100×100, white border) or initials avatar
+    $photo_html = !empty($player->photo)
         ? '<img src="'.esc_url($player->photo).'" class="spm-profile__photo" alt="'.esc_attr($player->player_name).'">'
         : '<div class="spm-profile__avatar">'.esc_html(strtoupper(substr($player->player_name,0,2))).'</div>';
-    
-    $height_display = !empty($player->height) ? $player->height : '—';
-    $weight_display = intval($player->weight) > 0 ? intval($player->weight).' lbs' : '—';
-    $position_display = !empty($player->position) ? $player->position : '—';
-    $jersey_display = intval($player->jersey_number) > 0 ? '#'.intval($player->jersey_number) : '—';
-    
-    $status_color = $player->status === 'active' ? 'green' : 'gray';
-    
-    // Create inline style with team colors
-    $profile_style = 'style="--team-primary: '.esc_attr($primary_color).'; --team-secondary: '.esc_attr($secondary_color).'; --team-secondary-text: '.esc_attr($secondary_text_color).'; --team-outline: '.esc_attr($outline_color).';"';
-    
+
+    // Team logo: compact badge (40px) beside team name — no white frame
+    $team_logo_block = '';
+    if (!empty($player->team_logo)) {
+        $team_logo_block = '
+            <div class="spm-profile__player-team-block">
+                <img src="'.esc_url($player->team_logo).'" class="spm-profile__team-logo" alt="'.esc_attr($player->team_name ?: '').'">
+                <span class="spm-profile__team-label">'.esc_html(!empty($player->team_name) ? $player->team_name : 'No Team').'</span>
+            </div>';
+    } else {
+        $team_logo_block = '
+            <div class="spm-profile__player-team-block">
+                <span class="spm-profile__team-label">'.esc_html(!empty($player->team_name) ? $player->team_name : 'No Team').'</span>
+            </div>';
+    }
+
+    $height_display   = !empty($player->height)            ? $player->height                     : '—';
+    $weight_display   = intval($player->weight) > 0        ? intval($player->weight).' lbs'      : '—';
+    $position_display = !empty($player->position)          ? $player->position                   : '—';
+    $jersey_display   = intval($player->jersey_number) > 0 ? '#'.intval($player->jersey_number) : '—';
+
+    // Status pill
+    $status_is_active = ($player->status === 'active');
+    $status_pill_bg  = $status_is_active ? 'rgba(46,125,50,0.4)'    : 'rgba(255,255,255,0.12)';
+    $status_pill_col = $status_is_active ? '#a5d6a7'                 : 'rgba(255,255,255,0.5)';
+
     $html = '
-    <div class="spm-profile" '.$profile_style.'>
-        <div class="spm-profile__header">
+    <div class="spm-profile" style="
+         --team-primary:'.esc_attr($primary_color).';
+         --team-secondary:'.esc_attr($secondary_color).';
+         --team-outline:'.esc_attr($outline_color).';
+         background: linear-gradient(150deg, '.esc_attr($primary_color).' 0%,
+                     color-mix(in srgb, '.esc_attr($primary_color).' 55%, #000) 100%);">
+
+        <!-- ── HERO: photo left | name / team-logo / pos+jersey right ── -->
+        <div class="spm-profile__hero">
             '.$photo_html.'
-            <div class="spm-profile__info">
+            <div class="spm-profile__hero-info">
                 <h2>'.esc_html($player->player_name).'</h2>
-                <p class="spm-profile__team">'.esc_html($player->team_name ?: 'No Team').'</p>
-                <p style="font-size:14px;margin-top:12px;">'.$position_display.' • '.$jersey_display.'</p>
+                '.$team_logo_block.'
+                <p class="spm-profile__position-jersey">'.esc_html($position_display).' &bull; '.esc_html($jersey_display).'</p>
             </div>
         </div>
+
+        <!-- ── PHYSICAL DETAILS ── -->
         <div class="spm-profile__details">
-            <div class="spm-profile__detail-grid">
+            <div class="spm-profile__detail-row">
                 <div class="spm-profile__detail-item">
                     <div class="spm-profile__detail-label">Jersey</div>
                     <div class="spm-profile__detail-value">'.esc_html($jersey_display).'</div>
                 </div>
                 <div class="spm-profile__detail-item">
                     <div class="spm-profile__detail-label">Position</div>
-                    <div class="spm-profile__detail-value" style="font-size:20px;">'.esc_html($position_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-size:22px;">'.esc_html($position_display).'</div>
                 </div>
                 <div class="spm-profile__detail-item">
                     <div class="spm-profile__detail-label">Height</div>
-                    <div class="spm-profile__detail-value" style="font-size:20px;">'.esc_html($height_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-size:17px;letter-spacing:0;">'.esc_html($height_display).'</div>
                 </div>
                 <div class="spm-profile__detail-item">
                     <div class="spm-profile__detail-label">Weight</div>
-                    <div class="spm-profile__detail-value" style="font-size:20px;">'.esc_html($weight_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-size:17px;letter-spacing:0;">'.esc_html($weight_display).'</div>
                 </div>
             </div>
         </div>
-        <div class="spm-profile__stats">
+
+        <!-- ── CAREER STATS ── -->
+        <div class="spm-profile__stats-section">
             <div class="spm-profile__stats-title">Career Statistics</div>
             <div class="spm-profile__stats-grid">
                 <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->ppg).'</span>
+                    <span class="spm-profile__stat-value">'.esc_html($stats->ppg ?: 0).'</span>
                     <span class="spm-profile__stat-label">PPG</span>
                 </div>
                 <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->rpg).'</span>
+                    <span class="spm-profile__stat-value">'.esc_html($stats->rpg ?: 0).'</span>
                     <span class="spm-profile__stat-label">RPG</span>
                 </div>
                 <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->apg).'</span>
+                    <span class="spm-profile__stat-value">'.esc_html($stats->apg ?: 0).'</span>
                     <span class="spm-profile__stat-label">APG</span>
                 </div>
                 <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->spg).'</span>
+                    <span class="spm-profile__stat-value">'.esc_html($stats->spg ?: 0).'</span>
                     <span class="spm-profile__stat-label">SPG</span>
                 </div>
-            </div>
-            <div class="spm-profile__stats-grid" style="margin-top:12px;">
                 <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->bpg).'</span>
+                    <span class="spm-profile__stat-value">'.esc_html($stats->bpg ?: 0).'</span>
                     <span class="spm-profile__stat-label">BPG</span>
                 </div>
                 <div class="spm-profile__stat-box">
                     <span class="spm-profile__stat-value">'.intval($stats->games_played).'</span>
-                    <span class="spm-profile__stat-label">GAMES</span>
+                    <span class="spm-profile__stat-label">Games</span>
                 </div>
                 <div class="spm-profile__stat-box">
                     <span class="spm-profile__stat-value">'.intval($stats->total_points).'</span>
-                    <span class="spm-profile__stat-label">TOTAL PTS</span>
+                    <span class="spm-profile__stat-label">Total PTS</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value" style="font-size:18px;">'.ucfirst($player->status).'</span>
-                    <span class="spm-profile__stat-label">Status</span>
+                <div class="spm-profile__stat-box" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+                    <span style="display:inline-block;font-family:var(--font-display);font-size:13px;font-weight:800;
+                          padding:4px 10px;border-radius:3px;letter-spacing:.5px;text-transform:uppercase;
+                          background:'.esc_attr($status_pill_bg).';color:'.esc_attr($status_pill_col).';">
+                        '.ucfirst(esc_html($player->status)).'
+                    </span>
+                    <span class="spm-profile__stat-label" style="margin-top:6px;">Status</span>
                 </div>
             </div>
         </div>
+
+        <!-- ── FOOTER ── -->
         <div class="spm-profile__footer">
             <button class="spm-btn spm-btn--secondary" onclick="spmCloseModal()">Close</button>
         </div>
-    </div>
-    ';
+    </div>';
     
     wp_send_json_success(['html'=>$html]);
 }
@@ -2721,7 +2852,6 @@ function bntm_ajax_spm_save_player() {
     global $wpdb;
     $id=intval($_POST['id']??0);
     $business_id=get_current_user_id();
-    // Fixed: Handle empty jersey_number and weight - only convert to int if not empty
     $jersey_val = isset($_POST['jersey_number']) && $_POST['jersey_number'] !== '' ? intval($_POST['jersey_number']) : 0;
     $weight_val = isset($_POST['weight']) && $_POST['weight'] !== '' ? intval($_POST['weight']) : 0;
     $player_name = sanitize_text_field($_POST['player_name'] ?? '');
@@ -2732,7 +2862,6 @@ function bntm_ajax_spm_save_player() {
     
     if(empty($player_name))wp_send_json_error(['message'=>'Player name is required']);
     
-    // Handle photo upload - prioritize new file, then existing URL
     $photo = '';
     if(!empty($_FILES['photo_file'])&&!empty($_FILES['photo_file']['tmp_name'])){
         require_once(ABSPATH.'wp-admin/includes/file.php');
@@ -2743,19 +2872,16 @@ function bntm_ajax_spm_save_player() {
             wp_send_json_error(['message'=>'Error uploading photo: '.$uploaded['error']]);
         }
     } elseif(!empty($_POST['photo_url'])) {
-        // Preserve existing photo URL if no new file is selected
         $photo=esc_url_raw($_POST['photo_url']);
     }
     
     if($id > 0){
-        // UPDATE existing player
         $update_data=['player_name'=>$player_name,'team_id'=>$team_id,'jersey_number'=>$jersey_val,'position'=>$position,'height'=>$height,'weight'=>$weight_val,'status'=>$status];
         if(!empty($photo))$update_data['photo']=$photo;
         $result=$wpdb->update("{$wpdb->prefix}spm_players",$update_data,['id'=>$id,'business_id'=>$business_id],['%s','%d','%d','%s','%s','%d','%s','%s'],['%d','%d']);
         if($wpdb->last_error)wp_send_json_error(['message'=>'Database error: '.$wpdb->last_error]);
         wp_send_json_success(['message'=>'Player updated!']);
     } else {
-        // INSERT new player
         $data=[
             'rand_id'=>bntm_rand_id(),
             'business_id'=>$business_id,
@@ -2805,7 +2931,6 @@ function bntm_ajax_spm_save_game() {
     $team_a=intval($_POST['team_a_id']);$team_b=intval($_POST['team_b_id']);
     if(!$team_a||!$team_b)wp_send_json_error(['message'=>'Both teams are required']);
     if($team_a===$team_b)wp_send_json_error(['message'=>'A team cannot play against itself']);
-    // Fixed: Handle empty scores properly
     $score_a = isset($_POST['team_a_score']) && $_POST['team_a_score'] !== '' ? max(0,intval($_POST['team_a_score'])) : 0;
     $score_b = isset($_POST['team_b_score']) && $_POST['team_b_score'] !== '' ? max(0,intval($_POST['team_b_score'])) : 0;
     $data=['game_date'=>sanitize_text_field($_POST['game_date']),'team_a_id'=>$team_a,'team_b_id'=>$team_b,'team_a_score'=>$score_a,'team_b_score'=>$score_b,'season'=>sanitize_text_field($_POST['season']??''),'status'=>sanitize_text_field($_POST['status']??'scheduled')];
@@ -2834,7 +2959,6 @@ function bntm_ajax_spm_get_game_players() {
     $game_id=intval($_POST['game_id']);$business_id=get_current_user_id();
     $game=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}spm_games WHERE id=%d AND business_id=%d",$game_id,$business_id));
     if(!$game)wp_send_json_error(['message'=>'Game not found']);
-    // Get ALL players from both teams, not just active ones, to allow stats for any player
     $players=$wpdb->get_results($wpdb->prepare("SELECT p.id,p.player_name,p.jersey_number,COALESCE(t.team_name,'Unassigned') AS team_name FROM {$wpdb->prefix}spm_players p LEFT JOIN {$wpdb->prefix}spm_teams t ON p.team_id=t.id WHERE p.team_id IN (%d,%d) ORDER BY t.team_name,p.player_name",$game->team_a_id,$game->team_b_id));
     wp_send_json_success($players);
 }
@@ -2847,8 +2971,9 @@ function bntm_ajax_spm_get_stat() {
     if(!$row)wp_send_json_error(['message'=>'Stat not found']);
     wp_send_json_success($row);
 }
-add_action('wp_ajax_spm_get_stat','bntm_ajax_spm_get_stat');
 
+// FIX: Stats insert - rand_id and business_id placed first in $data so format array aligns correctly.
+// Previously: $data had stat fields first, then rand_id appended last → rand_id got '%d' format → cast to 0 → UNIQUE constraint violation.
 function bntm_ajax_spm_save_stat() {
     check_ajax_referer('spm_stat_nonce','nonce');
     if(!is_user_logged_in())wp_send_json_error(['message'=>'Unauthorized']);
@@ -2860,18 +2985,41 @@ function bntm_ajax_spm_save_stat() {
     if(!$game)wp_send_json_error(['message'=>'Game not found']);
     $player=$wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}spm_players WHERE id=%d",$player_id));
     if(!$player||!in_array($player->team_id,[$game->team_a_id,$game->team_b_id]))wp_send_json_error(['message'=>'Player is not in a team participating in this game']);
-    // Fixed: Handle empty stat values properly
-    $minutes = isset($_POST['minutes']) && $_POST['minutes'] !== '' ? max(0,intval($_POST['minutes'])) : 0;
-    $points = isset($_POST['points']) && $_POST['points'] !== '' ? max(0,intval($_POST['points'])) : 0;
-    $rebounds = isset($_POST['rebounds']) && $_POST['rebounds'] !== '' ? max(0,intval($_POST['rebounds'])) : 0;
-    $assists = isset($_POST['assists']) && $_POST['assists'] !== '' ? max(0,intval($_POST['assists'])) : 0;
-    $steals = isset($_POST['steals']) && $_POST['steals'] !== '' ? max(0,intval($_POST['steals'])) : 0;
-    $blocks = isset($_POST['blocks']) && $_POST['blocks'] !== '' ? max(0,intval($_POST['blocks'])) : 0;
+    $minutes   = isset($_POST['minutes'])   && $_POST['minutes']   !== '' ? max(0,intval($_POST['minutes']))   : 0;
+    $points    = isset($_POST['points'])    && $_POST['points']    !== '' ? max(0,intval($_POST['points']))    : 0;
+    $rebounds  = isset($_POST['rebounds'])  && $_POST['rebounds']  !== '' ? max(0,intval($_POST['rebounds']))  : 0;
+    $assists   = isset($_POST['assists'])   && $_POST['assists']   !== '' ? max(0,intval($_POST['assists']))   : 0;
+    $steals    = isset($_POST['steals'])    && $_POST['steals']    !== '' ? max(0,intval($_POST['steals']))    : 0;
+    $blocks    = isset($_POST['blocks'])    && $_POST['blocks']    !== '' ? max(0,intval($_POST['blocks']))    : 0;
     $turnovers = isset($_POST['turnovers']) && $_POST['turnovers'] !== '' ? max(0,intval($_POST['turnovers'])) : 0;
-    $data=['game_id'=>$game_id,'player_id'=>$player_id,'minutes'=>$minutes,'points'=>$points,'rebounds'=>$rebounds,'assists'=>$assists,'steals'=>$steals,'blocks'=>$blocks,'turnovers'=>$turnovers];
-    $formats=['%d','%d','%d','%d','%d','%d','%d','%d','%d'];
-    if($id>0){$wpdb->update("{$wpdb->prefix}spm_player_stats",$data,['id'=>$id,'business_id'=>$business_id],$formats,['%d','%d']);wp_send_json_success(['message'=>'Stats updated!']);}
-    else{$data['rand_id']=bntm_rand_id();$data['business_id']=$business_id;$wpdb->insert("{$wpdb->prefix}spm_player_stats",$data,array_merge(['%s','%d'],$formats));wp_send_json_success(['message'=>'Stats recorded!']);}
+
+    $stat_data = [
+        'game_id'   => $game_id,   'player_id' => $player_id,
+        'minutes'   => $minutes,   'points'    => $points,
+        'rebounds'  => $rebounds,  'assists'   => $assists,
+        'steals'    => $steals,    'blocks'    => $blocks,
+        'turnovers' => $turnovers,
+    ];
+    $stat_formats = ['%d','%d','%d','%d','%d','%d','%d','%d','%d'];
+
+    if($id > 0) {
+        $wpdb->update("{$wpdb->prefix}spm_player_stats", $stat_data, ['id'=>$id,'business_id'=>$business_id], $stat_formats, ['%d','%d']);
+        if($wpdb->last_error) wp_send_json_error(['message'=>'Database error: '.$wpdb->last_error]);
+        wp_send_json_success(['message'=>'Stats updated!']);
+    } else {
+        // FIX: Put rand_id ('%s') and business_id ('%d') FIRST in the data array so the
+        // format array ['%s','%d', ...9x'%d'] maps correctly.
+        // Previously rand_id was appended last and received format '%d', truncating it to 0
+        // and causing a UNIQUE constraint violation on the rand_id column.
+        $insert_data = array_merge(
+            ['rand_id' => bntm_rand_id(), 'business_id' => $business_id],
+            $stat_data
+        );
+        $insert_formats = array_merge(['%s','%d'], $stat_formats);
+        $wpdb->insert("{$wpdb->prefix}spm_player_stats", $insert_data, $insert_formats);
+        if($wpdb->last_error) wp_send_json_error(['message'=>'Database error: '.$wpdb->last_error]);
+        wp_send_json_success(['message'=>'Stats recorded!','stat_id'=>$wpdb->insert_id]);
+    }
 }
 
 function bntm_ajax_spm_delete_stat() {
