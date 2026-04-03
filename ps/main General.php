@@ -514,14 +514,6 @@ function bntm_shortcode_ps() {
         color: var(--ps-primary, #1e40af);
         border-color: rgba(30,64,175,.25);
     }
-    /* Stats styles */
-    .bntm-stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px;}
-    .bntm-stat-card{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
-    .stat-icon{width:50px;height:50px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-    .stat-content{flex:1;}
-    .stat-content h3{margin:0;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;}
-    .stat-number{margin:6px 0 0;font-size:18px;font-weight:800;color:#111827;word-break: break-word;display:flex;align-items:center;flex-wrap:wrap;width:100%;}
-    .stat-label{display:block;margin:4px 0 0;font-size:11px;color:#9ca3af;}
     </style>
     <?php
     $content = ob_get_clean();
@@ -620,19 +612,31 @@ function ps_render_modals() {
                         <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;border-left:4px solid #1e40af;">
                             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#1e40af;margin-bottom:4px;">Collateral</div>
                         </div>
-                    
-                        <div class="bntm-form-group" style="grid-column:1/-1;">
-                            <label>Item Description <span style="color:#ef4444;">*</span></label>
-                            <textarea name="collateral_description" rows="2" required placeholder="e.g. 18k Gold Ring with Diamond, 3.5g, Ladies ring"></textarea>
+                        <div class="bntm-form-group">
+                            <label>Category <span style="color:#ef4444;">*</span></label>
+                            <select name="collateral_category" required>
+                                <option value="">Select category</option>
+                                <option value="jewelry">Jewelry</option><option value="electronics">Electronics</option>
+                                <option value="watches">Watches</option><option value="bags">Bags</option>
+                                <option value="documents">Documents</option><option value="others">Others</option>
+                            </select>
                         </div>
-                           <div class="bntm-form-group">
+                        <div class="bntm-form-group">
                             <label>Condition <span style="color:#ef4444;">*</span></label>
                             <select name="collateral_condition" required>
                                 <option value="excellent">Excellent</option><option value="good" selected>Good</option>
                                 <option value="fair">Fair</option><option value="poor">Poor</option>
                             </select>
                         </div>
-                       <div class="bntm-form-group"><label>Weight (grams)</label><input type="number" name="collateral_weight" step=".01" placeholder="0.00"></div>
+                        <div class="bntm-form-group" style="grid-column:1/-1;">
+                            <label>Item Description <span style="color:#ef4444;">*</span></label>
+                            <textarea name="collateral_description" rows="2" required placeholder="e.g. 18k Gold Ring with Diamond, 3.5g, Ladies ring"></textarea>
+                        </div>
+                        <div class="bntm-form-group"><label>Brand</label><input type="text" name="collateral_brand" placeholder="e.g. Rolex, Apple"></div>
+                        <div class="bntm-form-group"><label>Model</label><input type="text" name="collateral_model" placeholder="Model name or number"></div>
+                        <div class="bntm-form-group"><label>Serial Number</label><input type="text" name="collateral_serial"></div>
+                        <div class="bntm-form-group"><label>Metal Type</label><input type="text" name="collateral_metal" placeholder="Gold, Silver, Platinum"></div>
+                        <div class="bntm-form-group"><label>Weight (grams)</label><input type="number" name="collateral_weight" step=".01" placeholder="0.00"></div>
                         <div class="bntm-form-group">
                             <label>Karat</label>
                             <select name="collateral_karat"><option value="">N/A</option><option value="10k">10k</option><option value="14k">14k</option><option value="18k">18k</option><option value="21k">21k</option><option value="22k">22k</option><option value="24k">24k</option></select>
@@ -641,7 +645,10 @@ function ps_render_modals() {
                             <label>Appraised Value <span style="color:#ef4444;">*</span></label>
                             <input type="number" name="collateral_appraised_value" step=".01" placeholder="0.00" required id="appraised-val-input">
                         </div>
-                      
+                        <div class="bntm-form-group">
+                            <label>LTV Percentage (%)</label>
+                            <input type="number" name="ltv_percentage" step=".01" placeholder="0.00" value="<?php echo esc_attr(bntm_get_setting('ps_ltv_ratio','80')); ?>" id="loan-ltv-input">
+                        </div>
 
                         <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;border-left:4px solid #059669;margin-top:4px;">
                             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#059669;margin-bottom:4px;">Loan Terms</div>
@@ -658,7 +665,8 @@ function ps_render_modals() {
                         <div class="bntm-form-group">
                             <label>Term (months)</label>
                             <select name="term_months" id="loan-term-select" required>
-                               <option value="10">10 Months</option>
+                                <option value="1">1 Month</option><option value="2">2 Months</option>
+                                <option value="3">3 Months</option><option value="6">6 Months</option><option value="10">10 Months</option>
                             </select>
                         </div>
                         <div class="bntm-form-group">
@@ -2202,7 +2210,7 @@ function ps_overview_tab($business_id) {
                 style="padding:9px 16px;font-size:13px;border-radius:8px;">
             <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="flex-shrink:0;">
                 <path stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>                                                                   
+            </svg>
             Daily Summary
             <kbd class="ps-shortcut-key">Alt+D</kbd>
         </button>

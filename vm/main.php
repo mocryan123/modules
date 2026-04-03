@@ -127,6 +127,8 @@ add_action('wp_ajax_vm_delete_receipt', 'bntm_ajax_vm_delete_receipt');
 add_action('wp_ajax_vm_scan_receipt', 'bntm_ajax_vm_scan_receipt');
 add_action('wp_ajax_vm_add_category', 'bntm_ajax_vm_add_category');
 add_action('wp_ajax_vm_delete_category', 'bntm_ajax_vm_delete_category');
+add_action('wp_ajax_vm_import_company_expense', 'bntm_ajax_vm_import_company_expense');
+add_action('wp_ajax_vm_revert_company_expense', 'bntm_ajax_vm_revert_company_expense');
 
 // ============================================================================
 // MAIN DASHBOARD SHORTCODE
@@ -284,6 +286,18 @@ function bntm_shortcode_vm_dashboard() {
                 </svg>
                 Quarterly Reports
             </a>
+            <a href="?tab=monthly" class="bntm-tab <?php echo $active_tab === 'monthly' ? 'active' : ''; ?>">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10m-11 9h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v11a2 2 0 002 2z"/>
+                </svg>
+                Monthly Reports
+            </a>
+            <a href="?tab=import" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/>
+                </svg>
+                Import Finance
+            </a>
             <a href="?tab=settings" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">
                 <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -302,6 +316,10 @@ function bntm_shortcode_vm_dashboard() {
                 <?php echo vat_sales_tab($business_id); ?>
             <?php elseif ($active_tab === 'quarterly'): ?>
                 <?php echo vat_quarterly_tab($business_id); ?>
+            <?php elseif ($active_tab === 'monthly'): ?>
+                <?php echo vat_monthly_tab($business_id); ?>
+            <?php elseif ($active_tab === 'import'): ?>
+                <?php echo vat_import_tab($business_id); ?>
             <?php elseif ($active_tab === 'settings'): ?>
                 <?php echo vat_settings_tab($business_id); ?>
             <?php endif; ?>
@@ -328,7 +346,11 @@ function vat_overview_tab($business_id) {
             SUM(CASE WHEN receipt_type = 'expense' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as expense_vat,
             SUM(CASE WHEN receipt_type = 'sales' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as sales_vat,
             SUM(CASE WHEN receipt_type = 'expense' THEN amount ELSE 0 END) as total_expenses,
-            SUM(CASE WHEN receipt_type = 'sales' THEN amount ELSE 0 END) as total_sales
+            SUM(CASE WHEN receipt_type = 'sales' THEN amount ELSE 0 END) as total_sales,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN amount ELSE 0 END) as offset_expenses,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN amount ELSE 0 END) as company_expenses,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
         FROM {$receipts_table}
         WHERE business_id = %d AND year = %d AND quarter = %d AND status = 'active'
     ", $business_id, $current_year, $current_quarter));
@@ -337,6 +359,10 @@ function vat_overview_tab($business_id) {
     $sales_vat = floatval($current_quarter_stats->sales_vat ?? 0);
     $total_expenses = floatval($current_quarter_stats->total_expenses ?? 0);
     $total_sales = floatval($current_quarter_stats->total_sales ?? 0);
+    $offset_expenses = floatval($current_quarter_stats->offset_expenses ?? 0);
+    $company_expenses = floatval($current_quarter_stats->company_expenses ?? 0);
+    $offset_expense_vat = floatval($current_quarter_stats->offset_expense_vat ?? 0);
+    $company_expense_vat = floatval($current_quarter_stats->company_expense_vat ?? 0);
     $vat_payable = $sales_vat - $expense_vat;
     
     $ytd_stats = $wpdb->get_row($wpdb->prepare("
@@ -344,7 +370,13 @@ function vat_overview_tab($business_id) {
             SUM(CASE WHEN receipt_type = 'expense' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as expense_vat,
             SUM(CASE WHEN receipt_type = 'sales' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as sales_vat,
             COUNT(CASE WHEN receipt_type = 'expense' THEN 1 END) as expense_count,
-            COUNT(CASE WHEN receipt_type = 'sales' THEN 1 END) as sales_count
+            COUNT(CASE WHEN receipt_type = 'sales' THEN 1 END) as sales_count,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN amount ELSE 0 END) as offset_expenses,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN amount ELSE 0 END) as company_expenses,
+            COUNT(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN 1 END) as offset_count,
+            COUNT(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN 1 END) as company_count,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
         FROM {$receipts_table}
         WHERE business_id = %d AND year = %d AND status = 'active'
     ", $business_id, $current_year));
@@ -352,6 +384,12 @@ function vat_overview_tab($business_id) {
     $ytd_expense_vat = floatval($ytd_stats->expense_vat ?? 0);
     $ytd_sales_vat = floatval($ytd_stats->sales_vat ?? 0);
     $ytd_vat_payable = $ytd_sales_vat - $ytd_expense_vat;
+    $ytd_offset_expenses = floatval($ytd_stats->offset_expenses ?? 0);
+    $ytd_company_expenses = floatval($ytd_stats->company_expenses ?? 0);
+    $ytd_offset_count = intval($ytd_stats->offset_count ?? 0);
+    $ytd_company_count = intval($ytd_stats->company_count ?? 0);
+    $ytd_offset_expense_vat = floatval($ytd_stats->offset_expense_vat ?? 0);
+    $ytd_company_expense_vat = floatval($ytd_stats->company_expense_vat ?? 0);
     
     $quarterly_data = $wpdb->get_results($wpdb->prepare("
         SELECT 
@@ -750,6 +788,7 @@ function vat_expenses_tab($business_id) {
     (function() {
         const modal = document.getElementById('expense-modal');
         const form = document.getElementById('expense-form');
+        const addExpenseBtn = document.getElementById('add-expense-btn');
         const formFields = document.getElementById('expense-form-fields');
         const formActions = document.getElementById('expense-form-actions');
         const scannerContainer = document.querySelector('.receipt-scanner-container');
@@ -760,13 +799,31 @@ function vat_expenses_tab($business_id) {
         const previewImage = document.getElementById('preview-image');
         const removeImageBtn = document.getElementById('remove-image-btn');
         
-        document.getElementById('add-expense-btn').addEventListener('click', function() {
+        function openExpenseModal() {
             modal.style.display = 'block';
             form.reset();
             formFields.style.display = 'none';
             formActions.style.display = 'none';
             scannerContainer.style.display = 'block';
             preview.style.display = 'none';
+        }
+
+        addExpenseBtn.addEventListener('click', openExpenseModal);
+
+        document.addEventListener('keydown', function(e) {
+            const target = e.target;
+            const isTypingTarget = target && (
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT' ||
+                target.isContentEditable
+            );
+
+            if (isTypingTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+            if (e.key.toLowerCase() !== 'c' || modal.style.display === 'block') return;
+
+            e.preventDefault();
+            openExpenseModal();
         });
         
         document.querySelectorAll('.vm-modal-close').forEach(btn => {
@@ -1063,10 +1120,29 @@ function vat_sales_tab($business_id) {
     (function() {
         const modal = document.getElementById('sales-modal');
         const form = document.getElementById('sales-form');
+        const addSalesBtn = document.getElementById('add-sales-btn');
         
-        document.getElementById('add-sales-btn').addEventListener('click', function() {
+        function openSalesModal() {
             modal.style.display = 'block';
             form.reset();
+        }
+
+        addSalesBtn.addEventListener('click', openSalesModal);
+
+        document.addEventListener('keydown', function(e) {
+            const target = e.target;
+            const isTypingTarget = target && (
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT' ||
+                target.isContentEditable
+            );
+
+            if (isTypingTarget || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+            if (e.key.toLowerCase() !== 'c' || modal.style.display === 'block') return;
+
+            e.preventDefault();
+            openSalesModal();
         });
         
         document.querySelectorAll('.vm-modal-close').forEach(btn => {
@@ -1175,7 +1251,11 @@ function vat_quarterly_tab($business_id) {
                 SUM(CASE WHEN receipt_type = 'expense' THEN amount ELSE 0 END) as total_expenses,
                 SUM(CASE WHEN receipt_type = 'sales' THEN amount ELSE 0 END) as total_sales,
                 COUNT(CASE WHEN receipt_type = 'expense' THEN 1 END) as expense_count,
-                COUNT(CASE WHEN receipt_type = 'sales' THEN 1 END) as sales_count
+                COUNT(CASE WHEN receipt_type = 'sales' THEN 1 END) as sales_count,
+                SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN amount ELSE 0 END) as offset_expenses,
+                SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN amount ELSE 0 END) as company_expenses,
+                SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
+                SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
             FROM {$receipts_table}
             WHERE business_id = %d AND year = %d AND quarter = %d AND status = 'active'
         ", $business_id, $current_year, $q));
@@ -1192,6 +1272,10 @@ function vat_quarterly_tab($business_id) {
             'total_sales' => floatval($data->total_sales ?? 0),
             'expense_count' => intval($data->expense_count ?? 0),
             'sales_count' => intval($data->sales_count ?? 0),
+            'offset_expenses' => floatval($data->offset_expenses ?? 0),
+            'company_expenses' => floatval($data->company_expenses ?? 0),
+            'offset_expense_vat' => floatval($data->offset_expense_vat ?? 0),
+            'company_expense_vat' => floatval($data->company_expense_vat ?? 0),
         ];
     }
     
@@ -1232,6 +1316,8 @@ function vat_quarterly_tab($business_id) {
                     <div style="font-size: 12px; color: #92400e; margin-bottom: 4px;">Expense VAT (Deduction)</div>
                     <div style="font-size: 20px; font-weight: 700; color: #92400e;">₱<?php echo number_format($data['expense_vat'], 2); ?></div>
                     <div style="font-size: 11px; color: #92400e; margin-top: 2px;">From ₱<?php echo number_format($data['total_expenses'], 2); ?> expenses</div>
+                    <div style="font-size: 11px; color: #92400e; margin-top: 6px;">Offset: <?php echo vat_format_currency($data['offset_expenses']); ?> (VAT <?php echo vat_format_currency($data['offset_expense_vat']); ?>)</div>
+                    <div style="font-size: 11px; color: #92400e; margin-top: 2px;">Company: <?php echo vat_format_currency($data['company_expenses']); ?> (VAT <?php echo vat_format_currency($data['company_expense_vat']); ?>)</div>
                 </div>
                 
                 <div style="margin-bottom: 12px; padding: 12px; background: #d1fae5; border-radius: 8px;">
@@ -1285,6 +1371,667 @@ function vat_quarterly_tab($business_id) {
     })();
     </script>
     
+    <?php
+    return ob_get_clean();
+}
+
+function vat_monthly_tab($business_id) {
+    global $wpdb;
+    $receipts_table = $wpdb->prefix . 'vat_receipts';
+
+    $current_year = isset($_GET['year']) ? max(2000, intval($_GET['year'])) : intval(date('Y'));
+    $selected_month = isset($_GET['month']) ? max(1, min(12, intval($_GET['month']))) : intval(date('n'));
+    $report_type = isset($_GET['report_type']) ? sanitize_text_field($_GET['report_type']) : 'all';
+    if (!in_array($report_type, ['all', 'expense', 'sales'], true)) {
+        $report_type = 'all';
+    }
+
+    $available_years = $wpdb->get_col($wpdb->prepare("
+        SELECT DISTINCT YEAR(transaction_date) as report_year
+        FROM {$receipts_table}
+        WHERE business_id = %d AND status = 'active'
+        ORDER BY report_year DESC
+    ", $business_id));
+
+    if (empty($available_years)) {
+        $available_years = [date('Y')];
+    }
+
+    $month_start = sprintf('%04d-%02d-01', $current_year, $selected_month);
+    $month_end = date('Y-m-t', strtotime($month_start));
+    $month_label = date('F Y', strtotime($month_start));
+
+    $type_sql = '';
+    $type_params = [];
+    if ($report_type !== 'all') {
+        $type_sql = " AND receipt_type = %s";
+        $type_params[] = $report_type;
+    }
+
+    $summary_params = array_merge([$business_id, $month_start, $month_end], $type_params);
+    $summary = $wpdb->get_row($wpdb->prepare("
+        SELECT
+            SUM(CASE WHEN receipt_type = 'expense' THEN amount ELSE 0 END) as total_expenses,
+            SUM(CASE WHEN receipt_type = 'sales' THEN amount ELSE 0 END) as total_sales,
+            SUM(CASE WHEN receipt_type = 'expense' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as expense_vat,
+            SUM(CASE WHEN receipt_type = 'sales' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as sales_vat,
+            COUNT(CASE WHEN receipt_type = 'expense' THEN 1 END) as expense_count,
+            COUNT(CASE WHEN receipt_type = 'sales' THEN 1 END) as sales_count,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN amount ELSE 0 END) as offset_expenses,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN amount ELSE 0 END) as company_expenses,
+            COUNT(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' THEN 1 END) as offset_count,
+            COUNT(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' THEN 1 END) as company_count,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
+            SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
+        FROM {$receipts_table}
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
+            AND status = 'active'{$type_sql}
+    ", $summary_params));
+
+    $category_params = array_merge([$business_id, $month_start, $month_end], $type_params);
+    $category_rows = $wpdb->get_results($wpdb->prepare("
+        SELECT
+            receipt_type,
+            COALESCE(NULLIF(category, ''), 'Uncategorized') as category_name,
+            CASE
+                WHEN receipt_type = 'expense' THEN COALESCE(NULLIF(expense_type, ''), 'uncategorized')
+                ELSE ''
+            END as expense_group,
+            COUNT(*) as receipt_count,
+            SUM(amount) as total_amount,
+            SUM(CASE WHEN vat_type = 'vat' THEN vat_amount ELSE 0 END) as total_vat
+        FROM {$receipts_table}
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
+            AND status = 'active'{$type_sql}
+        GROUP BY receipt_type, COALESCE(NULLIF(category, ''), 'Uncategorized'),
+            CASE
+                WHEN receipt_type = 'expense' THEN COALESCE(NULLIF(expense_type, ''), 'uncategorized')
+                ELSE ''
+            END
+        ORDER BY receipt_type ASC, total_amount DESC, category_name ASC
+    ", $category_params));
+
+    $receipt_params = array_merge([$business_id, $month_start, $month_end], $type_params);
+    $receipts = $wpdb->get_results($wpdb->prepare("
+        SELECT transaction_date, receipt_type, or_number, store_name, category, expense_type, amount, vat_amount, vat_type
+        FROM {$receipts_table}
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
+            AND status = 'active'{$type_sql}
+        ORDER BY transaction_date DESC, created_at DESC
+    ", $receipt_params));
+
+    $expense_total = floatval($summary->total_expenses ?? 0);
+    $sales_total = floatval($summary->total_sales ?? 0);
+    $expense_vat = floatval($summary->expense_vat ?? 0);
+    $sales_vat = floatval($summary->sales_vat ?? 0);
+    $expense_count = intval($summary->expense_count ?? 0);
+    $sales_count = intval($summary->sales_count ?? 0);
+    $offset_expenses = floatval($summary->offset_expenses ?? 0);
+    $company_expenses = floatval($summary->company_expenses ?? 0);
+    $offset_count = intval($summary->offset_count ?? 0);
+    $company_count = intval($summary->company_count ?? 0);
+    $offset_expense_vat = floatval($summary->offset_expense_vat ?? 0);
+    $company_expense_vat = floatval($summary->company_expense_vat ?? 0);
+    $net_vat = $sales_vat - $expense_vat;
+    $total_receipts = $expense_count + $sales_count;
+
+    ob_start();
+    ?>
+
+    <div class="bntm-form-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+            <div>
+                <h3 style="margin: 0 0 6px;">Monthly VAT Reports</h3>
+                <p style="margin: 0; color: #6b7280;">View monthly totals, category breakdown, and print a PDF-ready report.</p>
+            </div>
+            <button type="button" id="print-monthly-report-btn" class="bntm-btn-secondary">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z"/>
+                </svg>
+                Print / Save PDF
+            </button>
+        </div>
+
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 20px;">
+            <div>
+                <label for="monthly-year-filter" style="display:block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Year</label>
+                <select id="monthly-year-filter" class="bntm-input" style="width: 120px;">
+                    <?php foreach ($available_years as $year): ?>
+                    <option value="<?php echo intval($year); ?>" <?php selected(intval($year), $current_year); ?>><?php echo intval($year); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label for="monthly-month-filter" style="display:block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Month</label>
+                <select id="monthly-month-filter" class="bntm-input" style="width: 170px;">
+                    <?php for ($month = 1; $month <= 12; $month++): ?>
+                    <option value="<?php echo $month; ?>" <?php selected($month, $selected_month); ?>><?php echo date('F', mktime(0, 0, 0, $month, 1)); ?></option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+            <div>
+                <label for="monthly-type-filter" style="display:block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Report Type</label>
+                <select id="monthly-type-filter" class="bntm-input" style="width: 170px;">
+                    <option value="all" <?php selected($report_type, 'all'); ?>>All Receipts</option>
+                    <option value="expense" <?php selected($report_type, 'expense'); ?>>Expenses Only</option>
+                    <option value="sales" <?php selected($report_type, 'sales'); ?>>Sales Only</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+            <div style="background: #fef3c7; border-radius: 12px; padding: 18px;">
+                <div style="font-size: 12px; color: #92400e; margin-bottom: 6px;">Expense Total</div>
+                <div style="font-size: 24px; font-weight: 700; color: #92400e;"><?php echo vat_format_currency($expense_total); ?></div>
+                <div style="font-size: 12px; color: #92400e; margin-top: 4px;"><?php echo $expense_count; ?> expense receipts</div>
+            </div>
+            <div style="background: #d1fae5; border-radius: 12px; padding: 18px;">
+                <div style="font-size: 12px; color: #065f46; margin-bottom: 6px;">Sales Total</div>
+                <div style="font-size: 24px; font-weight: 700; color: #065f46;"><?php echo vat_format_currency($sales_total); ?></div>
+                <div style="font-size: 12px; color: #065f46; margin-top: 4px;"><?php echo $sales_count; ?> sales receipts</div>
+            </div>
+            <div style="background: #e0f2fe; border-radius: 12px; padding: 18px;">
+                <div style="font-size: 12px; color: #075985; margin-bottom: 6px;">VAT Summary</div>
+                <div style="font-size: 18px; font-weight: 700; color: #075985;">Sales VAT: <?php echo vat_format_currency($sales_vat); ?></div>
+                <div style="font-size: 14px; color: #075985; margin-top: 4px;">Expense VAT: <?php echo vat_format_currency($expense_vat); ?></div>
+            </div>
+            <div style="background: <?php echo $net_vat >= 0 ? '#fce7f3' : '#dbeafe'; ?>; border-radius: 12px; padding: 18px;">
+                <div style="font-size: 12px; color: <?php echo $net_vat >= 0 ? '#9f1239' : '#1e3a8a'; ?>; margin-bottom: 6px;">Net VAT <?php echo $net_vat >= 0 ? 'Payable' : 'Refundable'; ?></div>
+                <div style="font-size: 24px; font-weight: 700; color: <?php echo $net_vat >= 0 ? '#9f1239' : '#1e3a8a'; ?>;"><?php echo vat_format_currency(abs($net_vat)); ?></div>
+                <div style="font-size: 12px; color: <?php echo $net_vat >= 0 ? '#9f1239' : '#1e3a8a'; ?>; margin-top: 4px;"><?php echo $total_receipts; ?> total receipts in <?php echo esc_html($month_label); ?></div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+            <div style="background: #fff7ed; border-radius: 12px; padding: 18px; border: 1px solid #fdba74;">
+                <div style="font-size: 12px; color: #9a3412; margin-bottom: 6px;">Offset Expenses</div>
+                <div style="font-size: 22px; font-weight: 700; color: #9a3412;"><?php echo vat_format_currency($offset_expenses); ?></div>
+                <div style="font-size: 12px; color: #9a3412; margin-top: 4px;"><?php echo $offset_count; ?> receipts, VAT <?php echo vat_format_currency($offset_expense_vat); ?></div>
+            </div>
+            <div style="background: #eff6ff; border-radius: 12px; padding: 18px; border: 1px solid #93c5fd;">
+                <div style="font-size: 12px; color: #1d4ed8; margin-bottom: 6px;">Company Expenses</div>
+                <div style="font-size: 22px; font-weight: 700; color: #1d4ed8;"><?php echo vat_format_currency($company_expenses); ?></div>
+                <div style="font-size: 12px; color: #1d4ed8; margin-top: 4px;"><?php echo $company_count; ?> receipts, VAT <?php echo vat_format_currency($company_expense_vat); ?></div>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 24px;">
+            <h4 style="margin: 0 0 12px; color: #111827;">Category Breakdown</h4>
+            <div class="bntm-table-container">
+                <table class="bntm-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Category</th>
+                            <th>Expense Class</th>
+                            <th>Receipts</th>
+                            <th>Total Amount</th>
+                            <th>Total VAT</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($category_rows)): ?>
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: #6b7280;">No category data found for this month.</td>
+                        </tr>
+                        <?php else: ?>
+                            <?php foreach ($category_rows as $row): ?>
+                            <tr>
+                                <td>
+                                    <span class="bntm-badge" style="background: <?php echo $row->receipt_type === 'expense' ? '#fef3c7' : '#d1fae5'; ?>; color: <?php echo $row->receipt_type === 'expense' ? '#92400e' : '#065f46'; ?>;">
+                                        <?php echo ucfirst($row->receipt_type); ?>
+                                    </span>
+                                </td>
+                                <td><strong><?php echo esc_html($row->category_name); ?></strong></td>
+                                <td><?php echo $row->receipt_type === 'expense' ? esc_html(ucfirst($row->expense_group)) : '-'; ?></td>
+                                <td><?php echo intval($row->receipt_count); ?></td>
+                                <td><?php echo vat_format_currency($row->total_amount); ?></td>
+                                <td><?php echo vat_format_currency($row->total_vat); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div>
+            <h4 style="margin: 0 0 12px; color: #111827;">Receipt Details</h4>
+            <div class="bntm-table-container">
+                <table class="bntm-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>OR #</th>
+                            <th>Store / Customer</th>
+                            <th>Category</th>
+                            <th>Expense Class</th>
+                            <th>Amount</th>
+                            <th>VAT</th>
+                            <th>VAT Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($receipts)): ?>
+                        <tr>
+                            <td colspan="9" style="text-align: center; color: #6b7280;">No receipts found for this month.</td>
+                        </tr>
+                        <?php else: ?>
+                            <?php foreach ($receipts as $receipt): ?>
+                            <tr>
+                                <td><?php echo date('M d, Y', strtotime($receipt->transaction_date)); ?></td>
+                                <td><?php echo ucfirst($receipt->receipt_type); ?></td>
+                                <td><strong><?php echo esc_html($receipt->or_number); ?></strong></td>
+                                <td><?php echo esc_html($receipt->store_name); ?></td>
+                                <td><?php echo esc_html($receipt->category ?: 'Uncategorized'); ?></td>
+                                <td><?php echo $receipt->receipt_type === 'expense' ? esc_html(ucfirst($receipt->expense_type ?: 'uncategorized')) : '-'; ?></td>
+                                <td><?php echo vat_format_currency($receipt->amount); ?></td>
+                                <td><?php echo vat_format_currency($receipt->vat_amount); ?></td>
+                                <td><?php echo $receipt->vat_type === 'vat' ? 'VAT' : 'Non-VAT'; ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 18px;">
+            <div style="padding: 18px; background: #fff7ed; border-radius: 8px; border: 1px solid #fdba74;">
+                <div style="font-size: 13px; color: #9a3412; font-weight: 600; margin-bottom: 6px;">Offset Expenses</div>
+                <div style="font-size: 20px; font-weight: 700; color: #9a3412;"><?php echo vat_format_currency($ytd_offset_expenses); ?></div>
+                <div style="font-size: 12px; color: #9a3412; margin-top: 4px;"><?php echo $ytd_offset_count; ?> receipts, VAT <?php echo vat_format_currency($ytd_offset_expense_vat); ?></div>
+            </div>
+            <div style="padding: 18px; background: #eff6ff; border-radius: 8px; border: 1px solid #93c5fd;">
+                <div style="font-size: 13px; color: #1d4ed8; font-weight: 600; margin-bottom: 6px;">Company Expenses</div>
+                <div style="font-size: 20px; font-weight: 700; color: #1d4ed8;"><?php echo vat_format_currency($ytd_company_expenses); ?></div>
+                <div style="font-size: 12px; color: #1d4ed8; margin-top: 4px;"><?php echo $ytd_company_count; ?> receipts, VAT <?php echo vat_format_currency($ytd_company_expense_vat); ?></div>
+            </div>
+        </div>
+        <div style="margin-top: 16px; padding: 14px 16px; background: #f9fafb; border-radius: 8px; color: #4b5563; font-size: 13px;">
+            Current quarter expense split: Offset <?php echo vat_format_currency($offset_expenses); ?> (VAT <?php echo vat_format_currency($offset_expense_vat); ?>), Company <?php echo vat_format_currency($company_expenses); ?> (VAT <?php echo vat_format_currency($company_expense_vat); ?>).
+        </div>
+    </div>
+
+    <div id="monthly-report-printable" style="display: none;">
+        <div style="font-family: Arial, sans-serif; color: #111827; padding: 28px;">
+            <div style="display: flex; justify-content: space-between; align-items: start; border-bottom: 2px solid #e5e7eb; padding-bottom: 16px; margin-bottom: 24px;">
+                <div>
+                    <h1 style="margin: 0 0 6px; font-size: 26px;">Monthly VAT Report</h1>
+                    <div style="font-size: 14px; color: #6b7280;"><?php echo esc_html($month_label); ?></div>
+                    <div style="font-size: 13px; color: #6b7280;">Report Type: <?php echo esc_html(ucfirst($report_type === 'all' ? 'all receipts' : $report_type)); ?></div>
+                </div>
+                <div style="text-align: right; font-size: 13px; color: #6b7280;">
+                    <div>Generated: <?php echo esc_html(date('F d, Y h:i A')); ?></div>
+                    <div>Period: <?php echo esc_html($month_start . ' to ' . $month_end); ?></div>
+                </div>
+            </div>
+
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 28px;">
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Expense Total</strong><br><?php echo vat_format_currency($expense_total); ?></td>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Sales Total</strong><br><?php echo vat_format_currency($sales_total); ?></td>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Expense VAT</strong><br><?php echo vat_format_currency($expense_vat); ?></td>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Sales VAT</strong><br><?php echo vat_format_currency($sales_vat); ?></td>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Net VAT</strong><br><?php echo vat_format_currency(abs($net_vat)); ?> <?php echo $net_vat >= 0 ? 'Payable' : 'Refundable'; ?></td>
+                </tr>
+            </table>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 28px;">
+                <tr>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Offset Expenses</strong><br><?php echo vat_format_currency($offset_expenses); ?>, <?php echo $offset_count; ?> receipts, VAT <?php echo vat_format_currency($offset_expense_vat); ?></td>
+                    <td style="padding: 10px; border: 1px solid #d1d5db;"><strong>Company Expenses</strong><br><?php echo vat_format_currency($company_expenses); ?>, <?php echo $company_count; ?> receipts, VAT <?php echo vat_format_currency($company_expense_vat); ?></td>
+                </tr>
+            </table>
+
+            <h2 style="font-size: 18px; margin: 0 0 12px;">Category Breakdown</h2>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Type</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Category</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Expense Class</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Receipts</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Amount</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">VAT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($category_rows)): ?>
+                    <tr>
+                        <td colspan="6" style="padding: 10px; border: 1px solid #d1d5db; text-align: center;">No category data found.</td>
+                    </tr>
+                    <?php else: ?>
+                        <?php foreach ($category_rows as $row): ?>
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo ucfirst($row->receipt_type); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo esc_html($row->category_name); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo $row->receipt_type === 'expense' ? esc_html(ucfirst($row->expense_group)) : '-'; ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo intval($row->receipt_count); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo vat_format_currency($row->total_amount); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo vat_format_currency($row->total_vat); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+
+            <h2 style="font-size: 18px; margin: 0 0 12px;">Receipt Details</h2>
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Date</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Type</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">OR #</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Name</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Category</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Expense Class</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">Amount</th>
+                        <th style="text-align: left; padding: 10px; border: 1px solid #d1d5db; background: #f9fafb;">VAT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($receipts)): ?>
+                    <tr>
+                        <td colspan="8" style="padding: 10px; border: 1px solid #d1d5db; text-align: center;">No receipts found.</td>
+                    </tr>
+                    <?php else: ?>
+                        <?php foreach ($receipts as $receipt): ?>
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo date('M d, Y', strtotime($receipt->transaction_date)); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo ucfirst($receipt->receipt_type); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo esc_html($receipt->or_number); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo esc_html($receipt->store_name); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo esc_html($receipt->category ?: 'Uncategorized'); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo $receipt->receipt_type === 'expense' ? esc_html(ucfirst($receipt->expense_type ?: 'uncategorized')) : '-'; ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo vat_format_currency($receipt->amount); ?></td>
+                            <td style="padding: 10px; border: 1px solid #d1d5db;"><?php echo vat_format_currency($receipt->vat_amount); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const yearFilter = document.getElementById('monthly-year-filter');
+        const monthFilter = document.getElementById('monthly-month-filter');
+        const typeFilter = document.getElementById('monthly-type-filter');
+        const printButton = document.getElementById('print-monthly-report-btn');
+        const printable = document.getElementById('monthly-report-printable');
+
+        function updateMonthlyReport() {
+            const params = new URLSearchParams({
+                tab: 'monthly',
+                year: yearFilter.value,
+                month: monthFilter.value,
+                report_type: typeFilter.value
+            });
+            window.location.href = '?' + params.toString();
+        }
+
+        yearFilter.addEventListener('change', updateMonthlyReport);
+        monthFilter.addEventListener('change', updateMonthlyReport);
+        typeFilter.addEventListener('change', updateMonthlyReport);
+
+        printButton.addEventListener('click', function() {
+            const printWindow = window.open('', '_blank', 'width=1000,height=800');
+            if (!printWindow) return;
+
+            printWindow.document.open();
+            printWindow.document.write(`
+                <html>
+                <head>
+                    <title>Monthly VAT Report - <?php echo esc_js($month_label); ?></title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #111827; }
+                        @media print {
+                            body { margin: 0; }
+                        }
+                    </style>
+                </head>
+                <body>${printable.innerHTML}</body>
+                </html>
+            `);
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.print();
+        });
+    })();
+    </script>
+
+    <?php
+    return ob_get_clean();
+}
+
+function vat_import_tab($business_id) {
+    global $wpdb;
+    $receipts_table = $wpdb->prefix . 'vat_receipts';
+    $fn_table = $wpdb->prefix . 'fn_transactions';
+
+    $receipts = $wpdb->get_results($wpdb->prepare("
+        SELECT r.*,
+            (SELECT COUNT(*) FROM {$fn_table} f
+             WHERE f.reference_type = 'vm_company_expense'
+               AND f.reference_id = r.id
+               AND f.business_id = r.business_id) as is_imported
+        FROM {$receipts_table} r
+        WHERE r.business_id = %d
+            AND r.receipt_type = 'expense'
+            AND r.expense_type = 'company'
+            AND r.status = 'active'
+        ORDER BY r.transaction_date DESC, r.created_at DESC
+    ", $business_id));
+
+    $nonce = wp_create_nonce('vm_fn_action');
+
+    ob_start();
+    ?>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+
+    <div class="bntm-form-section">
+        <h3>Import Company Expenses to Finance</h3>
+        <p>Import VAT company expense receipts as expense transactions in the Finance module.</p>
+
+        <div style="margin-bottom: 15px;">
+            <label style="cursor: pointer; margin-right: 20px;">
+                <input type="checkbox" id="select-all-not-imported">
+                <strong>Select All (Not Imported)</strong>
+            </label>
+            <label style="cursor: pointer;">
+                <input type="checkbox" id="select-all-imported">
+                <strong>Select All (Imported)</strong>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <button id="bulk-import-btn" class="bntm-btn-primary" style="margin-right: 10px;">Import Selected</button>
+            <button id="bulk-revert-btn" class="bntm-btn-secondary">Revert Selected</button>
+            <span id="selected-count" style="margin-left: 15px; color: #6b7280;"></span>
+        </div>
+
+        <div class="bntm-table-container">
+            <table class="bntm-table">
+                <thead>
+                    <tr>
+                        <th width="40"></th>
+                        <th>Date</th>
+                        <th>OR #</th>
+                        <th>Store</th>
+                        <th>Category</th>
+                        <th>Amount</th>
+                        <th>VAT</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($receipts)): ?>
+                    <tr>
+                        <td colspan="8" style="text-align: center;">No active company expense receipts found.</td>
+                    </tr>
+                    <?php else: ?>
+                        <?php foreach ($receipts as $receipt): ?>
+                        <tr>
+                            <td>
+                                <input type="checkbox"
+                                    class="company-expense-checkbox <?php echo $receipt->is_imported ? 'imported-expense' : 'not-imported-expense'; ?>"
+                                    data-id="<?php echo $receipt->id; ?>"
+                                    data-amount="<?php echo esc_attr($receipt->amount); ?>"
+                                    data-or="<?php echo esc_attr($receipt->or_number); ?>"
+                                    data-store="<?php echo esc_attr($receipt->store_name); ?>"
+                                    data-category="<?php echo esc_attr($receipt->category ?: 'Company Expense'); ?>"
+                                    data-date="<?php echo esc_attr($receipt->transaction_date); ?>"
+                                    data-imported="<?php echo $receipt->is_imported ? '1' : '0'; ?>">
+                            </td>
+                            <td><?php echo date('M d, Y', strtotime($receipt->transaction_date)); ?></td>
+                            <td><strong><?php echo esc_html($receipt->or_number); ?></strong></td>
+                            <td><?php echo esc_html($receipt->store_name); ?></td>
+                            <td><?php echo esc_html($receipt->category ?: 'Uncategorized'); ?></td>
+                            <td class="bntm-stat-expense"><?php echo vat_format_currency($receipt->amount); ?></td>
+                            <td><?php echo vat_format_currency($receipt->vat_amount); ?></td>
+                            <td>
+                                <?php if ($receipt->is_imported): ?>
+                                <span style="color:#059669;">Imported</span>
+                                <?php else: ?>
+                                <span style="color:#6b7280;">Not Imported</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const nonce = '<?php echo $nonce; ?>';
+
+        function updateSelectedCount() {
+            const selected = document.querySelectorAll('.company-expense-checkbox:checked').length;
+            document.getElementById('selected-count').textContent = selected > 0 ? `${selected} selected` : '';
+        }
+
+        const selectAllNotImported = document.getElementById('select-all-not-imported');
+        const selectAllImported = document.getElementById('select-all-imported');
+
+        if (selectAllNotImported) {
+            selectAllNotImported.addEventListener('change', function() {
+                document.querySelectorAll('.not-imported-expense').forEach(cb => {
+                    cb.checked = this.checked;
+                });
+                if (this.checked && selectAllImported) selectAllImported.checked = false;
+                updateSelectedCount();
+            });
+        }
+
+        if (selectAllImported) {
+            selectAllImported.addEventListener('change', function() {
+                document.querySelectorAll('.imported-expense').forEach(cb => {
+                    cb.checked = this.checked;
+                });
+                if (this.checked && selectAllNotImported) selectAllNotImported.checked = false;
+                updateSelectedCount();
+            });
+        }
+
+        document.querySelectorAll('.company-expense-checkbox').forEach(cb => {
+            cb.addEventListener('change', updateSelectedCount);
+        });
+
+        document.getElementById('bulk-import-btn').addEventListener('click', function() {
+            const selected = Array.from(document.querySelectorAll('.company-expense-checkbox:checked'))
+                .filter(cb => cb.dataset.imported === '0');
+
+            if (selected.length === 0) {
+                alert('Please select at least one company expense that is not imported.');
+                return;
+            }
+
+            const totalAmount = selected.reduce((sum, cb) => sum + parseFloat(cb.dataset.amount || '0'), 0);
+            if (!confirm(`Import ${selected.length} company expense(s) to Finance?\n\nTotal Amount: ₱${totalAmount.toFixed(2)}`)) return;
+
+            this.disabled = true;
+            this.textContent = 'Importing...';
+
+            let completed = 0;
+            const total = selected.length;
+
+            selected.forEach(cb => {
+                const data = new FormData();
+                data.append('action', 'vm_import_company_expense');
+                data.append('receipt_id', cb.dataset.id);
+                data.append('nonce', nonce);
+
+                fetch(ajaxurl, {method: 'POST', body: data})
+                    .then(r => r.json())
+                    .then(() => {
+                        completed++;
+                        if (completed === total) {
+                            alert(`Successfully imported ${total} company expense(s).`);
+                            location.reload();
+                        }
+                    })
+                    .catch(() => {
+                        completed++;
+                        if (completed === total) {
+                            alert('Import completed with some errors. Please review the records.');
+                            location.reload();
+                        }
+                    });
+            });
+        });
+
+        document.getElementById('bulk-revert-btn').addEventListener('click', function() {
+            const selected = Array.from(document.querySelectorAll('.company-expense-checkbox:checked'))
+                .filter(cb => cb.dataset.imported === '1');
+
+            if (selected.length === 0) {
+                alert('Please select at least one imported company expense.');
+                return;
+            }
+
+            if (!confirm(`Remove ${selected.length} company expense(s) from Finance?`)) return;
+
+            this.disabled = true;
+            this.textContent = 'Reverting...';
+
+            let completed = 0;
+            const total = selected.length;
+
+            selected.forEach(cb => {
+                const data = new FormData();
+                data.append('action', 'vm_revert_company_expense');
+                data.append('receipt_id', cb.dataset.id);
+                data.append('nonce', nonce);
+
+                fetch(ajaxurl, {method: 'POST', body: data})
+                    .then(r => r.json())
+                    .then(() => {
+                        completed++;
+                        if (completed === total) {
+                            alert(`Successfully reverted ${total} company expense(s).`);
+                            location.reload();
+                        }
+                    })
+                    .catch(() => {
+                        completed++;
+                        if (completed === total) {
+                            alert('Revert completed with some errors. Please review the records.');
+                            location.reload();
+                        }
+                    });
+            });
+        });
+    })();
+    </script>
     <?php
     return ob_get_clean();
 }
@@ -1616,6 +2363,98 @@ function bntm_ajax_vm_delete_category() {
         wp_send_json_success(['message' => 'Category deleted successfully']);
     } else {
         wp_send_json_error(['message' => 'Failed to delete category']);
+    }
+}
+
+function bntm_ajax_vm_import_company_expense() {
+    check_ajax_referer('vm_fn_action', 'nonce');
+    if (!is_user_logged_in()) wp_send_json_error(['message' => 'Unauthorized']);
+
+    global $wpdb;
+    $receipts_table = $wpdb->prefix . 'vat_receipts';
+    $fn_table = $wpdb->prefix . 'fn_transactions';
+    $receipt_id = intval($_POST['receipt_id']);
+    $business_id = get_current_user_id();
+
+    $receipt = $wpdb->get_row($wpdb->prepare("
+        SELECT *
+        FROM {$receipts_table}
+        WHERE id = %d
+            AND business_id = %d
+            AND receipt_type = 'expense'
+            AND expense_type = 'company'
+            AND status = 'active'
+    ", $receipt_id, $business_id));
+
+    if (!$receipt) {
+        wp_send_json_error(['message' => 'Company expense receipt not found.']);
+    }
+
+    $exists = $wpdb->get_var($wpdb->prepare("
+        SELECT id
+        FROM {$fn_table}
+        WHERE reference_type = 'vm_company_expense'
+            AND reference_id = %d
+            AND business_id = %d
+    ", $receipt_id, $business_id));
+
+    if ($exists) {
+        wp_send_json_error(['message' => 'This company expense has already been imported.']);
+    }
+
+    $notes = "VAT Company Expense Import\n"
+        . "Date: {$receipt->transaction_date}\n"
+        . "OR #: {$receipt->or_number}\n"
+        . "Store: {$receipt->store_name}\n"
+        . "Category: " . ($receipt->category ?: 'Uncategorized') . "\n"
+        . "VAT: {$receipt->vat_amount}";
+
+    $data = [
+        'rand_id' => bntm_rand_id(),
+        'business_id' => $business_id,
+        'type' => 'expense',
+        'amount' => $receipt->amount,
+        'category' => $receipt->category ?: 'Company Expense',
+        'notes' => $notes,
+        'reference_type' => 'vm_company_expense',
+        'reference_id' => $receipt_id,
+        'created_at' => current_time('mysql')
+    ];
+
+    $result = $wpdb->insert($fn_table, $data);
+
+    if ($result) {
+        if (function_exists('bntm_fn_update_cashflow_summary')) {
+            bntm_fn_update_cashflow_summary();
+        }
+        wp_send_json_success(['message' => 'Company expense imported to Finance successfully.']);
+    } else {
+        wp_send_json_error(['message' => 'Failed to import company expense.']);
+    }
+}
+
+function bntm_ajax_vm_revert_company_expense() {
+    check_ajax_referer('vm_fn_action', 'nonce');
+    if (!is_user_logged_in()) wp_send_json_error(['message' => 'Unauthorized']);
+
+    global $wpdb;
+    $fn_table = $wpdb->prefix . 'fn_transactions';
+    $receipt_id = intval($_POST['receipt_id']);
+    $business_id = get_current_user_id();
+
+    $result = $wpdb->delete($fn_table, [
+        'reference_type' => 'vm_company_expense',
+        'reference_id' => $receipt_id,
+        'business_id' => $business_id
+    ], ['%s', '%d', '%d']);
+
+    if ($result) {
+        if (function_exists('bntm_fn_update_cashflow_summary')) {
+            bntm_fn_update_cashflow_summary();
+        }
+        wp_send_json_success(['message' => 'Company expense removed from Finance.']);
+    } else {
+        wp_send_json_error(['message' => 'Failed to revert company expense.']);
     }
 }
 

@@ -224,7 +224,7 @@ function bntm_ajax_fn_generate_pages() {
     }
     
     $stats = bntm_fn_get_dashboard_stats();
-    $currency = bntm_fn_get_currency_symbol();
+    $currency = get_option('bntm_currency_symbol', '$');
     
     ob_start();
     ?>
@@ -328,11 +328,9 @@ function bntm_ajax_fn_generate_pages() {
         border-radius: 12px;
         display: flex;
         align-items: flex-start;
-        flex-wrap: wrap;
         gap: 16px;
         border: 1px solid #e5e7eb;
         transition: all 0.2s ease;
-        min-width: 0;
     }
     
     .bntm-fn-stat-card:hover {
@@ -372,7 +370,6 @@ function bntm_ajax_fn_generate_pages() {
     
     .bntm-fn-stat-content {
         flex: 1;
-        min-width: 0;
     }
     
     .bntm-fn-stat-content h3 {
@@ -385,13 +382,11 @@ function bntm_ajax_fn_generate_pages() {
     }
     
     .bntm-fn-stat-number {
-        font-size: clamp(1.1rem, 1.8vw, 1.45rem);
+        font-size: 28px;
         font-weight: 700;
         color: #111827;
         margin: 0;
-        line-height: 1.2;
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        line-height: 1;
     }
     
     .bntm-fn-stat-income {
@@ -426,16 +421,6 @@ function bntm_ajax_fn_generate_pages() {
         font-weight: 600;
         color: #111827;
     }
-
-    @media (max-width: 640px) {
-        .bntm-fn-stat-card {
-            padding: 20px;
-        }
-
-        .bntm-fn-stat-number {
-            font-size: 1.05rem;
-        }
-    }
     
     .bntm-fn-chart-card canvas {
         max-height: 300px;
@@ -452,49 +437,6 @@ function bntm_ajax_fn_generate_pages() {
     (function() {
         const primaryColor = getComputedStyle(document.documentElement)
             .getPropertyValue('--bntm-primary').trim() || '#374151';
-        const incomeCategoryColors = [
-            '#10b981',
-            '#3b82f6',
-            '#f59e0b',
-            '#8b5cf6',
-            '#ec4899',
-            '#14b8a6',
-            '#f97316',
-            '#6366f1'
-        ];
-        const expenseCategoryColors = [
-            '#ef4444',
-            '#f97316',
-            '#eab308',
-            '#06b6d4',
-            '#8b5cf6',
-            '#84cc16',
-            '#ec4899',
-            '#6b7280'
-        ];
-        const getPercentage = (value, values) => {
-            const total = values.reduce((sum, item) => sum + Number(item || 0), 0);
-            if (!total) {
-                return '0.0';
-            }
-
-            return ((Number(value || 0) / total) * 100).toFixed(1);
-        };
-
-        const buildLegendLabels = (chart) => {
-            const dataset = chart.data.datasets[0] || { data: [] };
-            const labels = chart.data.labels || [];
-            const values = dataset.data || [];
-
-            return labels.map((label, index) => ({
-                text: `${label} (${getPercentage(values[index], values)}%)`,
-                fillStyle: dataset.backgroundColor[index],
-                strokeStyle: dataset.backgroundColor[index],
-                lineWidth: 0,
-                hidden: !chart.getDataVisibility(index),
-                index
-            }));
-        };
         
         // Cash Flow Overview Chart (Line Chart)
         const cashFlowCtx = document.getElementById('cashFlowChart');
@@ -592,7 +534,13 @@ function bntm_ajax_fn_generate_pages() {
                     labels: <?php echo json_encode(array_column($stats['income_by_category'], 'category')); ?>,
                     datasets: [{
                         data: <?php echo json_encode(array_column($stats['income_by_category'], 'total')); ?>,
-                        backgroundColor: incomeCategoryColors,
+                        backgroundColor: [
+                            '#10b981',
+                            '#059669',
+                            '#047857',
+                            '#065f46',
+                            '#064e3b'
+                        ],
                         borderWidth: 2,
                         borderColor: '#ffffff'
                     }]
@@ -607,13 +555,6 @@ function bntm_ajax_fn_generate_pages() {
                                 padding: 15,
                                 font: { size: 12 },
                                 color: '#374151'
-                            },
-                            onClick: function(event, legendItem, legend) {
-                                legend.chart.toggleDataVisibility(legendItem.index);
-                                legend.chart.update();
-                            },
-                            generateLabels: function(chart) {
-                                return buildLegendLabels(chart);
                             }
                         },
                         tooltip: {
@@ -626,9 +567,7 @@ function bntm_ajax_fn_generate_pages() {
                                 label: function(context) {
                                     const label = context.label || '';
                                     const value = context.parsed || 0;
-                                    const values = context.dataset.data || [];
-                                    const percentage = getPercentage(value, values);
-                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2) + ' (' + percentage + '%)';
+                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2);
                                 }
                             }
                         }
@@ -646,7 +585,13 @@ function bntm_ajax_fn_generate_pages() {
                     labels: <?php echo json_encode(array_column($stats['expense_by_category'], 'category')); ?>,
                     datasets: [{
                         data: <?php echo json_encode(array_column($stats['expense_by_category'], 'total')); ?>,
-                        backgroundColor: expenseCategoryColors,
+                        backgroundColor: [
+                            '#ef4444',
+                            '#dc2626',
+                            '#b91c1c',
+                            '#991b1b',
+                            '#7f1d1d'
+                        ],
                         borderWidth: 2,
                         borderColor: '#ffffff'
                     }]
@@ -661,13 +606,6 @@ function bntm_ajax_fn_generate_pages() {
                                 padding: 15,
                                 font: { size: 12 },
                                 color: '#374151'
-                            },
-                            onClick: function(event, legendItem, legend) {
-                                legend.chart.toggleDataVisibility(legendItem.index);
-                                legend.chart.update();
-                            },
-                            generateLabels: function(chart) {
-                                return buildLegendLabels(chart);
                             }
                         },
                         tooltip: {
@@ -680,9 +618,7 @@ function bntm_ajax_fn_generate_pages() {
                                 label: function(context) {
                                     const label = context.label || '';
                                     const value = context.parsed || 0;
-                                    const values = context.dataset.data || [];
-                                    const percentage = getPercentage(value, values);
-                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2) + ' (' + percentage + '%)';
+                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2);
                                 }
                             }
                         }
@@ -777,7 +713,7 @@ function bntm_shortcode_fn_page() {
         return '<div class="bntm-notice bntm-notice-error">Please log in to access Finance.</div>';
     }
     
-    $currency = bntm_fn_get_currency_symbol();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $type = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : 'dashboard';
     
     ob_start();
@@ -818,7 +754,7 @@ function bntm_shortcode_fn_page() {
 }
 /* ---------- TAB CONTENT ---------- */
 function bntm_fn_transactions_tab() {
-    $currency = bntm_fn_get_currency_symbol();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $income_cats = json_decode(bntm_get_setting('fn_categories_income', '[]'), true);
     $expense_cats = json_decode(bntm_get_setting('fn_categories_expense', '[]'), true);
     $nonce = wp_create_nonce('bntm_fn_action');
@@ -826,7 +762,16 @@ function bntm_fn_transactions_tab() {
     ob_start();
     ?>
     <div class="bntm-form-section">
-        <h3>Add New Transaction</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>Add New Transaction</h3>
+            <div style="background: #eff6ff; border-left: 4px solid #0284c7; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #0c4a6e;">
+                <strong style="display: block; margin-bottom: 6px;">⌨️ Keyboard Shortcuts:</strong>
+                <div style="display: flex; gap: 16px;">
+                    <span><strong>E</strong> — Quick Expense Entry</span>
+                    <span><strong>S</strong> — Quick Sales/Income Entry</span>
+                </div>
+            </div>
+        </div>
         <form id="bntm-fn-transaction-form" class="bntm-form">
             <div class="bntm-form-row">
                 <div class="bntm-form-group">
@@ -943,6 +888,61 @@ function bntm_fn_transactions_tab() {
         });
     });
     
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Check if we're typing in a text input or textarea
+        const activeElement = document.activeElement;
+        const isTypingInText = (activeElement.tagName === 'INPUT' && activeElement.type === 'text') || 
+                               activeElement.tagName === 'TEXTAREA';
+        
+        if (isTypingInText) return; // Don't interfere with actual typing
+        
+        const typeSelect = document.getElementById('fn_type');
+        const amountInput = document.getElementById('fn_amount');
+        
+        if (!typeSelect || !amountInput) return; // Elements don't exist yet
+        
+        // E for Expense
+        if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            typeSelect.value = 'expense';
+            typeSelect.dispatchEvent(new Event('change'));
+            setTimeout(() => {
+                amountInput.focus();
+                amountInput.select();
+            }, 100);
+            
+            // Show notification
+            bntmShowNotification('Expense mode activated. Ready to enter amount.', 'success', 2000);
+        }
+        
+        // S for Sales/Income
+        if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            typeSelect.value = 'income';
+            typeSelect.dispatchEvent(new Event('change'));
+            setTimeout(() => {
+                amountInput.focus();
+                amountInput.select();
+            }, 100);
+            
+            // Show notification
+            bntmShowNotification('Sales/Income mode activated. Ready to enter amount.', 'success', 2000);
+        }
+    });
+    
+    // Notification function
+    function bntmShowNotification(message, type, duration) {
+        const notification = document.createElement('div');
+        notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: ' + 
+            (type === 'success' ? '#10b981' : '#ef4444') + 
+            '; color: white; padding: 12px 20px; border-radius: 6px; z-index: 9999; font-weight: 600;';
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.remove(), duration);
+    }
+    
     // Delete transaction
     document.querySelectorAll('.bntm-delete-txn').forEach(btn => {
         btn.addEventListener('click', function() {
@@ -970,7 +970,7 @@ function bntm_fn_transactions_tab() {
 function bntm_fn_render_transaction_history($limit = 10) {
     global $wpdb;
     $table = $wpdb->prefix . 'fn_transactions';
-    $currency = bntm_fn_get_currency_symbol();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $nonce = wp_create_nonce('bntm_fn_action');
     
     // Get current page from URL parameter
@@ -1104,8 +1104,7 @@ function bntm_fn_reports_tab() {
     $year = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
     $month = isset($_GET['month']) ? intval($_GET['month']) : date('m');
     
-    $currency_symbol = bntm_fn_get_currency_symbol();
-    $currency_code = bntm_fn_get_currency_code();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $monthly_data = bntm_fn_get_monthly_report($year, $month);
     $category_breakdown = bntm_fn_get_category_breakdown($year, $month);
     $nonce = wp_create_nonce('bntm_fn_action');
@@ -1145,15 +1144,15 @@ function bntm_fn_reports_tab() {
         <div class="bntm-stats-grid">
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Total Income</div>
-                <div class="bntm-stat-value bntm-stat-income"><?php echo $currency_symbol ?><?php echo number_format($monthly_data['income'], 2); ?></div>
+                <div class="bntm-stat-value bntm-stat-income"><?php echo $currency ?><?php echo number_format($monthly_data['income'], 2); ?></div>
             </div>
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Total Expenses</div>
-                <div class="bntm-stat-value bntm-stat-expense"><?php echo $currency_symbol ?><?php echo number_format($monthly_data['expense'], 2); ?></div>
+                <div class="bntm-stat-value bntm-stat-expense"><?php echo $currency ?><?php echo number_format($monthly_data['expense'], 2); ?></div>
             </div>
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Net Profit/Loss</div>
-                <div class="bntm-stat-value <?php echo $monthly_data['balance'] >= 0 ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo $currency_symbol ?><?php echo number_format($monthly_data['balance'], 2); ?></div>
+                <div class="bntm-stat-value <?php echo $monthly_data['balance'] >= 0 ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo $currency ?><?php echo number_format($monthly_data['balance'], 2); ?></div>
             </div>
         </div>
         
@@ -1166,7 +1165,7 @@ function bntm_fn_reports_tab() {
                 <thead>
                     <tr>
                         <th style="text-align: left; width: 70%;">Particulars</th>
-                    <th style="text-align: right; width: 30%;">Amount (<?php echo $currency_code ?>)</th>
+                        <th style="text-align: right; width: 30%;">Amount (<?php echo $currency ?>)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1228,7 +1227,7 @@ function bntm_fn_reports_tab() {
                     <tr class="bntm-total">
                         <td><strong>NET INCOME (LOSS)</strong></td>
                         <td style="text-align: right; <?php echo $monthly_data['balance'] >= 0 ? 'color: #059669;' : 'color: #dc2626;'; ?>">
-                            <strong><?php echo $monthly_data['balance'] >= 0 ? '' : '('; ?><?php echo $currency_symbol ?><?php echo number_format(abs($monthly_data['balance']), 2); ?><?php echo $monthly_data['balance'] >= 0 ? '' : ')'; ?></strong>
+                            <strong><?php echo $monthly_data['balance'] >= 0 ? '' : '('; ?><?php echo $currency ?><?php echo number_format(abs($monthly_data['balance']), 2); ?><?php echo $monthly_data['balance'] >= 0 ? '' : ')'; ?></strong>
                         </td>
                     </tr>
                 </tbody>
@@ -1330,7 +1329,7 @@ function bntm_ajax_fn_generate_pdf() {
     if (!is_user_logged_in()) {
         wp_die('Unauthorized access');
     }
-    $currency = bntm_fn_get_currency_code();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $year = intval($_GET['year']);
     $month = intval($_GET['month']);
     
@@ -1584,7 +1583,7 @@ function bntm_ajax_fn_generate_pdf() {
 }
 function bntm_fn_export_tab() {
     $nonce = wp_create_nonce('bntm_fn_action');
-    $currency = bntm_fn_get_currency_symbol();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     
     ob_start();
     ?>
@@ -1645,7 +1644,7 @@ function bntm_fn_settings_tab() {
         return '<div class="bntm-notice bntm-notice-error">Only Admins, Owners, and Managers can access settings.</div>';
     }
     
-    $currency = bntm_fn_get_currency_code();
+    $currency = bntm_get_setting('ec_currency', 'PHP');
     $income_cats = json_decode(bntm_get_setting('fn_categories_income', '[]'), true);
     $expense_cats = json_decode(bntm_get_setting('fn_categories_expense', '[]'), true);
     $nonce = wp_create_nonce('bntm_fn_action');
@@ -1712,22 +1711,6 @@ function bntm_fn_settings_tab() {
 }
 
 /* ---------- HELPER FUNCTIONS ---------- */
-
-function bntm_fn_get_currency_code() {
-    return strtoupper((string) bntm_get_setting('ec_currency', 'PHP'));
-}
-
-function bntm_fn_get_currency_symbol() {
-    $currency_code = bntm_fn_get_currency_code();
-    $symbols = [
-        'PHP' => '₱',
-        'USD' => '$',
-        'EUR' => '€',
-        'GBP' => '£',
-    ];
-
-    return $symbols[$currency_code] ?? $currency_code;
-}
 
 function bntm_fn_get_transactions($limit = 50) {
     global $wpdb;
