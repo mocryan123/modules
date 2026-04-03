@@ -1,3 +1,7 @@
+
+
+
+
 <?php
 /**
  * Module Name: Booking
@@ -7760,6 +7764,3 @@ function bntm_ajax_fn_revert_booking() {
         wp_send_json_error('Failed to revert booking or booking not found in transactions.');
     }
 }
-?>
-
-
