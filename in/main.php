@@ -1213,6 +1213,8 @@ function in_products_tab($business_id) {
                                <td><?php echo esc_html($product->barcode ?: 'N/A'); ?></td>
                                <td>₱<?php echo number_format($product->cost_per_unit, 2); ?></td>
                                <td>₱<?php echo number_format($product->selling_price, 2); ?></td>
+                               <td><?php echo esc_html($product->stock_quantity); ?></td>
+                               <td><?php echo esc_html($product->reorder_level); ?></td>
                                <td><?php echo esc_html(bntm_in_format_quantity($product->stock_quantity, $product->unit_label ?: 'pcs')); ?></td>
                                <td><?php echo esc_html(bntm_in_format_quantity($product->reorder_level, $product->unit_label ?: 'pcs')); ?></td>
                                <td>

@@ -787,7 +787,16 @@ function bntm_fn_transactions_tab() {
     ob_start();
     ?>
     <div class="bntm-form-section">
-        <h3>Add New Transaction</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>Add New Transaction</h3>
+            <div style="background: #eff6ff; border-left: 4px solid #0284c7; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #0c4a6e;">
+                <strong style="display: block; margin-bottom: 6px;">⌨️ Keyboard Shortcuts:</strong>
+                <div style="display: flex; gap: 16px;">
+                    <span><strong>E</strong> — Quick Expense Entry</span>
+                    <span><strong>S</strong> — Quick Sales/Income Entry</span>
+                </div>
+            </div>
+        </div>
         <form id="bntm-fn-transaction-form" class="bntm-form">
             <div class="bntm-form-row">
                 <div class="bntm-form-group">
@@ -903,6 +912,61 @@ function bntm_fn_transactions_tab() {
             }
         });
     });
+    
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Check if we're typing in a text input or textarea
+        const activeElement = document.activeElement;
+        const isTypingInText = (activeElement.tagName === 'INPUT' && activeElement.type === 'text') || 
+                               activeElement.tagName === 'TEXTAREA';
+        
+        if (isTypingInText) return; // Don't interfere with actual typing
+        
+        const typeSelect = document.getElementById('fn_type');
+        const amountInput = document.getElementById('fn_amount');
+        
+        if (!typeSelect || !amountInput) return; // Elements don't exist yet
+        
+        // E for Expense
+        if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            typeSelect.value = 'expense';
+            typeSelect.dispatchEvent(new Event('change'));
+            setTimeout(() => {
+                amountInput.focus();
+                amountInput.select();
+            }, 100);
+            
+            // Show notification
+            bntmShowNotification('Expense mode activated. Ready to enter amount.', 'success', 2000);
+        }
+        
+        // S for Sales/Income
+        if ((e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            typeSelect.value = 'income';
+            typeSelect.dispatchEvent(new Event('change'));
+            setTimeout(() => {
+                amountInput.focus();
+                amountInput.select();
+            }, 100);
+            
+            // Show notification
+            bntmShowNotification('Sales/Income mode activated. Ready to enter amount.', 'success', 2000);
+        }
+    });
+    
+    // Notification function
+    function bntmShowNotification(message, type, duration) {
+        const notification = document.createElement('div');
+        notification.style.cssText = 'position: fixed; top: 20px; right: 20px; background: ' + 
+            (type === 'success' ? '#10b981' : '#ef4444') + 
+            '; color: white; padding: 12px 20px; border-radius: 6px; z-index: 9999; font-weight: 600;';
+        notification.textContent = message;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.remove(), duration);
+    }
     
     // Delete transaction
     document.querySelectorAll('.bntm-delete-txn').forEach(btn => {
