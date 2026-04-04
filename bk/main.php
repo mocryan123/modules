@@ -886,6 +886,121 @@ function bk_get_dashboard_stats($business_id) {
         'status_data' => $status_data ?: []
     ];
 }
+
+function bk_render_closed_dates_manager($nonce, $section_title = 'Holiday / Closed Dates', $section_description = 'Block specific dates such as holidays, maintenance days, or special events.') {
+    $closed_dates = bk_get_closed_dates();
+
+    ob_start();
+    ?>
+    <div class="bntm-form-section" style="background: #fff7ed;">
+        <h3><?php echo esc_html($section_title); ?></h3>
+        <p><?php echo esc_html($section_description); ?></p>
+
+        <form class="bntm-form bk-closed-date-form">
+            <div class="bntm-form-row">
+                <div class="bntm-form-group">
+                    <label>Holiday Date *</label>
+                    <input type="date" name="closed_date" required>
+                </div>
+                <div class="bntm-form-group">
+                    <label>Reason</label>
+                    <input type="text" name="closed_reason" placeholder="e.g., Christmas Day">
+                </div>
+            </div>
+            <button type="submit" class="bntm-btn-primary">Add Holiday</button>
+            <div class="bk-closed-date-message"></div>
+        </form>
+
+        <div class="bk-closed-dates-list" style="margin-top: 18px;">
+            <?php if (empty($closed_dates)): ?>
+                <p style="color: #6b7280;">No holiday dates set.</p>
+            <?php else: ?>
+                <?php foreach ($closed_dates as $entry): ?>
+                    <div class="bk-closed-date-item" style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:12px 14px; background:#fff; border:1px solid #fed7aa; border-radius:10px; margin-bottom:10px;">
+                        <div>
+                            <strong><?php echo esc_html(date('F j, Y', strtotime($entry['date']))); ?></strong>
+                            <?php if (!empty($entry['reason'])): ?>
+                                <div style="color:#6b7280; margin-top:4px;"><?php echo esc_html($entry['reason']); ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <button type="button" class="bntm-btn-small bntm-btn-danger bk-remove-closed-date" data-date="<?php echo esc_attr($entry['date']); ?>">Remove</button>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+
+    return ob_get_clean();
+}
+
+function bk_render_closed_dates_manager_script($nonce) {
+    ob_start();
+    ?>
+    <script>
+    (function() {
+        document.querySelectorAll('.bk-closed-date-form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                const formData = new FormData(this);
+                formData.append('action', 'bk_add_closed_date');
+                formData.append('nonce', '<?php echo esc_js($nonce); ?>');
+
+                const btn = this.querySelector('button[type="submit"]');
+                const originalText = btn.textContent;
+                const messageBox = this.querySelector('.bk-closed-date-message');
+
+                btn.disabled = true;
+                btn.textContent = 'Adding...';
+
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    messageBox.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+
+                    if (json.success) {
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        btn.disabled = false;
+                        btn.textContent = originalText;
+                    }
+                })
+                .catch(err => {
+                    messageBox.innerHTML = '<div class="bntm-notice bntm-notice-error">Error: ' + err.message + '</div>';
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                });
+            });
+        });
+
+        document.querySelectorAll('.bk-remove-closed-date').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (!confirm('Remove this holiday date?')) return;
+
+                const formData = new FormData();
+                formData.append('action', 'bk_remove_closed_date');
+                formData.append('closed_date', this.dataset.date);
+                formData.append('nonce', '<?php echo esc_js($nonce); ?>');
+
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        location.reload();
+                    } else {
+                        alert(json.data.message || 'Failed to remove holiday date');
+                    }
+                });
+            });
+        });
+    })();
+    </script>
+    <?php
+
+    return ob_get_clean();
+}
+
 function bk_services_tab($business_id) {
     global $wpdb;
     $table = $wpdb->prefix . 'bk_services';
@@ -994,6 +1109,8 @@ function bk_services_tab($business_id) {
             <div id="service-message"></div>
         </form>
     </div>
+
+    <?php echo bk_render_closed_dates_manager($nonce, 'Holiday Dates', 'Pick the dates you want to mark as holidays so customers cannot book on those days.'); ?>
 
     <!-- Edit Service Modal -->
     <div id="edit-service-modal" class="bk-modal">
@@ -1314,6 +1431,7 @@ document.getElementById('add-service-form').addEventListener('submit', function(
         });
     })();
     </script>
+    <?php echo bk_render_closed_dates_manager_script($nonce); ?>
     <?php
     return ob_get_clean();
 }
@@ -1490,8 +1608,6 @@ function bk_operating_hours_tab($business_id) {
         "SELECT * FROM $table ORDER BY day_of_week ASC",
         $business_id
     ));
-    $closed_dates = bk_get_closed_dates();
-    
     $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     $nonce = wp_create_nonce('bk_nonce');
     
@@ -1594,43 +1710,7 @@ function bk_operating_hours_tab($business_id) {
         </form>
     </div>
 
-    <div class="bntm-form-section" style="background: #fff7ed;">
-        <h3>Holiday / Closed Dates</h3>
-        <p>Block specific dates such as holidays, maintenance days, or special events.</p>
-
-        <form id="bk-closed-date-form" class="bntm-form">
-            <div class="bntm-form-row">
-                <div class="bntm-form-group">
-                    <label>Closed Date *</label>
-                    <input type="date" name="closed_date" required>
-                </div>
-                <div class="bntm-form-group">
-                    <label>Reason</label>
-                    <input type="text" name="closed_reason" placeholder="e.g., Christmas Day">
-                </div>
-            </div>
-            <button type="submit" class="bntm-btn-primary">Add Closed Date</button>
-            <div id="closed-date-message"></div>
-        </form>
-
-        <div id="bk-closed-dates-list" style="margin-top: 18px;">
-            <?php if (empty($closed_dates)): ?>
-                <p style="color: #6b7280;">No closed dates set.</p>
-            <?php else: ?>
-                <?php foreach ($closed_dates as $entry): ?>
-                    <div class="bk-closed-date-item" style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:12px 14px; background:#fff; border:1px solid #fed7aa; border-radius:10px; margin-bottom:10px;">
-                        <div>
-                            <strong><?php echo esc_html(date('F j, Y', strtotime($entry['date']))); ?></strong>
-                            <?php if (!empty($entry['reason'])): ?>
-                                <div style="color:#6b7280; margin-top:4px;"><?php echo esc_html($entry['reason']); ?></div>
-                            <?php endif; ?>
-                        </div>
-                        <button type="button" class="bntm-btn-small bntm-btn-danger bk-remove-closed-date" data-date="<?php echo esc_attr($entry['date']); ?>">Remove</button>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-    </div>
+    <?php echo bk_render_closed_dates_manager($nonce); ?>
 
     <script>
     var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
@@ -1697,58 +1777,9 @@ function bk_operating_hours_tab($business_id) {
             });
         });
 
-        document.getElementById('bk-closed-date-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-
-            const formData = new FormData(this);
-            formData.append('action', 'bk_add_closed_date');
-            formData.append('nonce', '<?php echo $nonce; ?>');
-
-            const btn = this.querySelector('button[type="submit"]');
-            btn.disabled = true;
-            btn.textContent = 'Adding...';
-
-            fetch(ajaxurl, {method: 'POST', body: formData})
-            .then(r => r.json())
-            .then(json => {
-                document.getElementById('closed-date-message').innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-
-                if (json.success) {
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    btn.disabled = false;
-                    btn.textContent = 'Add Closed Date';
-                }
-            })
-            .catch(err => {
-                document.getElementById('closed-date-message').innerHTML = '<div class="bntm-notice bntm-notice-error">Error: ' + err.message + '</div>';
-                btn.disabled = false;
-                btn.textContent = 'Add Closed Date';
-            });
-        });
-
-        document.querySelectorAll('.bk-remove-closed-date').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if (!confirm('Remove this closed date?')) return;
-
-                const formData = new FormData();
-                formData.append('action', 'bk_remove_closed_date');
-                formData.append('closed_date', this.dataset.date);
-                formData.append('nonce', '<?php echo $nonce; ?>');
-
-                fetch(ajaxurl, {method: 'POST', body: formData})
-                .then(r => r.json())
-                .then(json => {
-                    if (json.success) {
-                        location.reload();
-                    } else {
-                        alert(json.data.message || 'Failed to remove closed date');
-                    }
-                });
-            });
-        });
     })();
     </script>
+    <?php echo bk_render_closed_dates_manager_script($nonce); ?>
     <?php
     return ob_get_clean();
 }
