@@ -166,6 +166,57 @@ function bntm_bk_initialize_operating_hours() {
     }
 }
 
+function bk_get_closed_dates() {
+    $closed_dates = json_decode(bntm_get_setting('bk_closed_dates', '[]'), true);
+
+    if (!is_array($closed_dates)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($closed_dates as $entry) {
+        $date = sanitize_text_field($entry['date'] ?? '');
+        $reason = sanitize_text_field($entry['reason'] ?? '');
+        $date_obj = DateTime::createFromFormat('Y-m-d', $date);
+
+        if (!$date_obj || $date_obj->format('Y-m-d') !== $date) {
+            continue;
+        }
+
+        $normalized[] = [
+            'date' => $date,
+            'reason' => $reason
+        ];
+    }
+
+    usort($normalized, function($a, $b) {
+        return strcmp($a['date'], $b['date']);
+    });
+
+    return $normalized;
+}
+
+function bk_is_closed_date($date) {
+    foreach (bk_get_closed_dates() as $entry) {
+        if ($entry['date'] === $date) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function bk_get_closed_date_reason($date) {
+    foreach (bk_get_closed_dates() as $entry) {
+        if ($entry['date'] === $date) {
+            return $entry['reason'];
+        }
+    }
+
+    return '';
+}
+
 
 // AJAX handlers
 add_action('wp_ajax_bk_get_available_slots', 'bntm_ajax_bk_get_available_slots');
@@ -173,6 +224,8 @@ add_action('wp_ajax_nopriv_bk_get_available_slots', 'bntm_ajax_bk_get_available_
 add_action('wp_ajax_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_nopriv_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_bk_update_booking_status', 'bntm_ajax_bk_update_booking_status');
+add_action('wp_ajax_bk_add_closed_date', 'bntm_ajax_bk_add_closed_date');
+add_action('wp_ajax_bk_remove_closed_date', 'bntm_ajax_bk_remove_closed_date');
 
 function bk_get_current_access_role() {
     if (!is_user_logged_in()) {
@@ -1437,6 +1490,7 @@ function bk_operating_hours_tab($business_id) {
         "SELECT * FROM $table ORDER BY day_of_week ASC",
         $business_id
     ));
+    $closed_dates = bk_get_closed_dates();
     
     $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     $nonce = wp_create_nonce('bk_nonce');
@@ -1540,6 +1594,44 @@ function bk_operating_hours_tab($business_id) {
         </form>
     </div>
 
+    <div class="bntm-form-section" style="background: #fff7ed;">
+        <h3>Holiday / Closed Dates</h3>
+        <p>Block specific dates such as holidays, maintenance days, or special events.</p>
+
+        <form id="bk-closed-date-form" class="bntm-form">
+            <div class="bntm-form-row">
+                <div class="bntm-form-group">
+                    <label>Closed Date *</label>
+                    <input type="date" name="closed_date" required>
+                </div>
+                <div class="bntm-form-group">
+                    <label>Reason</label>
+                    <input type="text" name="closed_reason" placeholder="e.g., Christmas Day">
+                </div>
+            </div>
+            <button type="submit" class="bntm-btn-primary">Add Closed Date</button>
+            <div id="closed-date-message"></div>
+        </form>
+
+        <div id="bk-closed-dates-list" style="margin-top: 18px;">
+            <?php if (empty($closed_dates)): ?>
+                <p style="color: #6b7280;">No closed dates set.</p>
+            <?php else: ?>
+                <?php foreach ($closed_dates as $entry): ?>
+                    <div class="bk-closed-date-item" style="display:flex; justify-content:space-between; gap:12px; align-items:center; padding:12px 14px; background:#fff; border:1px solid #fed7aa; border-radius:10px; margin-bottom:10px;">
+                        <div>
+                            <strong><?php echo esc_html(date('F j, Y', strtotime($entry['date']))); ?></strong>
+                            <?php if (!empty($entry['reason'])): ?>
+                                <div style="color:#6b7280; margin-top:4px;"><?php echo esc_html($entry['reason']); ?></div>
+                            <?php endif; ?>
+                        </div>
+                        <button type="button" class="bntm-btn-small bntm-btn-danger bk-remove-closed-date" data-date="<?php echo esc_attr($entry['date']); ?>">Remove</button>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+
     <script>
     var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
 
@@ -1602,6 +1694,57 @@ function bk_operating_hours_tab($business_id) {
                 msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
                 btn.disabled = false;
                 btn.textContent = 'Save Booking Settings';
+            });
+        });
+
+        document.getElementById('bk-closed-date-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            formData.append('action', 'bk_add_closed_date');
+            formData.append('nonce', '<?php echo $nonce; ?>');
+
+            const btn = this.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                document.getElementById('closed-date-message').innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
+
+                if (json.success) {
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = 'Add Closed Date';
+                }
+            })
+            .catch(err => {
+                document.getElementById('closed-date-message').innerHTML = '<div class="bntm-notice bntm-notice-error">Error: ' + err.message + '</div>';
+                btn.disabled = false;
+                btn.textContent = 'Add Closed Date';
+            });
+        });
+
+        document.querySelectorAll('.bk-remove-closed-date').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (!confirm('Remove this closed date?')) return;
+
+                const formData = new FormData();
+                formData.append('action', 'bk_remove_closed_date');
+                formData.append('closed_date', this.dataset.date);
+                formData.append('nonce', '<?php echo $nonce; ?>');
+
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    if (json.success) {
+                        location.reload();
+                    } else {
+                        alert(json.data.message || 'Failed to remove closed date');
+                    }
+                });
             });
         });
     })();
@@ -2880,6 +3023,10 @@ function bntm_shortcode_bk_calendar() {
     function updateCalendarColors() {
       document.querySelectorAll('.bk-calendar-day:not(.other-month)').forEach(day => {
           const date = day.dataset.date;
+          const existingBadge = day.querySelector('.bk-slot-badge');
+          if (existingBadge) {
+              existingBadge.remove();
+          }
           
           // Check if date has availability data
           if (dateAvailability[date]) {
@@ -2889,13 +3036,10 @@ function bntm_shortcode_bk_calendar() {
               
               day.classList.remove('availability-low', 'availability-medium', 'availability-full', 'no-operating-hours');
               
-              // Check if there are any slots available
-              if (data.total_slots === 0 || available === 0) {
-                  // No operating hours or fully booked
+              if (!data.has_operating_hours || data.total_slots === 0) {
                   day.classList.add('no-operating-hours');
               } else {
-                  // Has available slots - apply color coding
-                  if (percentage >= 100) {
+                  if (available <= 0 || percentage >= 100) {
                       day.classList.add('availability-full');
                   } else if (percentage >= 50) {
                       day.classList.add('availability-medium');
@@ -2903,15 +3047,9 @@ function bntm_shortcode_bk_calendar() {
                       day.classList.add('availability-low');
                   }
                   
-                  // Add slot count display
-                  const existingBadge = day.querySelector('.bk-slot-badge');
-                  if (existingBadge) {
-                      existingBadge.remove();
-                  }
-                  
                   const badge = document.createElement('div');
                   badge.className = 'bk-slot-badge';
-                  badge.textContent = available + '/' + data.total_slots;
+                  badge.textContent = Math.max(0, available) + '/' + data.total_slots;
                   day.appendChild(badge);
               }
           } else {
@@ -3147,7 +3285,8 @@ function bntm_shortcode_bk_calendar() {
             if (json.success && json.data.slots && json.data.slots.length > 0) {
                 renderSlotsTable(json.data);
             } else {
-                // Show "No operating hours" message
+                const message = json.data?.message || 'There are no available time slots for this date. Please select another date.';
+                const title = json.data?.is_closed_date ? 'Date Closed' : 'No Operating Hours';
                 const msg = document.getElementById('slots-message');
                 msg.style.display = 'block';
                 msg.className = 'bntm-notice bntm-notice-warning';
@@ -3156,10 +3295,10 @@ function bntm_shortcode_bk_calendar() {
                         <svg style="width: 24px; height: 24px; color: #f59e0b;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <strong style="font-size: 16px;">No Operating Hours</strong>
+                        <strong style="font-size: 16px;">${title}</strong>
                     </div>
                     <p style="margin: 10px 0 0 0; text-align: center;">
-                        There are no available time slots for this date. Please select another date.
+                        ${message}
                     </p>
                 `;
             }
@@ -3465,6 +3604,22 @@ function bntm_ajax_bk_get_slots_table() {
     $dateObj = DateTime::createFromFormat('Y-m-d', $date);
     if (!$dateObj) {
         wp_send_json_error(['message' => 'Invalid date format']);
+    }
+
+    if (bk_is_closed_date($date)) {
+        $reason = bk_get_closed_date_reason($date);
+        $message = 'This date is closed.';
+        if (!empty($reason)) {
+            $message .= ' Reason: ' . $reason;
+        }
+
+        wp_send_json_success([
+            'slots' => [],
+            'services' => [],
+            'slots_by_service' => [],
+            'message' => $message,
+            'is_closed_date' => true
+        ]);
     }
     
     $services_table = $wpdb->prefix . 'bk_services';
@@ -4646,6 +4801,10 @@ function bk_bookings_calendar_tab($business_id) {
     function updateCalendarColors() {
       document.querySelectorAll('.bk-calendar-day:not(.other-month)').forEach(day => {
           const date = day.dataset.date;
+          const existingBadge = day.querySelector('.bk-slot-badge');
+          if (existingBadge) {
+              existingBadge.remove();
+          }
           
           // Check if date has availability data
           if (dateAvailability[date]) {
@@ -4655,13 +4814,10 @@ function bk_bookings_calendar_tab($business_id) {
               
               day.classList.remove('availability-low', 'availability-medium', 'availability-full', 'no-operating-hours');
               
-              // Check if there are any slots available
-              if (data.total_slots === 0 || available === 0) {
-                  // No operating hours or fully booked
+              if (!data.has_operating_hours || data.total_slots === 0) {
                   day.classList.add('no-operating-hours');
               } else {
-                  // Has available slots - apply color coding
-                  if (percentage >= 100) {
+                  if (available <= 0 || percentage >= 100) {
                       day.classList.add('availability-full');
                   } else if (percentage >= 50) {
                       day.classList.add('availability-medium');
@@ -4669,15 +4825,9 @@ function bk_bookings_calendar_tab($business_id) {
                       day.classList.add('availability-low');
                   }
                   
-                  // Add slot count display
-                  const existingBadge = day.querySelector('.bk-slot-badge');
-                  if (existingBadge) {
-                      existingBadge.remove();
-                  }
-                  
                   const badge = document.createElement('div');
                   badge.className = 'bk-slot-badge';
-                  badge.textContent = available + '/' + data.total_slots;
+                  badge.textContent = Math.max(0, available) + '/' + data.total_slots;
                   day.appendChild(badge);
               }
           } else {
@@ -4825,7 +4975,8 @@ function bk_bookings_calendar_tab($business_id) {
             if (json.success && json.data.slots && json.data.slots.length > 0) {
                 renderAdminSlotsTable(json.data);
             } else {
-                // Show "No operating hours" message
+                const message = json.data?.message || 'There are no time slots configured for this date. Please check your operating hours settings.';
+                const title = json.data?.is_closed_date ? 'Date Closed' : 'No Operating Hours';
                 const msg = document.getElementById('slots-message');
                 msg.style.display = 'block';
                 msg.className = 'bntm-notice bntm-notice-warning';
@@ -4834,10 +4985,10 @@ function bk_bookings_calendar_tab($business_id) {
                         <svg style="width: 24px; height: 24px; color: #f59e0b;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                         </svg>
-                        <strong style="font-size: 16px;">No Operating Hours</strong>
+                        <strong style="font-size: 16px;">${title}</strong>
                     </div>
                     <p style="margin: 10px 0 0 0; text-align: center;">
-                        There are no time slots configured for this date. Please check your operating hours settings.
+                        ${message}
                     </p>
                 `;
                 document.getElementById('admin-slots-container').style.display = 'none';
@@ -5193,6 +5344,22 @@ function bntm_ajax_bk_get_admin_slots() {
     if (empty($date)) {
         wp_send_json_error(['message' => 'Missing date']);
     }
+
+    if (bk_is_closed_date($date)) {
+        $reason = bk_get_closed_date_reason($date);
+        $message = 'This date is marked closed.';
+        if (!empty($reason)) {
+            $message .= ' Reason: ' . $reason;
+        }
+
+        wp_send_json_success([
+            'slots' => [],
+            'services' => [],
+            'slots_by_service' => [],
+            'message' => $message,
+            'is_closed_date' => true
+        ]);
+    }
     
     $services_table = $wpdb->prefix . 'bk_services';
     $hours_table = $wpdb->prefix . 'bk_operating_hours';
@@ -5346,6 +5513,19 @@ if (!is_user_logged_in()) {
     while ($current <= $end) {
         $date_str = date('Y-m-d', $current);
         $day_of_week = date('w', $current);
+
+        if (bk_is_closed_date($date_str)) {
+            $availability_data[$date_str] = [
+                'total_slots' => 0,
+                'booked_slots' => 0,
+                'percentage' => 0,
+                'has_operating_hours' => false,
+                'is_closed_date' => true,
+                'closed_reason' => bk_get_closed_date_reason($date_str)
+            ];
+            $current = strtotime('+1 day', $current);
+            continue;
+        }
         
         // Get operating hours for this day
         $operating_hour = $wpdb->get_row($wpdb->prepare(
@@ -5395,7 +5575,9 @@ if (!is_user_logged_in()) {
                 'total_slots' => $total_slots,
                 'booked_slots' => $booked_slots,
                 'percentage' => round($percentage, 2),
-                'has_operating_hours' => true
+                'has_operating_hours' => true,
+                'is_closed_date' => false,
+                'closed_reason' => ''
             ];
         } else {
             // No operating hours or closed - return zero availability
@@ -5403,7 +5585,9 @@ if (!is_user_logged_in()) {
                 'total_slots' => 0,
                 'booked_slots' => 0,
                 'percentage' => 0,
-                'has_operating_hours' => false
+                'has_operating_hours' => false,
+                'is_closed_date' => false,
+                'closed_reason' => ''
             ];
         }
         
@@ -5506,6 +5690,15 @@ function bntm_ajax_bk_update_admin_booking() {
     
     if (!$current_booking) {
         wp_send_json_error(['message' => 'Booking not found']);
+    }
+
+    if (bk_is_closed_date($booking_date) && $booking_date !== $current_booking->booking_date) {
+        $reason = bk_get_closed_date_reason($booking_date);
+        $message = 'This date is marked closed.';
+        if (!empty($reason)) {
+            $message .= ' Reason: ' . $reason;
+        }
+        wp_send_json_error(['message' => $message]);
     }
     
     // Check for conflicts if time/date changed
@@ -5613,6 +5806,15 @@ function bntm_ajax_bk_create_admin_booking() {
     // Validate quantity
     if ($quantity < 1) $quantity = 1;
     if ($quantity > 10) $quantity = 10;
+
+    if (bk_is_closed_date($booking_date)) {
+        $reason = bk_get_closed_date_reason($booking_date);
+        $message = 'This date is marked closed.';
+        if (!empty($reason)) {
+            $message .= ' Reason: ' . $reason;
+        }
+        wp_send_json_error(['message' => $message]);
+    }
     
     // Get service
     $service = $wpdb->get_row($wpdb->prepare(
@@ -6155,6 +6357,15 @@ function bntm_ajax_bk_get_available_slots() {
     if (!$dateObj) {
         wp_send_json_error(['message' => 'Invalid date format']);
     }
+
+    if (bk_is_closed_date($date)) {
+        $reason = bk_get_closed_date_reason($date);
+        $message = 'Business closed on this date';
+        if (!empty($reason)) {
+            $message .= ' (' . $reason . ')';
+        }
+        wp_send_json_success(['slots' => [], 'message' => $message]);
+    }
     
     // Get service
     $services_table = $wpdb->prefix . 'bk_services';
@@ -6267,6 +6478,15 @@ function bntm_ajax_bk_book_appointment() {
     // Validation
     if (empty($service_id) || empty($booking_date) || empty($start_time) || empty($customer_name) || empty($customer_email)) {
         wp_send_json_error(['message' => 'Please fill in all required fields']);
+    }
+
+    if (bk_is_closed_date($booking_date)) {
+        $reason = bk_get_closed_date_reason($booking_date);
+        $message = 'This date is closed for booking.';
+        if (!empty($reason)) {
+            $message .= ' Reason: ' . $reason;
+        }
+        wp_send_json_error(['message' => $message]);
     }
     
     // Get service
@@ -7526,6 +7746,58 @@ function bntm_ajax_bk_save_settings() {
     bntm_set_setting('bk_tax_rate', floatval($_POST['tax_rate']));
     
     wp_send_json_success(['message' => 'Booking settings saved successfully!']);
+}
+
+function bntm_ajax_bk_add_closed_date() {
+    check_ajax_referer('bk_nonce', 'nonce');
+
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $date = sanitize_text_field($_POST['closed_date'] ?? '');
+    $reason = sanitize_text_field($_POST['closed_reason'] ?? '');
+    $date_obj = DateTime::createFromFormat('Y-m-d', $date);
+
+    if (!$date_obj || $date_obj->format('Y-m-d') !== $date) {
+        wp_send_json_error(['message' => 'Invalid date']);
+    }
+
+    $closed_dates = bk_get_closed_dates();
+    foreach ($closed_dates as $entry) {
+        if ($entry['date'] === $date) {
+            wp_send_json_error(['message' => 'That date is already marked closed']);
+        }
+    }
+
+    $closed_dates[] = [
+        'date' => $date,
+        'reason' => $reason
+    ];
+
+    bntm_set_setting('bk_closed_dates', wp_json_encode($closed_dates));
+    wp_send_json_success(['message' => 'Closed date added successfully']);
+}
+
+function bntm_ajax_bk_remove_closed_date() {
+    check_ajax_referer('bk_nonce', 'nonce');
+
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $date = sanitize_text_field($_POST['closed_date'] ?? '');
+    $closed_dates = bk_get_closed_dates();
+    $updated = array_values(array_filter($closed_dates, function($entry) use ($date) {
+        return $entry['date'] !== $date;
+    }));
+
+    if (count($updated) === count($closed_dates)) {
+        wp_send_json_error(['message' => 'Closed date not found']);
+    }
+
+    bntm_set_setting('bk_closed_dates', wp_json_encode($updated));
+    wp_send_json_success(['message' => 'Closed date removed successfully']);
 }
 
 /* ---------- HELPER FUNCTIONS ---------- */
