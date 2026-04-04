@@ -127,6 +127,23 @@ add_action('wp_ajax_bntm_fn_revert_order', 'bntm_ajax_fn_revert_order');
 add_action('wp_ajax_bntm_fn_save_categories', 'bntm_ajax_fn_save_categories');
 add_action('wp_ajax_bntm_fn_export_csv', 'bntm_ajax_fn_export_csv');
 
+function bntm_fn_get_currency_display() {
+    $currency = trim((string) bntm_get_setting('ec_currency', 'PHP'));
+
+    return $currency !== '' ? $currency : 'PHP';
+}
+
+function bntm_fn_format_currency_amount($amount, $currency = null) {
+    $currency = $currency !== null ? trim((string) $currency) : bntm_fn_get_currency_display();
+    $formatted_amount = number_format((float) $amount, 2);
+
+    if ($currency === '') {
+        return $formatted_amount;
+    }
+
+    return preg_match('/^[A-Z]{3}$/', $currency) ? $currency . ' ' . $formatted_amount : $currency . $formatted_amount;
+}
+
 // Create Finance tables on module activation
 function bntm_fn_create_tables2() {
     global $wpdb;
@@ -224,7 +241,7 @@ function bntm_ajax_fn_generate_pages() {
     }
     
     $stats = bntm_fn_get_dashboard_stats();
-    $currency = get_option('bntm_currency_symbol', '$');
+    $currency = bntm_fn_get_currency_display();
     
     ob_start();
     ?>
@@ -241,7 +258,7 @@ function bntm_ajax_fn_generate_pages() {
                 </div>
                 <div class="bntm-fn-stat-content">
                     <h3>Total Income</h3>
-                    <p class="bntm-fn-stat-number bntm-fn-stat-income"><?php echo $currency; ?><?php echo number_format($stats['total_income'], 2); ?></p>
+                    <p class="bntm-fn-stat-number bntm-fn-stat-income"><?php echo esc_html(bntm_fn_format_currency_amount($stats['total_income'], $currency)); ?></p>
                 </div>
             </div>
             
@@ -254,7 +271,7 @@ function bntm_ajax_fn_generate_pages() {
                 </div>
                 <div class="bntm-fn-stat-content">
                     <h3>Total Expenses</h3>
-                    <p class="bntm-fn-stat-number bntm-fn-stat-expense"><?php echo $currency; ?><?php echo number_format($stats['total_expense'], 2); ?></p>
+                    <p class="bntm-fn-stat-number bntm-fn-stat-expense"><?php echo esc_html(bntm_fn_format_currency_amount($stats['total_expense'], $currency)); ?></p>
                 </div>
             </div>
             
@@ -267,7 +284,7 @@ function bntm_ajax_fn_generate_pages() {
                 </div>
                 <div class="bntm-fn-stat-content">
                     <h3>Net Balance</h3>
-                    <p class="bntm-fn-stat-number <?php echo $stats['balance'] >= 0 ? 'bntm-fn-stat-income' : 'bntm-fn-stat-expense'; ?>"><?php echo $currency; ?><?php echo number_format($stats['balance'], 2); ?></p>
+                    <p class="bntm-fn-stat-number <?php echo $stats['balance'] >= 0 ? 'bntm-fn-stat-income' : 'bntm-fn-stat-expense'; ?>"><?php echo esc_html(bntm_fn_format_currency_amount($stats['balance'], $currency)); ?></p>
                 </div>
             </div>
             
@@ -282,7 +299,7 @@ function bntm_ajax_fn_generate_pages() {
                 </div>
                 <div class="bntm-fn-stat-content">
                     <h3>This Month</h3>
-                    <p class="bntm-fn-stat-number"><?php echo $currency; ?><?php echo number_format($stats['month_balance'], 2); ?></p>
+                    <p class="bntm-fn-stat-number"><?php echo esc_html(bntm_fn_format_currency_amount($stats['month_balance'], $currency)); ?></p>
                 </div>
             </div>
         </div>
@@ -370,6 +387,7 @@ function bntm_ajax_fn_generate_pages() {
     
     .bntm-fn-stat-content {
         flex: 1;
+        min-width: 0;
     }
     
     .bntm-fn-stat-content h3 {
@@ -382,11 +400,13 @@ function bntm_ajax_fn_generate_pages() {
     }
     
     .bntm-fn-stat-number {
-        font-size: 28px;
+        font-size: 18px;
         font-weight: 700;
         color: #111827;
         margin: 0;
-        line-height: 1;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     
     .bntm-fn-stat-income {
@@ -430,11 +450,16 @@ function bntm_ajax_fn_generate_pages() {
         .bntm-fn-chart-card {
             grid-column: 1 / -1;
         }
+
+        .bntm-fn-stat-card {
+            padding: 20px;
+        }
     }
     </style>
     
     <script>
     (function() {
+        const currencyPrefix = <?php echo wp_json_encode(preg_match('/^[A-Z]{3}$/', $currency) ? $currency . ' ' : $currency); ?>;
         const primaryColor = getComputedStyle(document.documentElement)
             .getPropertyValue('--bntm-primary').trim() || '#374151';
         
@@ -495,7 +520,7 @@ function bntm_ajax_fn_generate_pages() {
                             cornerRadius: 8,
                             callbacks: {
                                 label: function(context) {
-                                    return context.dataset.label + ': <?php echo $currency; ?>' + context.parsed.y.toFixed(2);
+                                    return context.dataset.label + ': ' + currencyPrefix + context.parsed.y.toFixed(2);
                                 }
                             }
                         }
@@ -567,7 +592,7 @@ function bntm_ajax_fn_generate_pages() {
                                 label: function(context) {
                                     const label = context.label || '';
                                     const value = context.parsed || 0;
-                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2);
+                                    return label + ': ' + currencyPrefix + value.toFixed(2);
                                 }
                             }
                         }
@@ -618,7 +643,7 @@ function bntm_ajax_fn_generate_pages() {
                                 label: function(context) {
                                     const label = context.label || '';
                                     const value = context.parsed || 0;
-                                    return label + ': <?php echo $currency; ?>' + value.toFixed(2);
+                                    return label + ': ' + currencyPrefix + value.toFixed(2);
                                 }
                             }
                         }
@@ -713,7 +738,6 @@ function bntm_shortcode_fn_page() {
         return '<div class="bntm-notice bntm-notice-error">Please log in to access Finance.</div>';
     }
     
-    $currency = bntm_get_setting('ec_currency', 'PHP');
     $type = isset($_GET['type']) ? sanitize_text_field($_GET['type']) : 'dashboard';
     
     ob_start();
@@ -732,6 +756,7 @@ function bntm_shortcode_fn_page() {
         switch ($type) {
             case 'dashboard':
                 echo bntm_shortcode_fn_dashboard();
+                break;
             case 'transactions':
                 echo bntm_fn_transactions_tab();
                 break;
@@ -754,7 +779,7 @@ function bntm_shortcode_fn_page() {
 }
 /* ---------- TAB CONTENT ---------- */
 function bntm_fn_transactions_tab() {
-    $currency = bntm_get_setting('ec_currency', 'PHP');
+    $currency = bntm_fn_get_currency_display();
     $income_cats = json_decode(bntm_get_setting('fn_categories_income', '[]'), true);
     $expense_cats = json_decode(bntm_get_setting('fn_categories_expense', '[]'), true);
     $nonce = wp_create_nonce('bntm_fn_action');
@@ -970,7 +995,7 @@ function bntm_fn_transactions_tab() {
 function bntm_fn_render_transaction_history($limit = 10) {
     global $wpdb;
     $table = $wpdb->prefix . 'fn_transactions';
-    $currency = bntm_get_setting('ec_currency', 'PHP');
+    $currency = bntm_fn_get_currency_display();
     $nonce = wp_create_nonce('bntm_fn_action');
     
     // Get current page from URL parameter
@@ -1016,7 +1041,7 @@ function bntm_fn_render_transaction_history($limit = 10) {
                     <td><?php echo date('M d, Y', strtotime($txn->created_at)); ?></td>
                     <td><span class="bntm-type-badge bntm-type-<?php echo $txn->type; ?>"><?php echo ucfirst($txn->type); ?></span></td>
                     <td><?php echo esc_html($txn->category); ?></td>
-                    <td class="<?php echo $txn->type === 'income' ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo $currency ?><?php echo number_format($txn->amount, 2); ?></td>
+                    <td class="<?php echo $txn->type === 'income' ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo esc_html(bntm_fn_format_currency_amount($txn->amount, $currency)); ?></td>
                     <td><?php echo esc_html($txn->notes); ?></td>
                     <td>
                         <?php if (!$txn->reference_type): ?>
@@ -1104,14 +1129,12 @@ function bntm_fn_reports_tab() {
     $year = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
     $month = isset($_GET['month']) ? intval($_GET['month']) : date('m');
     
-    $currency = bntm_get_setting('ec_currency', 'PHP');
+    $currency = bntm_fn_get_currency_display();
     $monthly_data = bntm_fn_get_monthly_report($year, $month);
     $category_breakdown = bntm_fn_get_category_breakdown($year, $month);
     $nonce = wp_create_nonce('bntm_fn_action');
     
-    // Calculate start and end dates for the selected month
-    $start_date = date('Y-m-01', strtotime("$year-$month-01"));
-    $end_date = date('Y-m-t', strtotime("$year-$month-01"));
+    $report_url = add_query_arg(['type' => 'reports'], get_permalink());
     
     ob_start();
     ?>
@@ -1144,15 +1167,15 @@ function bntm_fn_reports_tab() {
         <div class="bntm-stats-grid">
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Total Income</div>
-                <div class="bntm-stat-value bntm-stat-income"><?php echo $currency ?><?php echo number_format($monthly_data['income'], 2); ?></div>
+                <div class="bntm-stat-value bntm-stat-income"><?php echo esc_html(bntm_fn_format_currency_amount($monthly_data['income'], $currency)); ?></div>
             </div>
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Total Expenses</div>
-                <div class="bntm-stat-value bntm-stat-expense"><?php echo $currency ?><?php echo number_format($monthly_data['expense'], 2); ?></div>
+                <div class="bntm-stat-value bntm-stat-expense"><?php echo esc_html(bntm_fn_format_currency_amount($monthly_data['expense'], $currency)); ?></div>
             </div>
             <div class="bntm-stat-card">
                 <div class="bntm-stat-label">Net Profit/Loss</div>
-                <div class="bntm-stat-value <?php echo $monthly_data['balance'] >= 0 ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo $currency ?><?php echo number_format($monthly_data['balance'], 2); ?></div>
+                <div class="bntm-stat-value <?php echo $monthly_data['balance'] >= 0 ? 'bntm-stat-income' : 'bntm-stat-expense'; ?>"><?php echo esc_html(bntm_fn_format_currency_amount($monthly_data['balance'], $currency)); ?></div>
             </div>
         </div>
         
@@ -1227,7 +1250,7 @@ function bntm_fn_reports_tab() {
                     <tr class="bntm-total">
                         <td><strong>NET INCOME (LOSS)</strong></td>
                         <td style="text-align: right; <?php echo $monthly_data['balance'] >= 0 ? 'color: #059669;' : 'color: #dc2626;'; ?>">
-                            <strong><?php echo $monthly_data['balance'] >= 0 ? '' : '('; ?><?php echo $currency ?><?php echo number_format(abs($monthly_data['balance']), 2); ?><?php echo $monthly_data['balance'] >= 0 ? '' : ')'; ?></strong>
+                            <strong><?php echo esc_html(bntm_fn_format_currency_amount($monthly_data['balance'], $currency)); ?></strong>
                         </td>
                     </tr>
                 </tbody>
@@ -1283,11 +1306,15 @@ function bntm_fn_reports_tab() {
     
     <script>
     var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    const reportBaseUrl = <?php echo wp_json_encode($report_url); ?>;
     
     function updateReport() {
         const month = document.getElementById('report_month').value;
         const year = document.getElementById('report_year').value;
-        window.location.href = '?type=reports&month=' + month + '&year=' + year;
+        const targetUrl = new URL(reportBaseUrl, window.location.origin);
+        targetUrl.searchParams.set('month', month);
+        targetUrl.searchParams.set('year', year);
+        window.location.href = targetUrl.toString();
     }
     
     // Generate PDF Report
@@ -1329,7 +1356,7 @@ function bntm_ajax_fn_generate_pdf() {
     if (!is_user_logged_in()) {
         wp_die('Unauthorized access');
     }
-    $currency = bntm_get_setting('ec_currency', 'PHP');
+    $currency = bntm_fn_get_currency_display();
     $year = intval($_GET['year']);
     $month = intval($_GET['month']);
     
@@ -1342,248 +1369,102 @@ function bntm_ajax_fn_generate_pdf() {
     
     $month_name = date('F', mktime(0, 0, 0, $month, 1));
     $period = "$month_name $year";
-    
-    // Generate HTML for PDF
-    ob_start();
-    ?>
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            @page {
-                margin: 2cm;
-            }
-            body {
-                font-family: 'Arial', sans-serif;
-                font-size: 11pt;
-                color: #000;
-                line-height: 1.4;
-            }
-            .header {
-                text-align: center;
-                margin-bottom: 30px;
-                border-bottom: 2px solid #000;
-                padding-bottom: 15px;
-            }
-            .header h1 {
-                margin: 0 0 5px 0;
-                font-size: 18pt;
-                font-weight: bold;
-            }
-            .header h2 {
-                margin: 0 0 5px 0;
-                font-size: 14pt;
-                font-weight: normal;
-            }
-            .header p {
-                margin: 3px 0;
-                font-size: 10pt;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin: 20px 0;
-            }
-            th {
-                background: #f0f0f0;
-                padding: 10px;
-                text-align: left;
-                border-bottom: 2px solid #000;
-                font-weight: bold;
-            }
-            th.amount {
-                text-align: right;
-            }
-            td {
-                padding: 8px 10px;
-                border-bottom: 1px solid #ddd;
-            }
-            td.amount {
-                text-align: right;
-                font-family: 'Courier New', monospace;
-            }
-            .indent {
-                padding-left: 30px;
-            }
-            .section-header {
-                background: #f5f5f5;
-                font-weight: bold;
-                border-top: 2px solid #000;
-                border-bottom: 1px solid #000;
-            }
-            .subtotal {
-                background: #fafafa;
-                font-weight: bold;
-                border-top: 1px solid #000;
-            }
-            .total {
-                background: #f0f0f0;
-                font-weight: bold;
-                font-size: 12pt;
-                border-top: 3px double #000;
-                border-bottom: 3px double #000;
-            }
-            .footer {
-                margin-top: 50px;
-                padding-top: 20px;
-                border-top: 1px solid #ddd;
-            }
-            .signature-section {
-                margin-top: 60px;
-                display: table;
-                width: 100%;
-            }
-            .signature-box {
-                display: table-cell;
-                width: 50%;
-                text-align: center;
-                padding: 0 20px;
-            }
-            .signature-line {
-                border-top: 1px solid #000;
-                margin-top: 50px;
-                padding-top: 5px;
-            }
-            .notes {
-                margin-top: 30px;
-                font-size: 9pt;
-                color: #666;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h1><?php echo esc_html($company_name); ?></h1>
-            <h2>INCOME STATEMENT</h2>
-            <p>For the Month of <?php echo esc_html($period); ?></p>
-            <?php 
-                if (($currency ==='PHP')): ?>
-                <p style="font-size: 9pt; color: #666;">
-                   Prepared in accordance with Philippine Financial Reporting Standards (PFRS)<br>
-                   All amounts are in Philippine Pesos (<?php echo $currency ?>)
-               </p>
-                <?php  endif; ?>
-            
-        </div>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 70%;">Particulars</th>
-                    <th class="amount" style="width: 30%;">Amount (<?php echo $currency ?>)</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- REVENUE SECTION -->
-                <tr class="section-header">
-                    <td colspan="2">REVENUE</td>
-                </tr>
-                
-                <?php 
-                $income_items = array_filter($category_breakdown, function($item) {
-                    return $item->type === 'income';
-                });
-                
-                if (empty($income_items)): ?>
-                <tr>
-                    <td class="indent">No revenue recorded</td>
-                    <td class="amount">-</td>
-                </tr>
-                <?php else:
-                    foreach ($income_items as $item): ?>
-                <tr>
-                    <td class="indent"><?php echo esc_html($item->category); ?></td>
-                    <td class="amount"><?php echo number_format($item->total, 2); ?></td>
-                </tr>
-                <?php endforeach; endif; ?>
-                
-                <tr class="subtotal">
-                    <td class="indent">Total Revenue</td>
-                    <td class="amount"><?php echo number_format($monthly_data['income'], 2); ?></td>
-                </tr>
-                
-                <!-- EXPENSES SECTION -->
-                <tr class="section-header">
-                    <td colspan="2">EXPENSES</td>
-                </tr>
-                
-                <?php 
-                $expense_items = array_filter($category_breakdown, function($item) {
-                    return $item->type === 'expense';
-                });
-                
-                if (empty($expense_items)): ?>
-                <tr>
-                    <td class="indent">No expenses recorded</td>
-                    <td class="amount">-</td>
-                </tr>
-                <?php else:
-                    foreach ($expense_items as $item): ?>
-                <tr>
-                    <td class="indent"><?php echo esc_html($item->category); ?></td>
-                    <td class="amount"><?php echo number_format($item->total, 2); ?></td>
-                </tr>
-                <?php endforeach; endif; ?>
-                
-                <tr class="subtotal">
-                    <td class="indent">Total Expenses</td>
-                    <td class="amount"><?php echo number_format($monthly_data['expense'], 2); ?></td>
-                </tr>
-                
-                <!-- NET INCOME -->
-                <tr class="total">
-                    <td>NET INCOME <?php echo $monthly_data['balance'] < 0 ? '(LOSS)' : ''; ?></td>
-                    <td class="amount" style="<?php echo $monthly_data['balance'] >= 0 ? 'color: #000;' : 'color: #000;'; ?>">
-                        <?php echo $monthly_data['balance'] >= 0 ? '' : '('; ?><?php echo number_format(abs($monthly_data['balance']), 2); ?><?php echo $monthly_data['balance'] >= 0 ? '' : ')'; ?>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-        
-        <div class="signature-section">
-            <div class="signature-box">
-                <div class="signature-line">
-                    Prepared by
-                </div>
-            </div>
-            <div class="signature-box">
-                <div class="signature-line">
-                    Approved by
-                </div>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p style="font-size: 9pt; margin: 5px 0;"><strong>Report Details:</strong></p>
-            <p style="font-size: 9pt; margin: 3px 0;">Generated: <?php echo date('F d, Y h:i A'); ?></p>
-            <p style="font-size: 9pt; margin: 3px 0;">Contact: <?php echo esc_html($admin_email); ?></p>
-        </div>
-        
-        <div class="notes">
-            <p><strong>Notes:</strong></p>
-            <p>1. This financial statement is prepared for internal management purposes.</p>
-            <p>2. All figures are subject to audit and verification.</p>
-            <p>3. This document is auto-generated by BNTM Hub Financial Management System.</p>
-        </div>
-    </body>
-    </html>
-    <?php
-    $html = ob_get_clean();
-    
-    // Check if we can use TCPDF or mPDF
-    // For now, we'll use browser's print-to-PDF capability with proper formatting
-    
-    header('Content-Type: text/html; charset=UTF-8');
-    echo $html;
-    
-    // Add auto-print script
-    echo '<script>window.print();</script>';
+    $income_items = array_filter($category_breakdown, function($item) { return $item->type === 'income'; });
+    $expense_items = array_filter($category_breakdown, function($item) { return $item->type === 'expense'; });
+    $pdf = bntm_fn_build_financial_statement_pdf([
+        'title' => 'Finance Statement - ' . $period,
+        'company_name' => $company_name,
+        'period' => $period,
+        'currency' => $currency,
+        'income_items' => $income_items,
+        'expense_items' => $expense_items,
+        'monthly_data' => $monthly_data,
+        'admin_email' => $admin_email,
+        'generated_at' => date('F d, Y h:i A'),
+        'notes' => [
+            'This financial statement is prepared for internal management purposes.',
+            'All figures are subject to audit and verification.',
+            'This document is auto-generated by BNTM Hub Financial Management System.',
+        ],
+    ]);
+    $filename = 'finance_statement_' . $year . '_' . str_pad((string) $month, 2, '0', STR_PAD_LEFT) . '.pdf';
+
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Content-Length: ' . strlen($pdf));
+    header('Cache-Control: private, max-age=0, must-revalidate');
+    echo $pdf;
     exit;
 }
+function bntm_fn_pdf_escape_text($text) {
+    $text = wp_strip_all_tags((string) $text);
+    $text = preg_replace('/[\r\n\t]+/', ' ', $text);
+
+    return str_replace(['\\', '(', ')'], ['\\\\', '\(', '\)'], $text);
+}
+
+function bntm_fn_pdf_estimate_text_width($text, $font_size = 12, $font = 'regular') {
+    $multiplier = $font === 'bold' ? 0.56 : 0.52;
+
+    return strlen((string) $text) * $font_size * $multiplier;
+}
+
+function bntm_fn_pdf_wrap_text($text, $max_chars = 70) {
+    $text = trim(preg_replace('/\s+/', ' ', (string) $text));
+    if ($text === '') return [''];
+    $words = explode(' ', $text);
+    $lines = [];
+    $current_line = '';
+    foreach ($words as $word) {
+        $candidate = $current_line === '' ? $word : $current_line . ' ' . $word;
+        if (strlen($candidate) <= $max_chars) { $current_line = $candidate; continue; }
+        if ($current_line !== '') $lines[] = $current_line;
+        $current_line = $word;
+    }
+    if ($current_line !== '') $lines[] = $current_line;
+    return $lines;
+}
+
+function bntm_fn_pdf_text_command($x, $y, $text, $font = 'F1', $font_size = 12) {
+    return "BT /{$font} {$font_size} Tf 1 0 0 1 {$x} {$y} Tm (" . bntm_fn_pdf_escape_text($text) . ") Tj ET";
+}
+
+function bntm_fn_pdf_line_command($x1, $y1, $x2, $y2, $width = 1) {
+    return "{$width} w {$x1} {$y1} m {$x2} {$y2} l S";
+}
+
+function bntm_fn_pdf_rect_fill_command($x, $y, $width, $height, $r = 0.95, $g = 0.95, $b = 0.95) {
+    return "{$r} {$g} {$b} rg {$x} {$y} {$width} {$height} re f 0 0 0 rg";
+}
+
+function bntm_fn_build_financial_statement_pdf($data) {
+    $page_width = 612; $page_height = 792; $left_x = 56; $right_x = 540; $amount_x = 520; $table_width = $right_x - $left_x; $y = 752; $commands = [];
+    $push_text = function($x, $y_pos, $text, $font = 'F1', $font_size = 11) use (&$commands) { $commands[] = bntm_fn_pdf_text_command($x, $y_pos, $text, $font, $font_size); };
+    $push_center = function($y_pos, $text, $font = 'F1', $font_size = 11, $font_weight = 'regular') use (&$commands, $page_width) { $width = bntm_fn_pdf_estimate_text_width($text, $font_size, $font_weight); $x = max(36, ($page_width - $width) / 2); $commands[] = bntm_fn_pdf_text_command(round($x, 2), $y_pos, $text, $font, $font_size); };
+    $push_right = function($y_pos, $text, $font = 'F1', $font_size = 11, $font_weight = 'regular') use (&$commands, $amount_x) { $width = bntm_fn_pdf_estimate_text_width($text, $font_size, $font_weight); $x = max(320, $amount_x - $width); $commands[] = bntm_fn_pdf_text_command(round($x, 2), $y_pos, $text, $font, $font_size); };
+    $row = function($label, $amount = '', $options = []) use (&$commands, &$y, $left_x, $right_x, $table_width, $push_text, $push_right) { $font = $options['font'] ?? 'F1'; $font_size = $options['font_size'] ?? 10; $amount_font = $options['amount_font'] ?? $font; $fill = !empty($options['fill']); $indent = (int) ($options['indent'] ?? 0); $border_bottom = array_key_exists('border_bottom', $options) ? (bool) $options['border_bottom'] : true; if ($fill) $commands[] = bntm_fn_pdf_rect_fill_command($left_x, $y - 6, $table_width, 18, 0.96, 0.97, 0.98); $push_text($left_x + $indent, $y, $label, $font, $font_size); if ($amount !== '') $push_right($y, $amount, $amount_font, $font_size, $amount_font === 'F2' ? 'bold' : 'regular'); if ($border_bottom) $commands[] = bntm_fn_pdf_line_command($left_x, $y - 8, $right_x, $y - 8, 0.5); $y -= 22; };
+    $push_center($y, $data['company_name'], 'F2', 16, 'bold'); $y -= 24; $push_center($y, 'INCOME STATEMENT', 'F2', 13, 'bold'); $y -= 18; $push_center($y, 'For the Month of ' . $data['period'], 'F1', 10, 'regular'); $y -= 18;
+    if ($data['currency'] === 'PHP') { $push_center($y, 'Prepared in accordance with Philippine Financial Reporting Standards (PFRS)', 'F1', 8, 'regular'); $y -= 12; $push_center($y, 'All amounts are stated in Philippine Pesos (PHP)', 'F1', 8, 'regular'); $y -= 16; }
+    $commands[] = bntm_fn_pdf_line_command($left_x, $y, $right_x, $y, 1.2); $y -= 24;
+    $row('Particulars', 'Amount (' . $data['currency'] . ')', ['font' => 'F2', 'amount_font' => 'F2', 'fill' => true, 'font_size' => 10]);
+    $row('REVENUE', '', ['font' => 'F2', 'fill' => true, 'font_size' => 10]);
+    if (empty($data['income_items'])) $row('No revenue recorded', bntm_fn_format_currency_amount(0, $data['currency']), ['indent' => 14]); else foreach ($data['income_items'] as $item) $row($item->category, bntm_fn_format_currency_amount($item->total, $data['currency']), ['indent' => 14]);
+    $row('Total Revenue', bntm_fn_format_currency_amount($data['monthly_data']['income'], $data['currency']), ['font' => 'F2', 'amount_font' => 'F2', 'indent' => 14, 'fill' => true]);
+    $row('EXPENSES', '', ['font' => 'F2', 'fill' => true, 'font_size' => 10]);
+    if (empty($data['expense_items'])) $row('No expenses recorded', bntm_fn_format_currency_amount(0, $data['currency']), ['indent' => 14]); else foreach ($data['expense_items'] as $item) $row($item->category, bntm_fn_format_currency_amount($item->total, $data['currency']), ['indent' => 14]);
+    $row('Total Expenses', bntm_fn_format_currency_amount($data['monthly_data']['expense'], $data['currency']), ['font' => 'F2', 'amount_font' => 'F2', 'indent' => 14, 'fill' => true]);
+    $row($data['monthly_data']['balance'] < 0 ? 'NET LOSS' : 'NET INCOME', bntm_fn_format_currency_amount($data['monthly_data']['balance'], $data['currency']), ['font' => 'F2', 'amount_font' => 'F2', 'font_size' => 11, 'fill' => true]);
+    $y -= 12; $commands[] = bntm_fn_pdf_line_command($left_x, $y, $right_x, $y, 0.8); $y -= 18; $push_text($left_x, $y, 'Report Details', 'F2', 10); $y -= 16; $push_text($left_x, $y, 'Generated: ' . $data['generated_at'], 'F1', 9); $y -= 14; $push_text($left_x, $y, 'Contact: ' . $data['admin_email'], 'F1', 9); $y -= 24;
+    $push_text($left_x, $y, 'Prepared by', 'F1', 9); $push_text(360, $y, 'Approved by', 'F1', 9); $y -= 10; $commands[] = bntm_fn_pdf_line_command($left_x, $y, 250, $y, 0.7); $commands[] = bntm_fn_pdf_line_command(360, $y, $right_x, $y, 0.7); $y -= 28;
+    $push_text($left_x, $y, 'Notes', 'F2', 10); $y -= 14; foreach ($data['notes'] as $index => $note) { $wrapped_lines = bntm_fn_pdf_wrap_text(($index + 1) . '. ' . $note, 88); foreach ($wrapped_lines as $line_index => $line) { $push_text($left_x + ($line_index === 0 ? 0 : 10), $y, $line, 'F1', 8); $y -= 12; } }
+    $content = implode("\n", $commands); $content_length = strlen($content);
+    $objects = ["1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n","2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n","3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {$page_width} {$page_height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj\n","4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n","5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n","6 0 obj\n<< /Length {$content_length} >>\nstream\n{$content}\nendstream\nendobj\n","7 0 obj\n<< /Title (" . bntm_fn_pdf_escape_text($data['title']) . ") /Producer (BNTM Hub) >>\nendobj\n"];
+    $pdf = "%PDF-1.4\n"; $offsets = [0]; foreach ($objects as $object) { $offsets[] = strlen($pdf); $pdf .= $object; } $xref_offset = strlen($pdf); $pdf .= "xref\n0 " . (count($objects) + 1) . "\n"; $pdf .= "0000000000 65535 f \n"; for ($i = 1; $i <= count($objects); $i++) $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]); $pdf .= "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R /Info 7 0 R >>\n"; $pdf .= "startxref\n{$xref_offset}\n%%EOF";
+    return $pdf;
+}
+
 function bntm_fn_export_tab() {
     $nonce = wp_create_nonce('bntm_fn_action');
-    $currency = bntm_get_setting('ec_currency', 'PHP');
     
     ob_start();
     ?>
@@ -1617,6 +1498,7 @@ function bntm_fn_export_tab() {
     </div>
     
     <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
     document.getElementById('bntm-fn-export-form').addEventListener('submit', function(e) {
         e.preventDefault();
         
@@ -1889,20 +1771,30 @@ function bntm_ajax_fn_export_csv() {
     $start_date = sanitize_text_field($_GET['start_date']);
     $end_date = sanitize_text_field($_GET['end_date']);
     $export_type = sanitize_text_field($_GET['export_type']);
-    
-    $where = "created_at BETWEEN '{$start_date}' AND '{$end_date}'";
-    
-    if ($export_type === 'income') {
-        $where .= " AND type='income'";
-    } elseif ($export_type === 'expense') {
-        $where .= " AND type='expense'";
+
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start_date) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end_date)) {
+        wp_die('Invalid export date range.');
     }
-    
-    $transactions = $wpdb->get_results("SELECT * FROM {$table} WHERE {$where} ORDER BY created_at DESC");
+
+    if ($start_date > $end_date) {
+        wp_die('Start date must be earlier than or equal to the end date.');
+    }
+
+    $query = "SELECT * FROM {$table} WHERE DATE(created_at) BETWEEN %s AND %s";
+    $query_args = [$start_date, $end_date];
+
+    if ($export_type === 'income' || $export_type === 'expense') {
+        $query .= " AND type = %s";
+        $query_args[] = $export_type;
+    }
+
+    $query .= " ORDER BY created_at DESC";
+    $transactions = $wpdb->get_results($wpdb->prepare($query, $query_args));
     
     // Generate CSV
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=finance_export_' . date('Y-m-d') . '.csv');
+    header('Cache-Control: private, max-age=0, must-revalidate');
     
     $output = fopen('php://output', 'w');
     

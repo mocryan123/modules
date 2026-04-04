@@ -23,6 +23,29 @@ if (!defined('ABSPATH')) exit;
 define('BNTM_BM_PATH', dirname(__FILE__) . '/');
 define('BNTM_BM_URL', plugin_dir_url(__FILE__));
 
+function bm_get_currency_display() {
+    $currency = trim((string) bntm_get_setting('ec_currency', 'PHP'));
+    return $currency !== '' ? $currency : 'PHP';
+}
+
+function bm_get_currency_prefix($currency = null) {
+    $currency = $currency !== null ? trim((string) $currency) : bm_get_currency_display();
+    if ($currency === '') {
+        return '';
+    }
+
+    return preg_match('/^[A-Z]{3}$/', $currency) ? $currency . ' ' : $currency;
+}
+
+function bm_format_currency($amount, $currency = null) {
+    return bm_get_currency_prefix($currency) . number_format((float) $amount, 2);
+}
+
+function bm_get_currency_code() {
+    $currency = strtoupper(trim((string) bntm_get_setting('ec_currency', 'PHP')));
+    return preg_match('/^[A-Z]{3}$/', $currency) ? $currency : 'PHP';
+}
+
 // ============================================================================
 // MODULE CONFIGURATION FUNCTIONS
 // ============================================================================
@@ -312,8 +335,11 @@ add_action('wp_ajax_bm_delete_yacht_type', 'bntm_ajax_bm_delete_yacht_type');
 add_action('wp_ajax_bm_save_car_type', 'bntm_ajax_bm_save_car_type');
 add_action('wp_ajax_bm_delete_car_type', 'bntm_ajax_bm_delete_car_type');
 add_action('wp_ajax_bm_update_booking_status', 'bntm_ajax_bm_update_booking_status');
+add_action('wp_ajax_bm_update_payment_status', 'bntm_ajax_bm_update_payment_status');
+add_action('wp_ajax_bm_update_booking_dates', 'bntm_ajax_bm_update_booking_dates');
 add_action('wp_ajax_bm_confirm_provider_phone', 'bntm_ajax_bm_confirm_provider_phone');
 add_action('wp_ajax_bm_resend_quotation', 'bntm_ajax_bm_resend_quotation');
+add_action('wp_ajax_bm_import_bookings_to_finance', 'bntm_ajax_bm_import_bookings_to_finance');
 
 // Customer form AJAX (both logged in and public)
 add_action('wp_ajax_bm_submit_booking', 'bntm_ajax_bm_submit_booking');
@@ -356,8 +382,17 @@ function bntm_shortcode_bm_dashboard() {
     
     $current_user = wp_get_current_user();
     $business_id = $current_user->ID;
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    $can_manage_all = $is_wp_admin || $current_role === 'owner';
+    $can_access_bookings = $can_manage_all || in_array($current_role, ['manager', 'staff'], true);
     
     $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'overview';
+    $allowed_tabs = $can_manage_all ? ['overview', 'bookings', 'rooms', 'yachts', 'cars', 'settings'] : ['overview', 'bookings'];
+
+    if (!in_array($active_tab, $allowed_tabs, true)) {
+        $active_tab = 'overview';
+    }
     
     ob_start();
     ?>
@@ -370,9 +405,12 @@ function bntm_shortcode_bm_dashboard() {
             <a href="?tab=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">
                 Overview
             </a>
+            <?php if ($can_access_bookings): ?>
             <a href="?tab=bookings" class="bntm-tab <?php echo $active_tab === 'bookings' ? 'active' : ''; ?>">
-                Bookings
+                All Bookings
             </a>
+            <?php endif; ?>
+            <?php if ($can_manage_all): ?>
             <a href="?tab=rooms" class="bntm-tab <?php echo $active_tab === 'rooms' ? 'active' : ''; ?>">
                 Room Types
             </a>
@@ -385,6 +423,7 @@ function bntm_shortcode_bm_dashboard() {
             <a href="?tab=settings" class="bntm-tab <?php echo $active_tab === 'settings' ? 'active' : ''; ?>">
                 Settings
             </a>
+            <?php endif; ?>
         </div>
         
         <div class="bntm-tab-content">
@@ -454,6 +493,7 @@ function bm_overview_tab($business_id) {
             <a href="?tab=bookings" class="bntm-btn-primary" style="text-align: center; padding: 15px;">
                 View All Bookings
             </a>
+            <?php if (current_user_can('manage_options') || bntm_get_user_role(get_current_user_id()) === 'owner'): ?>
             <a href="?tab=rooms" class="bntm-btn-secondary" style="text-align: center; padding: 15px;">
                 Manage Rooms
             </a>
@@ -463,6 +503,7 @@ function bm_overview_tab($business_id) {
             <a href="?tab=cars" class="bntm-btn-secondary" style="text-align: center; padding: 15px;">
                 Manage Cars
             </a>
+            <?php endif; ?>
         </div>
     </div>
     
@@ -513,8 +554,14 @@ function bm_overview_tab($business_id) {
 function bm_bookings_tab($business_id) {
     global $wpdb;
     $bookings_table = $wpdb->prefix . 'bm_bookings';
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    $can_manage_all = $is_wp_admin || $current_role === 'owner';
+    $can_manage_booking_actions = $can_manage_all || in_array($current_role, ['manager', 'staff'], true);
     
     $filter_status = isset($_GET['filter_status']) ? sanitize_text_field($_GET['filter_status']) : 'all';
+    $finance_month = isset($_GET['finance_month']) ? sanitize_text_field($_GET['finance_month']) : date('Y-m');
     
     $where = "WHERE business_id = %d";
     $params = [$business_id];
@@ -547,6 +594,18 @@ function bm_bookings_tab($business_id) {
                 </select>
             </div>
         </div>
+        <?php if ($can_manage_all): ?>
+        <div style="display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:20px; padding:16px; border:1px solid #e5e7eb; border-radius:8px; background:#f9fafb;">
+            <div>
+                <label for="finance-month" style="display:block; margin-bottom:6px; font-weight:600;">Import Paid Bookings to Finance by Month</label>
+                <input type="month" id="finance-month" value="<?php echo esc_attr($finance_month); ?>">
+            </div>
+            <button type="button" id="import-bookings-finance-btn" class="bntm-btn-primary" data-nonce="<?php echo esc_attr($nonce); ?>">
+                Import to Finance
+            </button>
+            <span style="font-size:13px; color:#6b7280;">Imports paid bookings for the selected check-in month that are not yet imported.</span>
+        </div>
+        <?php endif; ?>
         
         <table class="bntm-table">
             <thead>
@@ -559,7 +618,7 @@ function bm_bookings_tab($business_id) {
                     <th>Payment Status</th>
                     <th>Booking Status</th>
                     <th>Phone Confirmed</th>
-                    <th>Actions</th>
+                    <th>Required Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -572,22 +631,50 @@ function bm_bookings_tab($business_id) {
                         <?php echo esc_html($booking->customer_name); ?><br>
                         <small style="color: #6b7280;"><?php echo esc_html($booking->customer_email); ?></small>
                     </td>
-                    <td><?php echo date('M d, Y', strtotime($booking->check_in_date)); ?></td>
-                    <td><?php echo date('M d, Y', strtotime($booking->check_out_date)); ?></td>
-                    <td><strong>₱<?php echo number_format($booking->total_amount, 2); ?></strong></td>
                     <td>
-                        <span class="bm-badge bm-badge-<?php echo $booking->payment_status; ?>">
-                            <?php echo ucfirst($booking->payment_status); ?>
-                        </span>
+                        <?php if ($can_manage_booking_actions): ?>
+                        <input type="date" class="booking-date-input" data-field="check_in_date" data-id="<?php echo $booking->id; ?>" data-nonce="<?php echo esc_attr($nonce); ?>" value="<?php echo esc_attr($booking->check_in_date); ?>">
+                        <?php else: ?>
+                        <?php echo date('M d, Y', strtotime($booking->check_in_date)); ?>
+                        <?php endif; ?>
                     </td>
                     <td>
-                        <select class="booking-status-select" data-id="<?php echo $booking->id; ?>" data-nonce="<?php echo $nonce; ?>">
+                        <?php if ($can_manage_booking_actions): ?>
+                        <input type="date" class="booking-date-input" data-field="check_out_date" data-id="<?php echo $booking->id; ?>" data-nonce="<?php echo esc_attr($nonce); ?>" value="<?php echo esc_attr($booking->check_out_date); ?>">
+                        <?php else: ?>
+                        <?php echo date('M d, Y', strtotime($booking->check_out_date)); ?>
+                        <?php endif; ?>
+                    </td>
+                    <td><strong>₱<?php echo number_format($booking->total_amount, 2); ?></strong></td>
+                    <td>
+                        <span class="bm-badge bm-badge-<?php echo esc_attr($booking->payment_status); ?>">
+                            <?php echo esc_html(ucfirst($booking->payment_status)); ?>
+                        </span>
+                        <?php if ($can_manage_booking_actions): ?>
+                        <div style="margin-top:8px;">
+                            <select class="payment-status-select" data-id="<?php echo $booking->id; ?>" data-nonce="<?php echo esc_attr($nonce); ?>">
+                                <option value="pending" <?php selected($booking->payment_status, 'pending'); ?>>Mark as Pending</option>
+                                <option value="partial" <?php selected($booking->payment_status, 'partial'); ?>>Mark as Partial</option>
+                                <option value="paid" <?php selected($booking->payment_status, 'paid'); ?>>Mark as Paid</option>
+                                <option value="refunded" <?php selected($booking->payment_status, 'refunded'); ?>>Mark as Refunded</option>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if ($can_manage_booking_actions): ?>
+                        <select class="booking-status-select" data-id="<?php echo $booking->id; ?>" data-nonce="<?php echo esc_attr($nonce); ?>">
                             <option value="pending" <?php selected($booking->booking_status, 'pending'); ?>>Pending</option>
                             <option value="confirmed" <?php selected($booking->booking_status, 'confirmed'); ?>>Confirmed</option>
                             <option value="checked_in" <?php selected($booking->booking_status, 'checked_in'); ?>>Checked In</option>
                             <option value="completed" <?php selected($booking->booking_status, 'completed'); ?>>Completed</option>
                             <option value="cancelled" <?php selected($booking->booking_status, 'cancelled'); ?>>Cancelled</option>
                         </select>
+                        <?php else: ?>
+                        <span class="bm-badge bm-badge-<?php echo esc_attr($booking->booking_status); ?>">
+                            <?php echo esc_html(ucfirst(str_replace('_', ' ', $booking->booking_status))); ?>
+                        </span>
+                        <?php endif; ?>
                     </td>
                     <td>
                         <?php if ($booking->provider_phone_confirmed): ?>
@@ -603,15 +690,27 @@ function bm_bookings_tab($business_id) {
                         <?php endif; ?>
                     </td>
                     <td>
+                        <div style="margin-bottom:10px; color:#6b7280; font-size:13px;">
+                            <?php echo esc_html(bm_get_booking_action_text($booking)); ?>
+                        </div>
                         <a href="<?php echo home_url('/view-quotation/?booking_id=' . esc_attr($booking->rand_id)); ?>" 
                            class="bntm-btn-small" target="_blank">
                             View Details
                         </a>
+                        <?php if ($can_manage_booking_actions && $booking->payment_status !== 'paid'): ?>
+                        <button class="bntm-btn-small bntm-btn-primary quick-paid-btn" 
+                                data-id="<?php echo $booking->id; ?>" 
+                                data-nonce="<?php echo esc_attr($nonce); ?>">
+                            Confirm Payment
+                        </button>
+                        <?php endif; ?>
+                        <?php if ($can_manage_all): ?>
                         <button class="bntm-btn-small bntm-btn-secondary resend-quotation-btn" 
                                 data-id="<?php echo $booking->id; ?>" 
-                                data-nonce="<?php echo $nonce; ?>">
+                                data-nonce="<?php echo esc_attr($nonce); ?>">
                             Resend Quote
                         </button>
+                        <?php endif; ?>
                     </td>
                 </tr>
                 <?php endforeach; endif; ?>
@@ -649,10 +748,50 @@ function bm_bookings_tab($business_id) {
         border-radius: 6px;
         font-size: 14px;
     }
+    .payment-status-select,
+    .booking-date-input {
+        width: 100%;
+        max-width: 170px;
+        padding: 6px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+    .bm-badge-confirmed,
+    .bm-badge-completed {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    .bm-badge-checked_in {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    .bm-badge-cancelled {
+        background: #e5e7eb;
+        color: #374151;
+    }
     </style>
     
     <script>
     (function() {
+        function updateBookingDates(bookingId, nonce) {
+            const rowInputs = document.querySelectorAll('.booking-date-input[data-id="' + bookingId + '"]');
+            const formData = new FormData();
+            formData.append('action', 'bm_update_booking_dates');
+            formData.append('booking_id', bookingId);
+            formData.append('nonce', nonce);
+            rowInputs.forEach(input => formData.append(input.dataset.field, input.value));
+            
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                if (!json.success) {
+                    alert(json.data.message || 'Failed to update booking dates');
+                    location.reload();
+                }
+            });
+        }
+
         // Update booking status
         document.querySelectorAll('.booking-status-select').forEach(select => {
             select.addEventListener('change', function() {
@@ -672,6 +811,48 @@ function bm_bookings_tab($business_id) {
                         location.reload();
                     }
                 });
+            });
+        });
+
+        document.querySelectorAll('.payment-status-select').forEach(select => {
+            select.addEventListener('change', function() {
+                const formData = new FormData();
+                formData.append('action', 'bm_update_payment_status');
+                formData.append('booking_id', this.dataset.id);
+                formData.append('payment_status', this.value);
+                formData.append('nonce', this.dataset.nonce);
+
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    alert(json.data.message || 'Payment status updated!');
+                    location.reload();
+                });
+            });
+        });
+
+        document.querySelectorAll('.quick-paid-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (!confirm('Mark this booking payment as paid?')) return;
+
+                const formData = new FormData();
+                formData.append('action', 'bm_update_payment_status');
+                formData.append('booking_id', this.dataset.id);
+                formData.append('payment_status', 'paid');
+                formData.append('nonce', this.dataset.nonce);
+
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    alert(json.data.message || 'Payment status updated!');
+                    if (json.success) location.reload();
+                });
+            });
+        });
+
+        document.querySelectorAll('.booking-date-input').forEach(input => {
+            input.addEventListener('change', function() {
+                updateBookingDates(this.dataset.id, this.dataset.nonce);
             });
         });
         
@@ -724,6 +905,35 @@ function bm_bookings_tab($business_id) {
                 });
             });
         });
+
+        const importBtn = document.getElementById('import-bookings-finance-btn');
+        const financeMonthInput = document.getElementById('finance-month');
+        if (importBtn && financeMonthInput) {
+            importBtn.addEventListener('click', function() {
+                if (!financeMonthInput.value) {
+                    alert('Please select a month to import.');
+                    return;
+                }
+                if (!confirm('Import paid bookings for ' + financeMonthInput.value + ' to Finance?')) return;
+
+                const formData = new FormData();
+                formData.append('action', 'bm_import_bookings_to_finance');
+                formData.append('finance_month', financeMonthInput.value);
+                formData.append('nonce', this.dataset.nonce);
+
+                this.disabled = true;
+                fetch(ajaxurl, {method: 'POST', body: formData})
+                .then(r => r.json())
+                .then(json => {
+                    alert(json.data.message || 'Import complete.');
+                    this.disabled = false;
+                })
+                .catch(() => {
+                    alert('Failed to import bookings to Finance.');
+                    this.disabled = false;
+                });
+            });
+        }
     })();
     </script>
     <?php
@@ -1563,6 +1773,7 @@ function bntm_shortcode_bm_book_hotel() {
     ));
     
     $hotel_name = bntm_get_setting('bm_hotel_name', 'Hotel Booking System');
+    $currency_display = bm_get_currency_display();
     
     ob_start();
     ?>
@@ -1694,7 +1905,7 @@ function bntm_shortcode_bm_book_hotel() {
                                                     data-price="<?php echo $room->price_per_night; ?>"
                                                     data-name="<?php echo esc_attr($room->room_type); ?>">
                                                 <?php echo esc_html($room->room_type); ?> - 
-                                                ₱<?php echo number_format($room->price_per_night, 2); ?>/night
+                                                <?php echo esc_html(bm_format_currency($room->price_per_night, $currency_display)); ?>/night
                                                 (Max: <?php echo $room->max_occupancy; ?> guests)
                                             </option>
                                         <?php endforeach; ?>
@@ -1739,7 +1950,7 @@ function bntm_shortcode_bm_book_hotel() {
                                     data-driver-fee="<?php echo $car->driver_fee; ?>"
                                     data-name="<?php echo esc_attr($car->car_name); ?>">
                                 <?php echo esc_html($car->car_name); ?> - 
-                                ₱<?php echo number_format($car->price_per_day, 2); ?>/day
+                                <?php echo esc_html(bm_format_currency($car->price_per_day, $currency_display)); ?>/day
                                 (Max: <?php echo $car->max_passengers; ?> passengers)
                             </option>
                         <?php endforeach; ?>
@@ -1786,8 +1997,8 @@ function bntm_shortcode_bm_book_hotel() {
                                     data-max-guests="<?php echo $yacht->max_guests; ?>"
                                     data-name="<?php echo esc_attr($yacht->yacht_name); ?>">
                                 <?php echo esc_html($yacht->yacht_name); ?> - 
-                                ₱<?php echo number_format($yacht->price_per_hour, 2); ?>/hr or 
-                                ₱<?php echo number_format($yacht->price_per_day, 2); ?>/day
+                                <?php echo esc_html(bm_format_currency($yacht->price_per_hour, $currency_display)); ?>/hr or 
+                                <?php echo esc_html(bm_format_currency($yacht->price_per_day, $currency_display)); ?>/day
                                 (Max: <?php echo $yacht->max_guests; ?> guests)
                             </option>
                         <?php endforeach; ?>
@@ -1837,6 +2048,18 @@ function bntm_shortcode_bm_book_hotel() {
                               placeholder="Any special requirements, dietary restrictions, accessibility needs, etc."></textarea>
                 </div>
             </div>
+
+            <div class="bm-form-section">
+                <h2>Payment Preference</h2>
+                <div class="bm-form-group">
+                    <label>Preferred Payment Method</label>
+                    <select name="payment_method" required>
+                        <option value="manual">Manual Payment</option>
+                        <option value="online">Online Payment</option>
+                    </select>
+                    <small>Choose `Manual Payment` for bank transfer, proof of payment, or pay on arrival. Choose `Online Payment` if you want to continue to the online payment page after booking.</small>
+                </div>
+            </div>
             
             <!-- Summary -->
             <div class="bm-form-section bm-summary-section">
@@ -1844,11 +2067,11 @@ function bntm_shortcode_bm_book_hotel() {
                 <div id="summary-details">
                     <div class="bm-summary-row">
                         <span>Total Amount:</span>
-                        <strong id="summary-total">₱0.00</strong>
+                        <strong id="summary-total"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                     </div>
                     <div class="bm-summary-row">
                         <span>Deposit Required:</span>
-                        <strong id="summary-deposit">₱0.00</strong>
+                        <strong id="summary-deposit"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                     </div>
                 </div>
             </div>
@@ -1890,10 +2113,13 @@ function bntm_shortcode_bm_book_hotel() {
  * Sequential Booking Script
  */
 function bm_get_sequential_booking_script() {
+    $currency_prefix = bm_get_currency_prefix();
     ob_start();
     ?>
     <script>
     (function() {
+        const currencyPrefix = <?php echo wp_json_encode($currency_prefix); ?>;
+        const formatMoney = (amount) => currencyPrefix + Number(amount || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         const form = document.getElementById('hotel-booking-form');
         const serviceSelectionScreen = document.getElementById('service-selection-screen');
         const upsellModal = document.getElementById('upsell-modal');
@@ -2112,8 +2338,10 @@ function bm_get_sequential_booking_script() {
                     const price = parseFloat(option.dataset.price);
                     const quantity = parseInt(document.querySelector(`.room-quantity[data-index="${index}"]`).value) || 1;
                     const subtotal = price * quantity * nights;
+                    const subtotalFormatted = formatMoney(subtotal);
                     
                     document.querySelector(`.room-subtotal[data-index="${index}"]`).value = '₱' + subtotal.toFixed(2);
+                    document.querySelector(`.room-subtotal[data-index="${index}"]`).value = subtotalFormatted;
                     total += subtotal;
                 }
             });
@@ -2140,8 +2368,10 @@ function bm_get_sequential_booking_script() {
                         const driverFee = parseFloat(option.dataset.driverFee);
                         total += driverFee * days;
                     }
+                    const carTotalFormatted = formatMoney(total);
                     
                     document.getElementById('car-subtotal').value = '₱' + total.toFixed(2);
+                    document.getElementById('car-subtotal').value = carTotalFormatted;
                     return total;
                 }
             }
@@ -2159,8 +2389,10 @@ function bm_get_sequential_booking_script() {
                 const option = yachtSelect.options[yachtSelect.selectedIndex];
                 const price = unit === 'hours' ? parseFloat(option.dataset.priceHour) : parseFloat(option.dataset.priceDay);
                 const total = price * duration;
+                const yachtTotalFormatted = formatMoney(total);
                 
                 document.getElementById('yacht-subtotal').value = '₱' + total.toFixed(2);
+                document.getElementById('yacht-subtotal').value = yachtTotalFormatted;
                 return total;
             }
             
@@ -2183,6 +2415,12 @@ function bm_get_sequential_booking_script() {
             
             const depositPercentage = 30;
             const deposit = (total * depositPercentage) / 100;
+            const totalFormatted = formatMoney(total);
+            const depositFormatted = formatMoney(deposit);
+            setTimeout(() => {
+                document.getElementById('summary-total').textContent = totalFormatted;
+                document.getElementById('summary-deposit').textContent = depositFormatted;
+            }, 0);
             
             document.getElementById('summary-total').textContent = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-deposit').textContent = '₱' + deposit.toLocaleString('en-US', {minimumFractionDigits: 2});
@@ -2324,6 +2562,7 @@ function bntm_shortcode_bm_book_yacht() {
     ));
     
     $hotel_name = bntm_get_setting('bm_hotel_name', 'Yacht Rental Service');
+    $currency_display = bm_get_currency_display();
     
     ob_start();
     ?>
@@ -2379,8 +2618,8 @@ function bntm_shortcode_bm_book_yacht() {
                                     data-name="<?php echo esc_attr($yacht->yacht_name); ?>"
                                     data-description="<?php echo esc_attr($yacht->description); ?>">
                                 <?php echo esc_html($yacht->yacht_name); ?> - 
-                                ₱<?php echo number_format($yacht->price_per_hour, 2); ?>/hr or 
-                                ₱<?php echo number_format($yacht->price_per_day, 2); ?>/day
+                                <?php echo esc_html(bm_format_currency($yacht->price_per_hour, $currency_display)); ?>/hr or 
+                                <?php echo esc_html(bm_format_currency($yacht->price_per_day, $currency_display)); ?>/day
                                 (Max: <?php echo $yacht->max_guests; ?> guests)
                             </option>
                         <?php endforeach; ?>
@@ -2441,6 +2680,30 @@ function bntm_shortcode_bm_book_yacht() {
                               placeholder="Any special services, catering requests, celebration needs, etc."></textarea>
                 </div>
             </div>
+
+            <div class="bm-form-section">
+                <h2>5. Payment Preference</h2>
+                <div class="bm-form-group">
+                    <label>Preferred Payment Method</label>
+                    <select name="payment_method" required>
+                        <option value="manual">Manual Payment</option>
+                        <option value="online">Online Payment</option>
+                    </select>
+                    <small>Choose `Manual Payment` for bank transfer, proof of payment, or pay on arrival. Choose `Online Payment` if you want to continue to the online payment page after booking.</small>
+                </div>
+            </div>
+
+            <div class="bm-form-section">
+                <h2>5. Payment Preference</h2>
+                <div class="bm-form-group">
+                    <label>Preferred Payment Method</label>
+                    <select name="payment_method" required>
+                        <option value="manual">Manual Payment</option>
+                        <option value="online">Online Payment</option>
+                    </select>
+                    <small>Choose `Manual Payment` for bank transfer, proof of payment, or pay on arrival. Choose `Online Payment` if you want to continue to the online payment page after booking.</small>
+                </div>
+            </div>
             
             <!-- Summary -->
             <div class="bm-form-section bm-summary-section">
@@ -2448,11 +2711,11 @@ function bntm_shortcode_bm_book_yacht() {
                 
                 <div class="bm-summary-row">
                     <span>Total Amount:</span>
-                    <strong id="summary-total">₱0.00</strong>
+                    <strong id="summary-total"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                 </div>
                 <div class="bm-summary-row">
                     <span>Deposit Required:</span>
-                    <strong id="summary-deposit">₱0.00</strong>
+                    <strong id="summary-deposit"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                 </div>
             </div>
             
@@ -2490,6 +2753,7 @@ function bntm_shortcode_bm_book_car() {
     ));
     
     $hotel_name = bntm_get_setting('bm_hotel_name', 'Car Rental Service');
+    $currency_display = bm_get_currency_display();
     
     ob_start();
     ?>
@@ -2546,7 +2810,7 @@ function bntm_shortcode_bm_book_car() {
                                     data-name="<?php echo esc_attr($car->car_name); ?>"
                                     data-description="<?php echo esc_attr($car->description); ?>">
                                 <?php echo esc_html($car->car_name); ?> - 
-                                ₱<?php echo number_format($car->price_per_day, 2); ?>/day
+                                <?php echo esc_html(bm_format_currency($car->price_per_day, $currency_display)); ?>/day
                                 (<?php echo $car->max_passengers; ?> passengers)
                             </option>
                         <?php endforeach; ?>
@@ -2607,11 +2871,11 @@ function bntm_shortcode_bm_book_car() {
                 
                 <div class="bm-summary-row">
                     <span>Total Amount:</span>
-                    <strong id="summary-total">₱0.00</strong>
+                    <strong id="summary-total"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                 </div>
                 <div class="bm-summary-row">
                     <span>Deposit Required:</span>
-                    <strong id="summary-deposit">₱0.00</strong>
+                    <strong id="summary-deposit"><?php echo esc_html(bm_format_currency(0, $currency_display)); ?></strong>
                 </div>
             </div>
             
@@ -3081,10 +3345,13 @@ function bm_get_booking_styles() {
 // ============================================================================
 
 function bm_get_hotel_booking_script() {
+    $currency_prefix = bm_get_currency_prefix();
     ob_start();
     ?>
     <script>
     (function() {
+        const currencyPrefix = <?php echo wp_json_encode($currency_prefix); ?>;
+        const formatMoney = (amount) => currencyPrefix + Number(amount || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         let roomIndex = 1;
         const form = document.getElementById('hotel-booking-form');
         
@@ -3120,17 +3387,25 @@ function bm_get_hotel_booking_script() {
                     const price = parseFloat(option.dataset.price);
                     const quantity = parseInt(document.querySelector(`.room-quantity[data-index="${index}"]`).value) || 1;
                     const subtotal = price * quantity * nights;
+                    const subtotalFormatted = formatMoney(subtotal);
                     
                     document.querySelector(`.room-subtotal[data-index="${index}"]`).value = '₱' + subtotal.toFixed(2);
+                    document.querySelector(`.room-subtotal[data-index="${index}"]`).value = subtotalFormatted;
                     total += subtotal;
                 }
             });
             
             const depositPercentage = 30; // Get from settings if needed
             const deposit = (total * depositPercentage) / 100;
+            const totalFormatted = formatMoney(total);
+            const depositFormatted = formatMoney(deposit);
             
             document.getElementById('summary-total').textContent = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-deposit').textContent = '₱' + deposit.toLocaleString('en-US', {minimumFractionDigits: 2});
+            setTimeout(() => {
+                document.getElementById('summary-total').textContent = totalFormatted;
+                document.getElementById('summary-deposit').textContent = depositFormatted;
+            }, 0);
             
             return total;
         }
@@ -3241,10 +3516,13 @@ function bm_get_hotel_booking_script() {
 // ============================================================================
 
 function bm_get_yacht_booking_script() {
+    $currency_prefix = bm_get_currency_prefix();
     ob_start();
     ?>
     <script>
     (function() {
+        const currencyPrefix = <?php echo wp_json_encode($currency_prefix); ?>;
+        const formatMoney = (amount) => currencyPrefix + Number(amount || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         const form = document.getElementById('yacht-booking-form');
         const yachtSelect = document.getElementById('yacht-type');
         const yachtInfo = document.getElementById('yacht-info');
@@ -3285,10 +3563,17 @@ function bm_get_yacht_booking_script() {
             const total = price * duration;
             const depositPercentage = 30;
             const deposit = (total * depositPercentage) / 100;
+            const totalFormatted = formatMoney(total);
+            const depositFormatted = formatMoney(deposit);
             
             document.getElementById('yacht-subtotal').value = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-total').textContent = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-deposit').textContent = '₱' + deposit.toLocaleString('en-US', {minimumFractionDigits: 2});
+            setTimeout(() => {
+                document.getElementById('yacht-subtotal').value = totalFormatted;
+                document.getElementById('summary-total').textContent = totalFormatted;
+                document.getElementById('summary-deposit').textContent = depositFormatted;
+            }, 0);
         }
         
         // Price change listeners
@@ -3356,10 +3641,13 @@ function bm_get_yacht_booking_script() {
 // ============================================================================
 
 function bm_get_car_booking_script() {
+    $currency_prefix = bm_get_currency_prefix();
     ob_start();
     ?>
     <script>
     (function() {
+        const currencyPrefix = <?php echo wp_json_encode($currency_prefix); ?>;
+        const formatMoney = (amount) => currencyPrefix + Number(amount || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         const form = document.getElementById('car-booking-form');
         const carSelect = document.getElementById('car-type');
         const carInfo = document.getElementById('car-info');
@@ -3380,7 +3668,7 @@ function bm_get_car_booking_script() {
                 const driverFee = parseFloat(option.dataset.driverFee);
                 if (driverFee > 0) {
                     document.getElementById('driver-fee-display').textContent = 
-                        `(+₱${driverFee.toFixed(2)}/day)`;
+                        `(+${formatMoney(driverFee)}/day)`;
                 }
                 
                 calculateCarPrice();
@@ -3417,10 +3705,17 @@ function bm_get_car_booking_script() {
             
             const depositPercentage = 30;
             const deposit = (total * depositPercentage) / 100;
+            const totalFormatted = formatMoney(total);
+            const depositFormatted = formatMoney(deposit);
             
             document.getElementById('car-subtotal').value = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-total').textContent = '₱' + total.toLocaleString('en-US', {minimumFractionDigits: 2});
             document.getElementById('summary-deposit').textContent = '₱' + deposit.toLocaleString('en-US', {minimumFractionDigits: 2});
+            setTimeout(() => {
+                document.getElementById('car-subtotal').value = totalFormatted;
+                document.getElementById('summary-total').textContent = totalFormatted;
+                document.getElementById('summary-deposit').textContent = depositFormatted;
+            }, 0);
         }
         
         // Price change listeners
@@ -3553,6 +3848,8 @@ function bntm_shortcode_bm_view_quotation() {
     $hotel_phone = bntm_get_setting('bm_hotel_phone', '');
     $hotel_address = bntm_get_setting('bm_hotel_address', '');
     $enable_paymaya = bntm_get_setting('bm_enable_paymaya', '0');
+    $currency_display = bm_get_currency_display();
+    $payment_method_label = $booking->payment_method === 'online' ? 'Online Payment' : 'Manual Payment';
     
     $nonce = wp_create_nonce('bm_payment_action');
     
@@ -4184,6 +4481,10 @@ function bntm_shortcode_bm_view_quotation() {
                     <strong>Address:</strong><br>
                     <?php echo esc_html($booking->customer_address ?: 'Not provided'); ?>
                 </div>
+                <div>
+                    <strong>Payment Preference:</strong><br>
+                    <?php echo esc_html($payment_method_label); ?>
+                </div>
             </div>
         </div>
         
@@ -4307,12 +4608,12 @@ function bntm_shortcode_bm_view_quotation() {
                 </div>
                 <div class="bm-summary-row">
                     <span>Deposit Required (<?php echo bntm_get_setting('bm_deposit_percentage', '30'); ?>%):</span>
-                    <strong>₱<?php echo number_format($booking->deposit_amount, 2); ?></strong>
+                    <strong><?php echo esc_html(bm_format_currency($booking->deposit_amount, $currency_display)); ?></strong>
                 </div>
                 <div class="bm-summary-total">
                     <div class="bm-summary-row">
                         <span>Total Amount:</span>
-                        <strong>₱<?php echo number_format($booking->total_amount, 2); ?></strong>
+                        <strong><?php echo esc_html(bm_format_currency($booking->total_amount, $currency_display)); ?></strong>
                     </div>
                 </div>
             </div>
@@ -4322,7 +4623,7 @@ function bntm_shortcode_bm_view_quotation() {
         <div class="bm-quotation-section">
             <h3>Payment Options</h3>
             
-            <?php if ($enable_paymaya == '1'): ?>
+            <?php if ($booking->payment_method === 'online' && $enable_paymaya == '1'): ?>
             <div class="bm-payment-option">
                 <h4>Pay Online with PayMaya</h4>
                 <p>Secure payment processing - Credit Card, Debit Card, or GCash</p>
@@ -4330,7 +4631,7 @@ function bntm_shortcode_bm_view_quotation() {
                         data-booking-id="<?php echo $booking->id; ?>"
                         data-amount="<?php echo $booking->deposit_amount; ?>"
                         data-nonce="<?php echo $nonce; ?>">
-                    Pay Deposit (₱<?php echo number_format($booking->deposit_amount, 2); ?>) with PayMaya
+                    Pay Deposit (<?php echo esc_html(bm_format_currency($booking->deposit_amount, $currency_display)); ?>) with PayMaya
                 </button>
             </div>
             <?php endif; ?>
@@ -4350,6 +4651,13 @@ function bntm_shortcode_bm_view_quotation() {
                 <h4>Pay at Hotel</h4>
                 <p>You can also pay the deposit when you arrive at our hotel. Please note that your reservation is not confirmed until payment is received.</p>
             </div>
+            
+            <?php if ($booking->payment_method === 'manual'): ?>
+            <div class="bm-payment-option">
+                <h4>Selected Payment Preference</h4>
+                <p>This booking was submitted as <strong>Manual Payment</strong>. Please review the payment details above and share your proof of payment if required.</p>
+            </div>
+            <?php endif; ?>
         </div>
         <?php else: ?>
         <div class="bm-quotation-section bm-payment-success">
@@ -4372,6 +4680,7 @@ function bntm_shortcode_bm_view_quotation() {
             </div>
             
             <div class="bm-quotation-actions">
+                <button onclick="window.history.back()" class="bm-btn-secondary">Back</button>
                 <button onclick="window.print()" class="bm-btn-secondary">Print Quotation</button>
             </div>
         </div>
@@ -4499,7 +4808,7 @@ function bntm_ajax_bm_delete_room_type() {
 function bntm_ajax_bm_save_yacht_type() {
     check_ajax_referer('bm_yacht_action', 'nonce');
     
-    if (!is_user_logged_in()) {
+    if (!bm_current_user_can_manage_all()) {
         wp_send_json_error(['message' => 'Unauthorized']);
     }
     
@@ -4544,7 +4853,7 @@ function bntm_ajax_bm_save_yacht_type() {
 function bntm_ajax_bm_delete_yacht_type() {
     check_ajax_referer('bm_yacht_action', 'nonce');
     
-    if (!is_user_logged_in()) {
+    if (!bm_current_user_can_manage_all()) {
         wp_send_json_error(['message' => 'Unauthorized']);
     }
     
@@ -4567,7 +4876,7 @@ function bntm_ajax_bm_delete_yacht_type() {
 function bntm_ajax_bm_save_car_type() {
     check_ajax_referer('bm_car_action', 'nonce');
     
-    if (!is_user_logged_in()) {
+    if (!bm_current_user_can_manage_all()) {
         wp_send_json_error(['message' => 'Unauthorized']);
     }
     
@@ -4666,6 +4975,184 @@ function bntm_ajax_bm_update_booking_status() {
     } else {
         wp_send_json_error(['message' => 'Failed to update status']);
     }
+}
+
+function bntm_ajax_bm_update_payment_status() {
+    check_ajax_referer('bm_booking_action', 'nonce');
+
+    if (!bm_current_user_can_manage_all()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    if (!$is_wp_admin && !in_array($current_role, ['owner', 'manager', 'staff'], true)) {
+        wp_send_json_error(['message' => 'Permission denied']);
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'bm_bookings';
+    $booking_id = intval($_POST['booking_id'] ?? 0);
+    $payment_status = sanitize_text_field($_POST['payment_status'] ?? '');
+    $allowed_statuses = ['pending', 'partial', 'paid', 'refunded'];
+
+    if (!$booking_id || !in_array($payment_status, $allowed_statuses, true)) {
+        wp_send_json_error(['message' => 'Invalid payment status request']);
+    }
+
+    $booking = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$table} WHERE id = %d", $booking_id));
+    if (!$booking) {
+        wp_send_json_error(['message' => 'Booking not found']);
+    }
+
+    $update_data = ['payment_status' => $payment_status];
+    $update_format = ['%s'];
+
+    if ($payment_status === 'paid') {
+        if ($booking->booking_status === 'pending') {
+            $update_data['booking_status'] = 'confirmed';
+            $update_format[] = '%s';
+        }
+        if (empty($booking->confirmed_at)) {
+            $update_data['confirmed_at'] = current_time('mysql');
+            $update_format[] = '%s';
+        }
+    }
+
+    $updated = $wpdb->update($table, $update_data, ['id' => $booking_id], $update_format, ['%d']);
+
+    if ($updated !== false) {
+        wp_send_json_success(['message' => 'Payment status updated successfully.']);
+    }
+
+    wp_send_json_error(['message' => 'Failed to update payment status']);
+}
+
+function bntm_ajax_bm_update_booking_dates() {
+    check_ajax_referer('bm_booking_action', 'nonce');
+
+    if (!bm_current_user_can_manage_all()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    if (!$is_wp_admin && !in_array($current_role, ['owner', 'manager', 'staff'], true)) {
+        wp_send_json_error(['message' => 'Permission denied']);
+    }
+
+    $booking_id = intval($_POST['booking_id'] ?? 0);
+    $check_in_date = sanitize_text_field($_POST['check_in_date'] ?? '');
+    $check_out_date = sanitize_text_field($_POST['check_out_date'] ?? '');
+
+    if (!$booking_id || !$check_in_date || !$check_out_date) {
+        wp_send_json_error(['message' => 'Booking dates are required']);
+    }
+
+    if ($check_in_date > $check_out_date) {
+        wp_send_json_error(['message' => 'Check-out date must be after check-in date']);
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'bm_bookings';
+    $updated = $wpdb->update(
+        $table,
+        ['check_in_date' => $check_in_date, 'check_out_date' => $check_out_date],
+        ['id' => $booking_id],
+        ['%s', '%s'],
+        ['%d']
+    );
+
+    if ($updated !== false) {
+        wp_send_json_success(['message' => 'Booking dates updated successfully.']);
+    }
+
+    wp_send_json_error(['message' => 'Failed to update booking dates']);
+}
+
+function bntm_ajax_bm_import_bookings_to_finance() {
+    check_ajax_referer('bm_booking_action', 'nonce');
+
+    if (!bm_current_user_can_manage_all()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    if (!$is_wp_admin && $current_role !== 'owner') {
+        wp_send_json_error(['message' => 'Only Admin and Owner can import to Finance.']);
+    }
+
+    global $wpdb;
+    $bookings_table = $wpdb->prefix . 'bm_bookings';
+    $finance_table = $wpdb->prefix . 'fn_transactions';
+    $finance_month = sanitize_text_field($_POST['finance_month'] ?? '');
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $finance_month)) {
+        wp_send_json_error(['message' => 'Please select a valid month.']);
+    }
+
+    $finance_table_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $finance_table));
+    if ($finance_table_exists !== $finance_table) {
+        wp_send_json_error(['message' => 'Finance module tables are not available yet.']);
+    }
+
+    $bookings = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$bookings_table}
+         WHERE business_id = %d
+         AND payment_status = 'paid'
+         AND DATE_FORMAT(check_in_date, '%%Y-%%m') = %s",
+        $current_user->ID,
+        $finance_month
+    ));
+
+    if (empty($bookings)) {
+        wp_send_json_error(['message' => 'No paid bookings found for the selected month.']);
+    }
+
+    $imported = 0;
+    foreach ($bookings as $booking) {
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$finance_table} WHERE reference_type = %s AND reference_id = %d",
+            'booking',
+            $booking->id
+        ));
+
+        if ($existing) {
+            continue;
+        }
+
+        $result = $wpdb->insert(
+            $finance_table,
+            [
+                'rand_id' => bntm_rand_id(),
+                'business_id' => $booking->business_id,
+                'type' => 'income',
+                'amount' => $booking->total_amount,
+                'category' => 'Booking Revenue',
+                'notes' => 'Booking #' . $booking->rand_id . ' for ' . $booking->customer_name,
+                'reference_type' => 'booking',
+                'reference_id' => $booking->id,
+            ],
+            ['%s', '%d', '%s', '%f', '%s', '%s', '%s', '%d']
+        );
+
+        if ($result) {
+            $imported++;
+        }
+    }
+
+    if ($imported > 0) {
+        if (function_exists('bntm_fn_update_cashflow_summary')) {
+            bntm_fn_update_cashflow_summary();
+        }
+        wp_send_json_success(['message' => "Imported {$imported} booking(s) to Finance successfully."]);
+    }
+
+    wp_send_json_error(['message' => 'No new paid bookings were available to import.']);
 }
 
 /**
@@ -5052,6 +5539,11 @@ function bntm_ajax_bm_submit_booking() {
             $check_out = date('Y-m-d', strtotime('+1 day')); // Use tomorrow's date
         }
         
+        $payment_method = sanitize_text_field($_POST['payment_method'] ?? 'manual');
+        if (!in_array($payment_method, ['manual', 'online'], true)) {
+            $payment_method = 'manual';
+        }
+
         $booking_insert = $wpdb->insert($bookings_table, [
             'rand_id' => $booking_rand_id,
             'business_id' => $business_id,
@@ -5066,11 +5558,12 @@ function bntm_ajax_bm_submit_booking() {
             'special_requests' => sanitize_textarea_field($_POST['special_requests'] ?? ''),
             'total_amount' => $total_amount,
             'deposit_amount' => $deposit_amount,
+            'payment_method' => $payment_method,
             'payment_status' => 'pending',
             'booking_status' => 'pending',
             'created_at' => current_time('mysql')
         ], [
-            '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%f', '%f', '%s', '%s', '%s'
+            '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%f', '%f', '%s', '%s', '%s', '%s'
         ]);
         
         if (!$booking_insert) {
@@ -5193,6 +5686,10 @@ function bntm_ajax_bm_process_payment() {
     if ($booking->payment_status === 'paid') {
         wp_send_json_error(['message' => 'This booking has already been paid']);
     }
+
+    if ($booking->payment_method !== 'online') {
+        wp_send_json_error(['message' => 'This booking is set to manual payment.']);
+    }
     
     if ($gateway === 'paymaya') {
         $result = bm_process_paymaya_payment($booking, $amount);
@@ -5243,7 +5740,7 @@ function bm_process_paymaya_payment($booking, $amount) {
     $checkout_data = [
         'totalAmount' => [
             'value' => floatval($amount),
-            'currency' => 'PHP'
+            'currency' => bm_get_currency_code()
         ],
         'buyer' => [
             'firstName' => explode(' ', $booking->customer_name)[0],
@@ -5424,8 +5921,8 @@ function bm_send_quotation_email($booking) {
     
     $check_in_formatted = date('F d, Y', strtotime($booking->check_in_date));
     $check_out_formatted = date('F d, Y', strtotime($booking->check_out_date));
-    $total_formatted = number_format($booking->total_amount, 2);
-    $deposit_formatted = number_format($booking->deposit_amount, 2);
+    $total_formatted = bm_format_currency($booking->total_amount);
+    $deposit_formatted = bm_format_currency($booking->deposit_amount);
     $current_year = date('Y');
     
     $subject = "Your Booking Quotation - {$hotel_name}";
@@ -5457,8 +5954,8 @@ function bm_send_quotation_email($booking) {
                 <li>Booking ID: #{$booking->rand_id}</li>
                 <li>Check-In: {$check_in_formatted}</li>
                 <li>Check-Out: {$check_out_formatted}</li>
-                <li>Total Amount: ₱{$total_formatted}</li>
-                <li>Deposit Required: ₱{$deposit_formatted}</li>
+                <li>Total Amount: {$total_formatted}</li>
+                <li>Deposit Required: {$deposit_formatted}</li>
             </ul>
             
             <p>Please review your complete quotation and proceed with payment to confirm your booking:</p>
@@ -5584,6 +6081,47 @@ function bm_get_stats($business_id) {
     ];
     
     return $stats;
+}
+
+function bm_get_booking_action_text($booking) {
+    if ($booking->payment_status !== 'paid' && $booking->payment_status !== 'refunded') {
+        return 'Follow up payment or confirm manual proof of payment.';
+    }
+
+    if (!$booking->provider_phone_confirmed) {
+        return 'Call the customer to confirm the booking details.';
+    }
+
+    if ($booking->booking_status === 'pending') {
+        return 'Booking is ready for confirmation.';
+    }
+
+    if ($booking->booking_status === 'confirmed') {
+        return 'Prepare for guest arrival and check-in.';
+    }
+
+    if ($booking->booking_status === 'checked_in') {
+        return 'Monitor the active stay or rental.';
+    }
+
+    if ($booking->booking_status === 'completed') {
+        return 'No further action required.';
+    }
+
+    if ($booking->booking_status === 'cancelled') {
+        return 'Booking is cancelled. Review if refund action is needed.';
+    }
+
+    return 'Review the booking and update the next action.';
+}
+
+function bm_current_user_can_manage_all() {
+    if (!is_user_logged_in()) {
+        return false;
+    }
+
+    $current_user = wp_get_current_user();
+    return current_user_can('manage_options') || bntm_get_user_role($current_user->ID) === 'owner';
 }
 
 /**

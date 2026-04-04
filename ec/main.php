@@ -1,7 +1,7 @@
 <?php
 /**
  * Module Name: E-Commerce
- * Module Slug: ec
+ * Module Slug: ec  
  * Description: Complete e-commerce solution with products, orders, and checkout
  * Version: 1.0.3
  * Author: Your Name
@@ -4934,6 +4934,8 @@ function bntm_ajax_ec_process_checkout() {
             'total' => $order_total
         ]);
 
+        ec_send_order_confirmation_email($order_rand_id);
+
         // Clear cart
         unset($_SESSION['ec_cart']);
 
@@ -4967,6 +4969,101 @@ function ec_get_payment_method($index) {
     }
     
     return $payment_methods[$index];
+}
+
+function ec_get_transaction_tracking_url($order_rand_id) {
+    $transaction_page = get_page_by_path('transaction');
+
+    if ($transaction_page) {
+        return add_query_arg('id', $order_rand_id, get_permalink($transaction_page));
+    }
+
+    return home_url('/transaction/?id=' . rawurlencode($order_rand_id));
+}
+
+function ec_send_order_confirmation_email($order_rand_id, $force = false) {
+    global $wpdb;
+
+    $orders_table = $wpdb->prefix . 'ec_orders';
+    $order_items_table = $wpdb->prefix . 'ec_order_items';
+
+    $order = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $orders_table WHERE rand_id = %s",
+        $order_rand_id
+    ));
+
+    if (!$order) {
+        return false;
+    }
+
+    $metadata_key = 'ec_order_' . $order_rand_id . '_customer';
+    $customer_data = get_option($metadata_key, []);
+    $customer_email = sanitize_email($customer_data['email'] ?? '');
+
+    if (empty($customer_email)) {
+        return false;
+    }
+
+    if (!$force && !empty($customer_data['order_email_sent_at'])) {
+        return true;
+    }
+
+    $order_items = $wpdb->get_results($wpdb->prepare(
+        "SELECT product_name, quantity, price, subtotal FROM $order_items_table WHERE order_id = %d ORDER BY id ASC",
+        $order->id
+    ));
+
+    $tracking_url = ec_get_transaction_tracking_url($order_rand_id);
+    $site_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+    $customer_name = trim((string) ($customer_data['name'] ?? ''));
+    $payment_method = $customer_data['payment_method'] ?? ($order->payment_method ?? 'N/A');
+    $display_name = $customer_name !== '' ? $customer_name : 'Customer';
+
+    $items_text = '';
+    if (!empty($order_items)) {
+        foreach ($order_items as $item) {
+            $item_total = isset($item->subtotal) ? (float) $item->subtotal : ((float) $item->price * (int) $item->quantity);
+            $items_text .= sprintf(
+                "- %s x %d @ %s = %s\n",
+                $item->product_name,
+                (int) $item->quantity,
+                ec_format_price($item->price),
+                ec_format_price($item_total)
+            );
+        }
+    } else {
+        $items_text = "- Order items are available on your transaction page.\n";
+    }
+
+    $message = "Hi {$display_name},\n\n";
+    $message .= "Thank you for your order with {$site_name}.\n\n";
+    $message .= "Order details:\n";
+    $message .= "Order Number: " . ($order->order_number ?: $order->rand_id) . "\n";
+    $message .= "Transaction ID: " . $order->rand_id . "\n";
+    $message .= "Order Date: " . date_i18n('F j, Y g:i a', strtotime($order->created_at)) . "\n";
+    $message .= "Order Status: " . ucfirst($order->status) . "\n";
+    $message .= "Payment Status: " . ucfirst($order->payment_status) . "\n";
+    $message .= "Payment Method: " . $payment_method . "\n\n";
+    $message .= "Items:\n" . $items_text . "\n";
+    $message .= "Subtotal: " . ec_format_price($order->subtotal) . "\n";
+    $message .= "Tax: " . ec_format_price($order->tax) . "\n";
+    $message .= "Total: " . ec_format_price($order->total) . "\n\n";
+    $message .= "Track your order here:\n{$tracking_url}\n\n";
+    $message .= "If you have questions about your order, just reply to this email or contact us.\n\n";
+    $message .= "{$site_name}";
+
+    $headers = ['Content-Type: text/plain; charset=UTF-8'];
+    $subject = sprintf('Order Confirmation - %s', $order->order_number ?: $order->rand_id);
+    $sent = wp_mail($customer_email, $subject, $message, $headers);
+
+    if ($sent) {
+        $customer_data['order_email_sent_at'] = current_time('mysql');
+        $customer_data['order_email_sent_status'] = $order->payment_status;
+        $customer_data['tracking_url'] = $tracking_url;
+        update_option($metadata_key, $customer_data);
+    }
+
+    return $sent;
 }
 
 /**
@@ -5316,6 +5413,10 @@ function bntm_ajax_ec_process_checkout_op() {
             'total' => $order_total,
             'is_ec_order' => true // Flag to identify EC orders
         ]);
+
+        if ($payment_method->gateway === 'manual') {
+            ec_send_order_confirmation_email($order_rand_id);
+        }
 
         // Clear cart after successful order creation
         unset($_SESSION['ec_cart']);
@@ -5721,6 +5822,8 @@ function op_complete_ec_order_payment($gateway, $order_rand_id) {
         error_log("All payment records for order {$order->id}: " . print_r($all_payments, true));
     }
     
+    ec_send_order_confirmation_email($order_rand_id, true);
+
     error_log("EC Order payment completed: Order #{$order->id}, Status set to 'paid', Gateway: $gateway");
     
     return true;
