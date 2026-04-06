@@ -1638,11 +1638,6 @@ function ps_render_js() {
         const modal = document.getElementById('ps-print-modal');
         const printSettingsMap = <?php echo wp_json_encode(ps_get_all_print_settings()); ?>;
         if (!preview || !preview.trim()) return false;
-        const win = window.open('', '_blank', 'width=860,height=1100');
-        if (!win) {
-            alert('Print window was blocked. Please allow popups for this site.');
-            return false;
-        }
         const fd = new FormData();
         fd.append('action','ps_log_print');
         fd.append('loan_id', modal.dataset.loanId || 0);
@@ -1650,6 +1645,8 @@ function ps_render_js() {
         fd.append('copies', copies);
         fd.append('nonce', PS_NONCES.doc);
         fetch(ajaxurl, {method:'POST', body:fd});
+        const win = window.open('', '_blank', 'width=860,height=1100');
+        if (!win) return false;
         const activeDocType = modal.dataset.docType || 'global';
         const activeSettings = printSettingsMap[activeDocType] || printSettingsMap.global;
         const pageWidth = activeSettings.width || '148mm';
@@ -1687,7 +1684,6 @@ function ps_render_js() {
         win.document.write(content);
         win.document.write('</body></html>');
         win.document.close();
-        try { win.focus(); } catch (e) {}
         if (closeModal) psDismissPrint();
         return true;
     };
@@ -4725,102 +4721,135 @@ function ps_number_to_words( float $number ): string {
 function ps_doc_pawn_ticket( $loan, $bd, array $b ): string {
     $net_proceeds  = $loan->principal - $loan->service_fee;
     $grace_days    = (int) bntm_get_setting('ps_grace_period', '0');
-    $expiry_date   = date('m/d/Y', strtotime($loan->due_date . ' +' . $grace_days . ' days'));
-    $loan_date_fmt = date('m/d/Y', strtotime($loan->loan_date));
-    $due_date_fmt  = date('m/d/Y', strtotime($loan->due_date));
-    $rate_pct      = number_format((float)$loan->interest_rate, 0);
-    $term_display  = $loan->term_months > 1 ? $loan->term_months . ' mos' : '30 days';
-    $effective_rate = number_format((float)$loan->interest_rate * 12, 2);
-
-    $customer_name = preg_replace('/\s+/', ' ', trim($loan->customer_name));
-    $address = preg_replace('/\s+/', ' ', trim($loan->address));
-    $id_presented = trim($loan->id_type . ': ' . $loan->id_number);
-    $x_offset = 2.0;
-    $y_offset = 3.0;
-    $pos = function(float $top, float $left, string $extra = '') use ($x_offset, $y_offset): string {
-        return 'top:' . ($top + $y_offset) . 'mm; left:' . ($left + $x_offset) . 'mm;' . $extra;
-    };
-
-    $desc_parts = array_values(array_filter([
+    $expiry_date   = date('M d, Y', strtotime($loan->due_date . ' +' . $grace_days . ' days'));
+    $loan_date_fmt = date('M d, Y', strtotime($loan->loan_date));
+    $due_date_fmt  = date('M d, Y', strtotime($loan->due_date));
+    $rate_pct      = number_format((float)$loan->interest_rate, 0) . '%';
+    $term_display  = $loan->term_months > 1 ? $loan->term_months : '30';
+ 
+    $karat_weight = trim( $loan->karat . ($loan->weight_grams > 0 ? ' / ' . $loan->weight_grams . ' GMS.' : '') );
+    $desc_parts   = array_values( array_filter([
         $loan->collateral_desc,
-        trim(($loan->brand ?: '') . ' ' . ($loan->model ?: '')),
-        trim(($loan->karat ?: '') . ($loan->weight_grams > 0 ? ' / ' . $loan->weight_grams . ' GMS' : '')),
+        $loan->brand ? ($loan->brand . ($loan->model ? ' ' . $loan->model : '')) : '',
+        $karat_weight,
         $loan->serial_number ? 'S/N: ' . $loan->serial_number : '',
     ]));
-    while (count($desc_parts) < 4) { $desc_parts[] = ''; }
-
+    while ( count($desc_parts) < 4 ) { $desc_parts[] = ''; }
+ 
+    $chain_note = ($loan->root_ticket !== $loan->ticket_number)
+        ? '<span style="font-size:8px;color:#555;">(Chain: Root ' . esc_html($loan->root_ticket) . ')</span>'
+        : '';
+ 
     ob_start(); ?>
 <!DOCTYPE html><html><head><meta charset="UTF-8">
 <?php echo ps_page_style(); ?>
 <style>
-body { font-family:'Courier New',Courier,monospace; font-size:10px; }
-.tk-dot-sheet {
-    position: relative;
-    width: 184mm;
-    height: 126mm;
-    margin: 0 auto;
-    color: #000;
-}
-.tk-dot-val {
-    position: absolute;
-    font-size: 18px;
-    line-height: 1;
-    white-space: nowrap;
-    font-weight: 700;
-}
-.tk-dot-small { font-size: 14px; }
-.tk-dot-small2 { font-size: 8px; }
-.tk-dot-wide  { letter-spacing: 0.5px; }
-.tk-dot-wrap {
-    position: absolute;
-    font-size: 14px;
-    line-height: 1.1;
-    font-weight: 700;
-    white-space: normal;
-    
-}
-.tk-dot-wrap2 {
-    position: absolute;
-    font-size: 10px;
-    line-height: 1.1;
-    font-weight: 700;
-    white-space: normal;
-    
-}
+body { font-family:'Times New Roman',Times,serif; font-size:10px; }
+.tk-bname  { font-size:15px;font-weight:900;font-family:'Times New Roman',serif;text-transform:uppercase;letter-spacing:1px;color:#8B0000; }
+.tk-bsub   { font-size:8.5px;font-family:'Times New Roman',serif;line-height:1.5; }
+.tk-row    { display:flex;align-items:flex-end;gap:4px;margin-bottom:4px;font-size:9.5px; }
+.tk-lbl    { white-space:nowrap;flex-shrink:0; }
+.tk-val    { flex:1;border-bottom:1px solid #666;font-weight:700;font-size:9.5px;padding-bottom:1px; }
+.tk-narr   { font-size:9px;line-height:1.75;margin-bottom:3px; }
+.tk-ul     { border-bottom:1px solid #555;padding-bottom:1px;font-weight:700; }
+.tk-desc-title { font-size:8.5px;text-align:center;margin-bottom:3px; }
+.tk-desc-line  { border-bottom:1px solid #555;margin-bottom:4px;height:14px;font-size:9.5px;font-weight:700;padding-left:2px; }
+.tk-amt-lbl  { flex:1;padding-right:4px;font-size:9px; }
+.tk-amt-val  { border-bottom:1px solid #555;min-width:70px;text-align:right;font-weight:700;padding-bottom:1px;font-size:9.5px; }
+.tk-sig-line { border-top:1px solid #000;padding-top:2px;font-size:8px; }
+.tk-notice   { font-size:8px;font-weight:900;text-align:center;text-transform:uppercase;
+               letter-spacing:.3px;border-top:1px solid #000;padding-top:3px;margin-top:6px; }
 </style>
 </head><body>
-<div class="tk-dot-sheet">
+<div>
+    <div style="text-align:center;margin-bottom:5px;">
+        <div class="tk-bname"><?php echo esc_html($b['name']); ?></div>
+        <?php if ($b['addr'])   echo "<div class='tk-bsub'>" . esc_html($b['addr'])   . "</div>"; ?>
+        <?php if ($b['con'])    echo "<div class='tk-bsub'>Tel No.: " . esc_html($b['con']) . "</div>"; ?>
+        <?php if ($b['tin'])    echo "<div class='tk-bsub'>Non-VAT Reg. - TIN " . esc_html($b['tin']) . "</div>"; ?>
+        <?php if ($b['licens'] || $b['bsp']): ?>
+        <div class="tk-bsub">
+            <?php if ($b['licens']) echo 'DTI/SEC: ' . esc_html($b['licens']); ?>
+            <?php if ($b['bsp'])    echo ' &nbsp; BSP: ' . esc_html($b['bsp']); ?>
+        </div>
+        <?php endif; ?>
+    </div>
  
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(28, 40)); ?>"><?php echo esc_html($loan_date_fmt); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(25, 135)); ?>"><?php echo esc_html($due_date_fmt); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(28, 150)); ?>"><?php echo esc_html($expiry_date); ?></div>
-
-    <div class="tk-dot-val" style="<?php echo esc_attr($pos(33, 20, 'max-width:60mm; overflow:hidden;')); ?>"><?php echo esc_html($customer_name); ?></div>
-    <div class="tk-dot-wrap2 tk-dot-small" style="<?php echo esc_attr($pos(32, 110, 'width:80mm;')); ?>"><?php echo esc_html($address); ?></div>
-
-    <div class="tk-dot-wrap2 tk-dot-small2" style="<?php echo esc_attr($pos(42, 40, 'width:70mm;')); ?>"><?php echo esc_html(ps_number_to_words($loan->principal)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(42, 110)); ?>"><?php echo esc_html(number_format($loan->principal,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(42, 157)); ?>"><?php echo esc_html($rate_pct); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(42, 176)); ?>"><?php echo esc_html($rate_pct); ?></div>
-
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(46,15)); ?>"><?php echo esc_html($term_display); ?></div>
-     <div class="tk-dot-wrap2 tk-dot-small2" style="<?php echo esc_attr($pos(52, 20, 'width:70mm;')); ?>"><?php echo esc_html(ps_number_to_words($loan->appraised_value)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(52, 110)); ?>"><?php echo esc_html(number_format($loan->appraised_value,2)); ?></div>
-
-    <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(72, 8, 'width:88mm;')); ?>"><?php echo esc_html($desc_parts[0]); ?></div>
-    <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(76, 8, 'width:88mm;')); ?>"><?php echo esc_html($desc_parts[1]); ?></div>
-    <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(80, 8, 'width:88mm;')); ?>"><?php echo esc_html($desc_parts[2]); ?></div>
-    <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(84, 8, 'width:88mm;')); ?>"><?php echo esc_html($desc_parts[3]); ?></div>
-
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(58, 165)); ?>"><?php echo esc_html(number_format($loan->principal,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(61, 165)); ?>"><?php echo esc_html(number_format($bd['regular_interest'],2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(64, 165)); ?>"><?php echo esc_html(number_format($loan->service_fee,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(67, 165)); ?>"><?php echo esc_html(number_format($net_proceeds,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(64, 132)); ?>"><?php echo esc_html($effective_rate); ?></div>
-  
-
-    <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(95, 25, 'width:76mm;')); ?>"><?php echo esc_html($id_presented); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(95, 126)); ?>"><?php echo esc_html($loan->contact_number); ?></div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:2px;">
+        <div>
+            <span style="font-size:10px;font-weight:700;">Serial No.</span>
+            <span style="font-size:20px;font-weight:900;font-family:'Times New Roman',serif;letter-spacing:1px;"><?php echo esc_html($loan->ticket_number); ?></span>
+            <?php echo $chain_note; ?>
+        </div>
+        <div style="font-size:11px;font-style:italic;">Original</div>
+    </div>
+ 
+    <hr style="border:none;border-top:1px solid #999;margin:2px 0 4px;">
+ 
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;">
+        <div class="tk-row"><span class="tk-lbl">Date Loan Granted</span><span class="tk-val"><?php echo $loan_date_fmt; ?></span></div>
+        <div class="tk-row"><span class="tk-lbl">Maturity Date</span><span class="tk-val"><?php echo $due_date_fmt; ?></span></div>
+    </div>
+    <div class="tk-row"><span class="tk-lbl">Expiry Date of Redemption:</span><span class="tk-val"><?php echo $expiry_date; ?></span></div>
+ 
+    <div class="tk-row" style="margin-top:4px;">
+        <span class="tk-lbl">Mr./Ms.</span>
+        <span class="tk-val" style="max-width:120px;"><?php echo esc_html(trim($loan->customer_name)); ?></span>
+        <span class="tk-lbl" style="padding-left:4px;">a resident of</span>
+        <span class="tk-val" style="font-size:8.5px;"><?php echo esc_html($loan->address); ?></span>
+    </div>
+    <div style="font-size:8px;font-style:italic;text-align:right;margin-bottom:3px;color:#333;">(No. Street Barangay/Town or City/Province)</div>
+ 
+    <div class="tk-narr">for a loan of PESOS <span class="tk-ul"><?php echo esc_html(ps_number_to_words($loan->principal)); ?></span>
+        (P <span class="tk-ul"><?php echo number_format($loan->principal,2); ?></span>)
+        with an interest of <span class="tk-ul"><?php echo $rate_pct; ?></span> percent (<span class="tk-ul"><?php echo $rate_pct; ?></span>)
+    </div>
+    <div class="tk-narr">for (<span class="tk-ul"><?php echo $term_display; ?></span> days/month), has pledged to this Pawnee as security for the loan, article(s) described below appraised at PESOS.</div>
+    <div class="tk-narr">(P&nbsp;<span class="tk-ul"><?php echo number_format($loan->appraised_value,2); ?></span>) subject to the terms and conditions stated on the reverse side hereof.&nbsp; Penalty interest, if any <span class="tk-ul"><?php echo number_format($loan->penalty_rate,2); ?>%</span></div>
+ 
+    <div style="display:grid;grid-template-columns:52% 48%;gap:6px;margin-top:4px;">
+        <div>
+            <div class="tk-desc-title">Description of the Pawn</div>
+            <?php foreach ($desc_parts as $dl): ?>
+            <div class="tk-desc-line"><?php echo esc_html($dl); ?></div>
+            <?php endforeach; ?>
+        </div>
+        <div style="padding-left:6px;">
+            <?php
+            $amt_rows = [
+                ['Principal',                     'P ' . number_format($loan->principal,2)],
+                ['Interest in absolute amount 1/', number_format($bd['regular_interest'],2)],
+                ['Service Charge',                 number_format($loan->service_fee,2)],
+            ];
+            foreach ($amt_rows as $ar): ?>
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">
+                <span class="tk-amt-lbl"><?php echo $ar[0]; ?></span>
+                <span class="tk-amt-val"><?php echo $ar[1]; ?></span>
+            </div>
+            <?php endforeach; ?>
+            <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">
+                <span class="tk-amt-lbl">Net Proceeds</span>
+                <span class="tk-amt-val" style="border-bottom:2px solid #000;">P <?php echo number_format($net_proceeds,2); ?></span>
+            </div>
+            <div style="font-size:8px;font-style:italic;margin-top:3px;">Effective Interest Rate in Percent _____%</div>
+            <div style="font-size:8.5px;margin-top:3px;">Please check:</div>
+            <div style="font-size:8.5px;">Per annum[ ] &nbsp; Per Month [<?php echo $loan->interest_rate > 0 ? ' ✓ ' : '   '; ?>] &nbsp; (Others)[ ]</div>
+            <div style="font-size:8px;font-style:italic;margin-top:3px;"><sup>1/</sup>Formula (Principal × Rate × Time)</div>
+        </div>
+    </div>
+ 
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:5px;">
+        <div class="tk-row" style="margin-bottom:0;"><span class="tk-lbl">ID Presented</span><span class="tk-val" style="font-size:8.5px;"><?php echo esc_html($loan->id_type . ': ' . $loan->id_number); ?></span></div>
+        <div class="tk-row" style="margin-bottom:0;"><span class="tk-lbl">Contact No.:</span><span class="tk-val" style="font-size:8.5px;"><?php echo esc_html($loan->contact_number); ?></span></div>
+    </div>
+ 
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:18px;text-align:center;">
+        <div><div style="border-bottom:1px solid #000;height:18px;"></div><div class="tk-sig-line">(Signature or Thumbmark of Pawner)</div></div>
+        <div><div style="border-bottom:1px solid #000;height:18px;"></div><div class="tk-sig-line">(Signature or Pawnshop's Authorized Representative)</div></div>
+    </div>
+ 
+    <div class="tk-notice">PAWNER IS ADVISED TO READ AND UNDERSTAND THE TERMS AND CONDITIONS ON THE REVERSE SIDE HEREOF</div>
+    <?php echo ps_footer_line( $b['footer'] ); ?>
 </div>
 </body></html>
 <?php return ob_get_clean();
