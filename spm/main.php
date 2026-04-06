@@ -1115,14 +1115,14 @@ function bntm_shortcode_spm_dashboard() {
         background: rgba(0,0,0,0.20);
     }
 
-    /* Player photo — large square, white border like reference image */
+    /* Player photo — large square, border matches team secondary color */
     .spm-profile__photo {
         width: 100px;
         height: 100px;
         border-radius: 6px;
         object-fit: cover;
         flex-shrink: 0;
-        border: 3px solid #ffffff;
+        border: 3px solid var(--team-secondary, #FFD700);
     }
 
     /* Initials fallback */
@@ -1138,7 +1138,7 @@ function bntm_shortcode_spm_dashboard() {
         font-size: 36px;
         font-weight: 900;
         color: #fff;
-        border: 3px solid #ffffff;
+        border: 3px solid var(--team-secondary, #FFD700);
         flex-shrink: 0;
     }
 
@@ -1155,7 +1155,7 @@ function bntm_shortcode_spm_dashboard() {
         font-size: 32px;
         font-weight: 900;
         color: var(--team-secondary, #FFC72C);
-        border: 3px solid rgba(255,255,255,0.4);
+        border: 3px solid var(--team-secondary, #FFC72C);
         flex-shrink: 0;
     }
 
@@ -1721,7 +1721,7 @@ function spm_teams_tab($business_id) {
                                 <span class="spm-player-cell__name spm-clickable-name" style="font-weight:700; color: var(--nba-navy);"><?php echo esc_html($team->team_name); ?></span>
                             </div>
                         </td>
-                        <td><?php echo esc_html($team->city ?: '—'); ?></td>
+                        <td><?php echo !empty($team->city) ? esc_html($team->city) : '—'; ?></td>
                         <td><?php echo esc_html($team->coach ?: '—'); ?></td>
                         <td><span class="spm-badge spm-badge--blue"><?php echo $team->player_count; ?> players</span></td>
                         <td style="display:flex;gap:6px;">
@@ -1779,7 +1779,9 @@ function spm_teams_tab($business_id) {
         var name=document.getElementById('spm-team-name').value.trim();
         if(!name){spmNotice('spm-team-form-notice','Team name is required.','error');return;}
         var logoFile=document.getElementById('spm-team-logo-file').files[0];
-        var payload={action:'spm_save_team',nonce:spmTeamNonce,id:id,team_name:name,city:document.getElementById('spm-team-city').value.trim(),coach:document.getElementById('spm-team-coach').value.trim(),logo:document.getElementById('spm-team-logo').value.trim(),primary_color:document.getElementById('spm-team-primary-color').value,secondary_color:document.getElementById('spm-team-secondary-color').value,outline_color:document.getElementById('spm-team-outline-color').value};
+        var cityVal = document.getElementById('spm-team-city').value.trim();
+        var coachVal = document.getElementById('spm-team-coach').value.trim();
+        var payload={action:'spm_save_team',nonce:spmTeamNonce,id:id,team_name:name,city:cityVal,coach:coachVal,logo:document.getElementById('spm-team-logo').value.trim(),primary_color:document.getElementById('spm-team-primary-color').value,secondary_color:document.getElementById('spm-team-secondary-color').value,outline_color:document.getElementById('spm-team-outline-color').value};
         if(logoFile)payload.logo_file=logoFile;
         spmAjax(payload,function(res){if(res.success){spmCloseModal();location.reload();}else spmNotice('spm-team-form-notice',res.data.message,'error');});
     }
@@ -2054,16 +2056,16 @@ function spm_games_tab($business_id) {
         var d=data||{};
         var today=new Date().toISOString().split('T')[0];
         var isEdit = d.id && d.id > 0;
-        var scoreA = isEdit ? d.team_a_score : '';
-        var scoreB = isEdit ? d.team_b_score : '';
-        var gameStatus = d.status || 'scheduled';
-        if(gameStatus==='0'||gameStatus==='') gameStatus='scheduled';
+        var scoreA = isEdit && d.team_a_score !== undefined && d.team_a_score !== null && d.team_a_score !== '' ? d.team_a_score : (isEdit ? 0 : '');
+        var scoreB = isEdit && d.team_b_score !== undefined && d.team_b_score !== null && d.team_b_score !== '' ? d.team_b_score : (isEdit ? 0 : '');
+        var gameStatus = (d.status && d.status !== '0' && d.status !== '') ? d.status : 'scheduled';
+        var gameSeason = d.season || '';
         return '<div class="spm-form-group"><label>Game Date *</label><input type="date" id="bg-date" value="'+(d.game_date||today)+'"></div>'+
                '<div class="spm-form-group"><label>Team A *</label><select id="bg-team-a">'+spmGameTeamOptions(d.team_a_id||0)+'</select></div>'+
                '<div class="spm-form-group"><label>Team B *</label><select id="bg-team-b">'+spmGameTeamOptions(d.team_b_id||0)+'</select></div>'+
                '<div class="spm-form-row"><div class="spm-form-group"><label>Team A Score</label><input type="number" id="bg-score-a" value="'+scoreA+'" min="0" placeholder="0"></div>'+
                '<div class="spm-form-group"><label>Team B Score</label><input type="number" id="bg-score-b" value="'+scoreB+'" min="0" placeholder="0"></div></div>'+
-               '<div class="spm-form-group"><label>Season</label><select id="bg-season">'+spmSeasonsOptions(d.season||'')+'</select></div>'+
+               '<div class="spm-form-group"><label>Season</label><select id="bg-season">'+spmSeasonsOptions(gameSeason)+'</select></div>'+
                '<div class="spm-form-group"><label>Status</label><select id="bg-status">'+
                '<option value="scheduled"'+(gameStatus==='scheduled'?' selected':'')+'>Scheduled</option>'+
                '<option value="completed"'+(gameStatus==='completed'?' selected':'')+'>Completed</option>'+
@@ -2544,7 +2546,14 @@ function bntm_ajax_spm_save_team() {
     if(empty($data['team_name']))wp_send_json_error(['message'=>'Team name is required']);
     if(!empty($_FILES['logo_file'])&&!empty($_FILES['logo_file']['tmp_name'])){require_once(ABSPATH.'wp-admin/includes/file.php');$uploaded=wp_handle_upload($_FILES['logo_file'],['test_form'=>false,'mimes'=>null]);if(empty($uploaded['error'])&&!empty($uploaded['url']))$data['logo']=esc_url_raw($uploaded['url']);}
     if($id>0){$wpdb->update("{$wpdb->prefix}spm_teams",$data,['id'=>$id,'business_id'=>$business_id],$formats,['%d','%d']);wp_send_json_success(['message'=>'Team updated!']);}
-    else{$data['rand_id']=bntm_rand_id();$data['business_id']=$business_id;$wpdb->insert("{$wpdb->prefix}spm_teams",$data,array_merge(['%s','%d'],$formats));wp_send_json_success(['message'=>'Team created!']);}
+    else{
+        // FIX: Put rand_id and business_id FIRST so the format array aligns correctly
+        // Previously: $data built without rand_id/business_id, then appended → misaligned formats → city became %d → cast to 0
+        $insert_data=array_merge(['rand_id'=>bntm_rand_id(),'business_id'=>$business_id],$data);
+        $insert_formats=array_merge(['%s','%d'],$formats);
+        $wpdb->insert("{$wpdb->prefix}spm_teams",$insert_data,$insert_formats);
+        wp_send_json_success(['message'=>'Team created!']);
+    }
 }
 
 function bntm_ajax_spm_delete_team() {
@@ -2610,9 +2619,9 @@ function bntm_ajax_spm_get_team_profile() {
             <div class="spm-profile__roster-item">
                 '.$av.'
                 <div style="flex:1;min-width:0;">
-                    <div style="font-weight:700;font-size:13px;color:'.$sc.';
+                    <div style="font-family:var(--font-display);font-weight:800;font-size:13px;letter-spacing:0.5px;color:'.$sc.';
                          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-                         -webkit-text-stroke:0.5px rgba(255,255,255,0.5);paint-order:stroke fill;">'.esc_html($pl->player_name).'</div>
+                         -webkit-text-stroke:0.6px '.$oc.';paint-order:stroke fill;">'.esc_html($pl->player_name).'</div>
                     <div style="font-size:11px;color:rgba(255,255,255,.60);margin-top:2px;">'.esc_html($pl->position ?: '—').' &bull; #'.intval($pl->jersey_number).'</div>
                 </div>
                 '.$status_badge.'
@@ -2630,30 +2639,30 @@ function bntm_ajax_spm_get_team_profile() {
         <div class="spm-profile__hero">
             '.$logo_html.'
             <div class="spm-profile__hero-info">
-                <h2 style="color:'.$sc.';-webkit-text-stroke:1px #fff;paint-order:stroke fill;">'.esc_html($team->team_name).'</h2>
-                '.(!empty($team->city)  ? '<p class="spm-profile__hero-sub">📍 '.esc_html($team->city).'</p>'           : '').'
-                '.(!empty($team->coach) ? '<p class="spm-profile__hero-sub">Coach: '.esc_html($team->coach).'</p>' : '').'
+                <h2 style="font-family:var(--font-display);font-size:40px;font-weight:800;letter-spacing:1px;color:'.$sc.';-webkit-text-stroke:1px '.$oc.';paint-order:stroke fill;">'.esc_html($team->team_name).'</h2>
+                '.(!empty($team->city)  ? '<p class="spm-profile__hero-sub" style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:0.5px;color:'.$sc.';">📍 '.esc_html($team->city).'</p>'           : '').'
+                '.(!empty($team->coach) ? '<p class="spm-profile__hero-sub" style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:0.5px;color:'.$sc.';">Coach: '.esc_html($team->coach).'</p>' : '').'
             </div>
         </div>
 
         <!-- ── WIN / LOSS RECORD ── -->
         <div class="spm-profile__details">
             <div class="spm-profile__detail-row">
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.$sc.';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Wins</div>
-                    <div class="spm-profile__detail-value">'.$wins.'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.$sc.';-webkit-text-stroke:0.8px '.$oc.';paint-order:stroke fill;">'.$wins.'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.$sc.';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Losses</div>
-                    <div class="spm-profile__detail-value">'.$losses.'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.$sc.';-webkit-text-stroke:0.8px '.$oc.';paint-order:stroke fill;">'.$losses.'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.$sc.';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Games</div>
-                    <div class="spm-profile__detail-value">'.$gp.'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.$sc.';-webkit-text-stroke:0.8px '.$oc.';paint-order:stroke fill;">'.$gp.'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.$sc.';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Win %</div>
-                    <div class="spm-profile__detail-value" style="font-size:20px;">'.$pct.'%</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.$sc.';-webkit-text-stroke:0.8px '.$oc.';paint-order:stroke fill;">'.$pct.'%</div>
                 </div>
             </div>
         </div>
@@ -2766,30 +2775,29 @@ function bntm_ajax_spm_get_player_profile() {
         <div class="spm-profile__hero">
             '.$photo_html.'
             <div class="spm-profile__hero-info">
-                <h2>'.esc_html($player->player_name).'</h2>
+                <h2 style="font-family:var(--font-display);font-size:36px;font-weight:800;letter-spacing:1px;color:'.esc_attr($secondary_color).';-webkit-text-stroke:1px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($player->player_name).'</h2>
                 '.$team_logo_block.'
-                <p class="spm-profile__position-jersey">'.esc_html($position_display).' &bull; '.esc_html($jersey_display).'</p>
             </div>
         </div>
 
         <!-- ── PHYSICAL DETAILS ── -->
         <div class="spm-profile__details">
             <div class="spm-profile__detail-row">
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.esc_attr($secondary_color).';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Jersey</div>
-                    <div class="spm-profile__detail-value">'.esc_html($jersey_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($jersey_display).'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.esc_attr($secondary_color).';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Position</div>
-                    <div class="spm-profile__detail-value" style="font-size:22px;">'.esc_html($position_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:800;font-size:24px;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($position_display).'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.esc_attr($secondary_color).';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Height</div>
-                    <div class="spm-profile__detail-value" style="font-size:17px;letter-spacing:0;">'.esc_html($height_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:700;font-size:18px;letter-spacing:0;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.6px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($height_display).'</div>
                 </div>
-                <div class="spm-profile__detail-item">
+                <div class="spm-profile__detail-item" style="border:2px solid '.esc_attr($secondary_color).';border-radius:6px;padding:12px;">
                     <div class="spm-profile__detail-label">Weight</div>
-                    <div class="spm-profile__detail-value" style="font-size:17px;letter-spacing:0;">'.esc_html($weight_display).'</div>
+                    <div class="spm-profile__detail-value" style="font-family:var(--font-display);font-weight:700;font-size:18px;letter-spacing:0;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.6px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($weight_display).'</div>
                 </div>
             </div>
         </div>
@@ -2798,38 +2806,38 @@ function bntm_ajax_spm_get_player_profile() {
         <div class="spm-profile__stats-section">
             <div class="spm-profile__stats-title">Career Statistics</div>
             <div class="spm-profile__stats-grid">
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->ppg ?: 0).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($stats->ppg ?: 0).'</span>
                     <span class="spm-profile__stat-label">PPG</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->rpg ?: 0).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($stats->rpg ?: 0).'</span>
                     <span class="spm-profile__stat-label">RPG</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->apg ?: 0).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($stats->apg ?: 0).'</span>
                     <span class="spm-profile__stat-label">APG</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->spg ?: 0).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($stats->spg ?: 0).'</span>
                     <span class="spm-profile__stat-label">SPG</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.esc_html($stats->bpg ?: 0).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.esc_html($stats->bpg ?: 0).'</span>
                     <span class="spm-profile__stat-label">BPG</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.intval($stats->games_played).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.intval($stats->games_played).'</span>
                     <span class="spm-profile__stat-label">Games</span>
                 </div>
-                <div class="spm-profile__stat-box">
-                    <span class="spm-profile__stat-value">'.intval($stats->total_points).'</span>
+                <div class="spm-profile__stat-box" style="border:2px solid '.esc_attr($secondary_color).';">
+                    <span class="spm-profile__stat-value" style="font-family:var(--font-display);font-weight:800;color:'.esc_attr($secondary_color).';-webkit-text-stroke:0.8px '.esc_attr($outline_color).';paint-order:stroke fill;">'.intval($stats->total_points).'</span>
                     <span class="spm-profile__stat-label">Total PTS</span>
                 </div>
                 <div class="spm-profile__stat-box" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
                     <span style="display:inline-block;font-family:var(--font-display);font-size:13px;font-weight:800;
                           padding:4px 10px;border-radius:3px;letter-spacing:.5px;text-transform:uppercase;
-                          background:'.esc_attr($status_pill_bg).';color:'.esc_attr($status_pill_col).';">
+                          background:'.esc_attr($status_pill_bg).';color:'.esc_attr($status_pill_col).';-webkit-text-stroke:0.3px rgba(255,255,255,0.3);paint-order:stroke fill;">
                         '.ucfirst(esc_html($player->status)).'
                     </span>
                     <span class="spm-profile__stat-label" style="margin-top:6px;">Status</span>
@@ -2936,7 +2944,14 @@ function bntm_ajax_spm_save_game() {
     $data=['game_date'=>sanitize_text_field($_POST['game_date']),'team_a_id'=>$team_a,'team_b_id'=>$team_b,'team_a_score'=>$score_a,'team_b_score'=>$score_b,'season'=>sanitize_text_field($_POST['season']??''),'status'=>sanitize_text_field($_POST['status']??'scheduled')];
     $formats=['%s','%d','%d','%d','%d','%s','%s'];
     if($id>0){$wpdb->update("{$wpdb->prefix}spm_games",$data,['id'=>$id,'business_id'=>$business_id],$formats,['%d','%d']);wp_send_json_success(['message'=>'Game updated!']);}
-    else{$data['rand_id']=bntm_rand_id();$data['business_id']=$business_id;$wpdb->insert("{$wpdb->prefix}spm_games",$data,array_merge(['%s','%d'],$formats));wp_send_json_success(['message'=>'Game recorded!']);}
+    else{
+        // FIX: Put rand_id and business_id FIRST in the data array so the format array aligns correctly
+        // Previously: $data built without rand_id/business_id, then formats prepended → misaligned → status got wrong format → corrupted
+        $insert_data=array_merge(['rand_id'=>bntm_rand_id(),'business_id'=>$business_id],$data);
+        $insert_formats=array_merge(['%s','%d'],$formats);
+        $wpdb->insert("{$wpdb->prefix}spm_games",$insert_data,$insert_formats);
+        wp_send_json_success(['message'=>'Game recorded!']);
+    }
 }
 
 function bntm_ajax_spm_delete_game() {
