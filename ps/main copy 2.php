@@ -247,12 +247,9 @@ function ps_auto_mark_overdue($business_id) {
 }
 
 /**
- * Compute daily accrued interest with grace period.
- * Interest accrues DAILY from day 1 of loan.
- * Grace period: first N days, interest = ₱0 (no charge).
- * After grace period ends: ALL accumulated interest (including grace days) is charged.
- * Example: 3% monthly = 0.1% daily. Days 1-3 grace (no charge).
- *          Day 4: charge 0.1% × 4 days = 0.4%.
+ * Compute daily accrued interest for a loan.
+ * Grace period applies from Day 1: no interest accrues during first N days.
+ * Interest starts accruing from Day (grace_days + 1) onwards.
  */
 function ps_compute_interest_breakdown($loan) {
     $today      = time();
@@ -265,40 +262,34 @@ function ps_compute_interest_breakdown($loan) {
     $days_elapsed  = max(0, floor(($today - $loan_date) / 86400));
     $days_past_due = max(0, floor(($today - $due_date) / 86400));
 
+    // --- Grace period applies from day 1: subtract grace days from total days elapsed for interest calculation ---
+    $days_for_interest = max(0, $days_elapsed - $grace_days);
+
+    // --- Split into months and remaining days for interest calculation ---
+    $months_for_interest  = floor($days_for_interest / 30);
+    $remaining_days_interest = $days_for_interest % 30;
+
     // --- Rates ---
-    $monthly_rate = $rate / 100;  // Convert to decimal (3% = 0.03)
-    $daily_rate   = $monthly_rate / 30;  // Daily rate
+    $monthly_rate = $rate / 100;
+    $daily_rate   = $monthly_rate / 30;
 
-    // --- Regular Interest: accrues DAILY, but only charged after grace period ---
-    // Interest is calculated for ALL days, but ₱0 if still in grace period
-    // Once grace period ends, charge for all accumulated days including grace days
-    if ($days_elapsed <= $grace_days) {
-        // Still in grace period: no charge yet
-        $regular_interest = 0;
-    } else {
-        // Grace period ended: charge interest for ALL days elapsed
-        $regular_interest = $loan->principal * $daily_rate * $days_elapsed;
-    }
+    // --- Regular Interest: starts after grace period ---
+    $monthly_interest  = $loan->principal * $monthly_rate * $months_for_interest;
+    $daily_interest    = $loan->principal * $daily_rate * $remaining_days_interest;
 
-    // --- Overdue Interest: accrues DAILY after due date, charged after grace ---
-    // Same logic: accumulated from due date, but ₱0 until grace period ends
-    if ($days_past_due <= $grace_days) {
-        // Still in grace period after due: no charge yet
-        $overdue_interest = 0;
-    } else {
-        // Grace period ended: charge interest for all days past due
-        $overdue_interest = $loan->principal * $daily_rate * $days_past_due;
-    }
+    $regular_interest  = $monthly_interest + $daily_interest;
 
-    // --- Penalty: accrues DAILY after overdue, charged after grace ---
+    // --- Grace logic for overdue period: apply to penalty as well ---
+    $effective_overdue_days = max(0, $days_past_due - $grace_days);
+
+    // --- Overdue Interest (only after grace period expires) ---
+    $overdue_interest = $loan->principal * $daily_rate * $effective_overdue_days;
+
+    // --- Penalty (also applies only after grace period) ---
     $penalty_rate  = (float)$loan->penalty_rate; // % per month
-    $penalty_daily_rate = ($penalty_rate / 100) / 30;
-    
-    if ($days_past_due <= $grace_days) {
-        $penalty_interest = 0;
-    } else {
-        $penalty_interest = $loan->principal * $penalty_daily_rate * $days_past_due;
-    }
+    $daily_penalty = ($penalty_rate / 100) / 30;
+
+    $penalty_interest = $loan->principal * $daily_penalty * $effective_overdue_days;
 
     // --- Carried interest ---
     $carried = (float)($loan->accrued_interest_carried ?? 0);
@@ -307,9 +298,15 @@ function ps_compute_interest_breakdown($loan) {
 
     return [
         'days_elapsed'        => $days_elapsed,
-        'grace_days'          => $grace_days,
+        'days_for_interest'   => $days_for_interest,
+        'months_for_interest' => $months_for_interest,
+        'remaining_days_interest' => $remaining_days_interest,
         'days_past_due'       => $days_past_due,
-        'daily_rate'          => round($daily_rate * 100, 4),  // As percentage for display
+        'effective_overdue'   => $effective_overdue_days,
+        'grace_days'          => $grace_days,
+
+        'monthly_interest'    => round($monthly_interest, 2),
+        'daily_interest'      => round($daily_interest, 2),
 
         'regular_interest'    => round($regular_interest, 2),
         'overdue_interest'    => round($overdue_interest, 2),
@@ -1541,19 +1538,14 @@ function ps_render_js() {
                 `;
                 document.getElementById('renew-interest-detail').innerHTML = `
                     <table style="width:100%;font-size:12px;">
-                        <tr><td style="color:#6b7280;">Loan Date</td><td style="text-align:right;font-weight:600;">${d.loan_date}</td></tr>
-                        <tr><td style="color:#6b7280;">Due Date</td><td style="text-align:right;font-weight:600;">${d.due_date}</td></tr>
-                        ${d.grace_end_date && d.grace_days > 0 ? `<tr><td style="color:#059669;font-weight:700;">Grace Period Ends</td><td style="text-align:right;color:#059669;font-weight:700;">${d.grace_end_date}</td></tr>` : ''}
-                        <tr style="border-top:1px solid #e5e7eb;"><td style="color:#6b7280;padding-top:6px;">Days Elapsed</td><td style="text-align:right;padding-top:6px;">${d.days_elapsed} days</td></tr>
+                        <tr><td style="color:#6b7280;">Days Elapsed</td><td style="text-align:right;">${d.days_elapsed} days</td></tr>
+                        ${d.grace_days > 0 ? `<tr><td style="color:#6b7280;">Grace Period</td><td style="text-align:right;color:#059669;">-${d.grace_days} days (no interest)</td></tr>` : ''}
+                        <tr><td style="color:#6b7280;font-weight:700;">Days for Interest</td><td style="text-align:right;font-weight:700;">${d.days_for_interest} days</td></tr>
                         <tr><td style="color:#6b7280;">Daily Interest Rate</td><td style="text-align:right;">${(d.interest_rate/30).toFixed(4)}%/day</td></tr>
-                        <tr><td style="color:#6b7280;">Days Elapsed</td><td style="text-align:right;">${d.days_elapsed}d</td></tr>
-                        <tr><td style="color:#6b7280;">Grace Period</td><td style="text-align:right;color:#059669;">${d.grace_days}d (no charge)</td></tr>
-                        <tr><td style="color:#6b7280;">Daily Rate</td><td style="text-align:right;">${d.daily_rate}%/day</td></tr>
                         <tr><td style="color:#6b7280;">Accrued Regular Interest</td><td style="text-align:right;font-weight:600;">₱${d.regular_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>
-                        ${d.days_past_due > 0 ? `<tr><td style="color:#f59e0b;">Days Overdue</td><td style="text-align:right;">${d.days_past_due}d</td></tr>` : ''}
-                        ${d.overdue_interest > 0 ? `<tr><td style="color:#f59e0b;">Overdue Interest</td><td style="text-align:right;font-weight:600;color:#f59e0b;">₱${d.overdue_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>` : ''}
+                        ${d.overdue_interest > 0 ? `<tr><td style="color:#f59e0b;">Overdue Interest (${d.effective_overdue}d after due date)</td><td style="text-align:right;font-weight:600;color:#f59e0b;">₱${d.overdue_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>` : ''}
                         ${d.carried_interest > 0 ? `<tr><td style="color:#6b7280;">Carried Interest</td><td style="text-align:right;color:#7c3aed;">₱${d.carried_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>` : ''}
-                        ${d.penalty_interest > 0 ? `<tr><td style="color:#dc2626;">Penalty Interest</td><td style="text-align:right;font-weight:600;color:#dc2626;">₱${d.penalty_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>` : ''}
+                        ${d.penalty_interest > 0 ? `<tr><td style="color:#dc2626;">Penalty Interest (${d.effective_overdue}d × ${d.penalty_rate}%/mo)</td><td style="text-align:right;font-weight:600;color:#dc2626;">₱${d.penalty_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>` : ''}
                         <tr style="border-top:1px solid #bfdbfe;"><td style="font-weight:700;padding-top:5px;">Total Interest Due</td><td style="text-align:right;font-weight:800;font-size:14px;padding-top:5px;">₱${d.total_interest.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>
                     </table>
                 `;
@@ -3052,7 +3044,21 @@ function ps_reports_tab( $business_id ) {
     </form>
 
     <?php if ($rtype === 'daily_summary'): ?>
-    
+    <div class="bntm-form-section" style="padding:14px;margin-bottom:16px;background:#fffbeb;border:1px solid #fde68a;">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div>
+                <div style="font-size:13px;font-weight:700;color:#92400e;">Daily Summary requires cash denomination before final generation.</div>
+                <div style="font-size:12px;color:#78350f;margin-top:2px;">
+                    <?php if (!empty($cash_breakdown['has_input'])): ?>
+                    Counted cash saved: <strong>P <?php echo number_format($cash_breakdown['total_counted'], 2); ?></strong>
+                    <?php else: ?>
+                    No denomination count saved yet.
+                    <?php endif; ?>
+                </div>
+            </div>
+            <button type="button" onclick="psOpenDenominationModal('edit')" class="bntm-btn-secondary" style="padding:7px 14px;">Enter Denomination</button>
+        </div>
+    </div>
     <?php endif; ?>
  
     <style>
@@ -3226,48 +3232,48 @@ function ps_reports_tab( $business_id ) {
     });
     </script>
     <style>
-    .ps-denom-shell { display:grid; grid-template-columns:1fr; gap:12px; }
-    .ps-denom-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:6px; }
+    .ps-denom-shell { display:grid; grid-template-columns:1fr; gap:16px; }
+    .ps-denom-grid { display:grid; grid-template-columns:1fr; gap:8px; }
     .ps-denom-card {
-        border:1px solid #e5e7eb; border-radius:6px; padding:8px 10px; background:#fff;
-        display:flex; flex-direction:column; gap:6px; align-items:flex-start;
+        border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; background:#fff;
+        display:grid; grid-template-columns:120px minmax(110px,140px) 1fr; gap:14px; align-items:center;
         transition:border-color .18s ease, background .18s ease;
     }
     .ps-denom-card:hover { border-color:#cbd5e1; }
     .ps-denom-card.is-active { border-color:#94a3b8; background:#f8fafc; }
     .ps-denom-bill {
-        font-size:14px; font-weight:700; color:#0f172a;
+        font-size:16px; font-weight:700; color:#0f172a;
     }
     .ps-denom-meta { display:flex; flex-direction:column; gap:2px; }
-    .ps-denom-label { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#64748b; font-weight:700; }
-    .ps-denom-subtotal { font-size:12px; font-weight:700; color:#334155; text-align:left; }
+    .ps-denom-label { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#64748b; font-weight:700; }
+    .ps-denom-subtotal { font-size:13px; font-weight:700; color:#334155; text-align:right; }
     .ps-denom-input {
-        width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; text-align:center;
-        font-size:13px; font-weight:700; color:#0f172a; background:#fff;
+        width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; text-align:center;
+        font-size:16px; font-weight:700; color:#0f172a; background:#fff;
     }
-    .ps-denom-input:focus { outline:none; border-color:#1e293b; box-shadow:0 0 0 2px rgba(148,163,184,.12); background:#fff; }
-    .ps-denom-field { display:flex; flex-direction:column; gap:3px; width:100%; }
+    .ps-denom-input:focus { outline:none; border-color:#1e293b; box-shadow:0 0 0 3px rgba(148,163,184,.18); background:#fff; }
+    .ps-denom-field { display:flex; flex-direction:column; gap:6px; }
     .ps-denom-side {
-        border:1px solid #e5e7eb; border-radius:6px; background:#f8fafc;
-        padding:10px 12px; display:flex; flex-direction:column; gap:8px; width:100%;
+        border:1px solid #e5e7eb; border-radius:8px; background:#fff;
+        padding:14px 16px; display:flex; flex-direction:column; gap:10px;
     }
-    .ps-denom-total-box { border-radius:6px; background:#f0f9ff; color:#0f172a; padding:10px 12px; border:1px solid #bfdbfe; }
-    .ps-denom-total-label { font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#64748b; }
-    .ps-denom-total-value { font-size:20px; font-weight:800; margin-top:4px; line-height:1; }
-    .ps-denom-tip { font-size:11px; color:#64748b; line-height:1.4; }
-    .ps-denom-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; padding-top:4px; }
+    .ps-denom-total-box { border-radius:8px; background:#f8fafc; color:#0f172a; padding:14px 16px; border:1px solid #e5e7eb; }
+    .ps-denom-total-label { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#64748b; }
+    .ps-denom-total-value { font-size:24px; font-weight:800; margin-top:6px; line-height:1; }
+    .ps-denom-tip { font-size:12px; color:#475569; line-height:1.5; }
+    .ps-denom-actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; padding-top:8px; }
     @media (max-width: 760px) {
         .ps-denom-card { grid-template-columns:1fr; gap:8px; }
         .ps-denom-subtotal { text-align:left; }
     }
     </style>
-    <div id="ps-denomination-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:10020;align-items:center;justify-content:center;padding:12px;">
-        <div style="background:#fff;border-radius:12px;width:min(480px,98%);max-height:85vh;overflow:auto;box-shadow:0 20px 48px rgba(0,0,0,.24);">
-            <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;">
-                <div style="font-size:16px;font-weight:800;color:#111827;">Cash Denomination Count</div>
-                <div style="font-size:12px;color:#64748b;margin-top:4px;">Enter quantities for each denomination.</div>
+    <div id="ps-denomination-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:10020;align-items:center;justify-content:center;padding:20px;">
+        <div style="background:#fff;border-radius:12px;width:min(720px,100%);max-height:90vh;overflow:auto;box-shadow:0 20px 48px rgba(0,0,0,.24);">
+            <div style="padding:18px 22px;border-bottom:1px solid #e5e7eb;">
+                <div style="font-size:18px;font-weight:800;color:#111827;">Cash Denomination Count</div>
+                <div style="font-size:13px;color:#64748b;margin-top:5px;">Enter the quantity for each bill denomination. This will be recorded in the daily summary report.</div>
             </div>
-            <div style="padding:14px 12px;">
+            <div style="padding:20px 22px;">
                 <div class="ps-denom-shell">
                     <div class="ps-denom-grid">
                         <?php foreach (ps_get_cash_denominations() as $denom): ?>
@@ -4283,7 +4289,7 @@ function ps_settings_tab($business_id) {
 
         <div class="bntm-form-section"><h4 style="margin:0 0 14px;font-size:14px;font-weight:700;">Interest &amp; Loan Settings</h4>
             <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;">
-                <strong>Interest Computation Rule:</strong> Interest accrues daily from loan date to due date at the agreed monthly rate. Grace period after due date: no interest charged during grace days. Interest on overdue portion starts only after grace period ends.
+                <strong>Interest Computation Rule:</strong> Interest accrues daily from loan date (principal × rate/100/30 × days). Grace period applies after due date before penalty interest kicks in.
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
                 <div class="bntm-form-group"><label>Default Interest Rate (%/month)</label><input type="number" name="ps_interest_rate" step=".01" value="<?php echo esc_attr(bntm_get_setting('ps_interest_rate','3.00')); ?>"></div>
@@ -4292,7 +4298,7 @@ function ps_settings_tab($business_id) {
                 <div class="bntm-form-group">
                     <label>Grace Period (days after due date)</label>
                     <input type="number" name="ps_grace_period" value="<?php echo esc_attr(bntm_get_setting('ps_grace_period','0')); ?>" placeholder="0">
-                    <div style="font-size:11px;color:#6b7280;margin-top:3px;">Grace period = days with NO charge. Interest accrues daily from day 1 but is only charged after grace period ends. Example: 3-day grace → Day 4 charges 0.1% × 4 days = 0.4%.</div>
+                    <div style="font-size:11px;color:#6b7280;margin-top:3px;">No interest/penalty charged during grace period</div>
                 </div>
                 <div class="bntm-form-group"><label>Auto-Forfeiture After (days past due)</label><input type="number" name="ps_auto_forfeit_days" value="<?php echo esc_attr(bntm_get_setting('ps_auto_forfeit_days','30')); ?>"></div>
             </div>
@@ -4470,9 +4476,10 @@ function bntm_ajax_ps_compute_interest() {
         'service_fee'     => (float)$loan->service_fee,
         'is_overdue'      => $bd['days_past_due'] > 0,
         'days_elapsed'    => $bd['days_elapsed'],
-        'grace_days'      => $bd['grace_days'],
+        'days_for_interest'=> $bd['days_for_interest'],
         'days_past_due'   => $bd['days_past_due'],
-        'daily_rate'      => $bd['daily_rate'],
+        'effective_overdue'=> $bd['effective_overdue'],
+        'grace_days'      => $bd['grace_days'],
         'regular_interest'=> $bd['regular_interest'],
         'overdue_interest'=> $bd['overdue_interest'],
         'penalty_interest'=> $bd['penalty_interest'],
@@ -5506,14 +5513,13 @@ function ps_doc_renewal_notice( $loan, $bd, array $b ): string {
         . ps_cf_line('Principal', 'P ' . number_format($loan->principal, 2))
         . ps_cf_line('Transaction Type', ucfirst(str_replace('_', ' ', $loan->transaction_type)))
         . ps_cf_line('Interest Rate', $loan->interest_rate . '%/month')
-        . ps_cf_line('Daily Rate', $bd['daily_rate'] . '%')
-        . ps_cf_line('Loan Term', $bd['days_elapsed'] . ' days')
-        . ps_cf_line('Grace Period', $bd['grace_days'] . ' days (no charge)')
-        . ps_cf_line('Accrued Interest', 'P ' . number_format($bd['regular_interest'], 2))
-        . ($bd['days_past_due'] > 0 ? ps_cf_line('Days Overdue', $bd['days_past_due'] . ' days') : '')
-        . ($bd['overdue_interest'] > 0 ? ps_cf_line('Overdue Interest', 'P ' . number_format($bd['overdue_interest'], 2)) : '')
-        . ($bd['penalty_interest'] > 0 ? ps_cf_line('Penalty Interest', 'P ' . number_format($bd['penalty_interest'], 2)) : '')
-        . ($loan->service_fee > 0      ? ps_cf_line('Service Fee', 'P ' . number_format($loan->service_fee, 2)) : '')
+        . ps_cf_line('Days Elapsed', $bd['days_elapsed'] . ' days')
+        . ($bd['grace_days'] > 0 ? ps_cf_line('Grace Period', $bd['grace_days'] . ' days (no interest)') : '')
+        . ps_cf_line('Days for Interest', $bd['days_for_interest'] . ' days')
+        . ps_cf_line('Accrued Interest', number_format($bd['regular_interest'], 2))
+        . ($bd['overdue_interest'] > 0 ? ps_cf_line('Overdue Interest (' . $bd['effective_overdue'] . 'd after due date)', number_format($bd['overdue_interest'], 2)) : '')
+        . ($bd['penalty_interest'] > 0 ? ps_cf_line('Penalty Interest (' . $bd['effective_overdue'] . 'd × ' . $loan->penalty_rate . '%/mo)', number_format($bd['penalty_interest'], 2)) : '')
+        . ($loan->service_fee > 0      ? ps_cf_line('Service Fee', number_format($loan->service_fee, 2)) : '')
         . ($pay && $pay->reference_number ? ps_cf_line('OR Number', esc_html($pay->reference_number)) : '')
         . ps_divider()
         . ps_cf_line('New Due Date', date('F d, Y', strtotime($loan->due_date)))

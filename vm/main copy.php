@@ -34,6 +34,7 @@ function bntm_vm_get_tables() {
         'vat_receipts' => "CREATE TABLE {$prefix}vat_receipts (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             rand_id VARCHAR(20) UNIQUE NOT NULL,
+            business_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
             receipt_type ENUM('expense', 'sales') NOT NULL DEFAULT 'expense',
             transaction_date DATE NOT NULL,
             store_name VARCHAR(255) NOT NULL,
@@ -51,6 +52,7 @@ function bntm_vm_get_tables() {
             status ENUM('active', 'archived') DEFAULT 'active',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_business (business_id),
             INDEX idx_type (receipt_type),
             INDEX idx_date (transaction_date),
             INDEX idx_quarter (year, quarter),
@@ -60,10 +62,12 @@ function bntm_vm_get_tables() {
         'vat_categories' => "CREATE TABLE {$prefix}vat_categories (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             rand_id VARCHAR(20) UNIQUE NOT NULL,
+            business_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
             category_name VARCHAR(100) NOT NULL,
             category_type ENUM('expense', 'sales', 'both') DEFAULT 'both',
             is_active TINYINT(1) DEFAULT 1,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_business (business_id)
         ) {$charset};"
     ];
 }
@@ -81,6 +85,7 @@ function bntm_vm_create_tables() {
     
     global $wpdb;
     $categories_table = $wpdb->prefix . 'vat_categories';
+    $business_id = get_current_user_id();
     
     $default_categories = [
         ['Office Supplies', 'expense'],
@@ -95,17 +100,18 @@ function bntm_vm_create_tables() {
     
     foreach ($default_categories as $cat) {
         $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$categories_table} WHERE category_name = %s",
-            $cat[0]
+            "SELECT id FROM {$categories_table} WHERE category_name = %s AND business_id = %d",
+            $cat[0], $business_id
         ));
         
         if (!$exists) {
             $wpdb->insert($categories_table, [
                 'rand_id' => bntm_rand_id(),
+                'business_id' => $business_id,
                 'category_name' => $cat[0],
                 'category_type' => $cat[1],
                 'is_active' => 1
-            ], ['%s', '%s', '%s', '%d']);
+            ], ['%s', '%d', '%s', '%s', '%d']);
         }
     }
     
@@ -134,6 +140,7 @@ function bntm_shortcode_vm_dashboard() {
     }
     
     $current_user = wp_get_current_user();
+    $business_id = $current_user->ID;
     $active_tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'overview';
     
     ob_start();
@@ -302,19 +309,19 @@ function bntm_shortcode_vm_dashboard() {
         
         <div class="bntm-tab-content">
             <?php if ($active_tab === 'overview'): ?>
-                <?php echo vat_overview_tab(); ?>
+                <?php echo vat_overview_tab($business_id); ?>
             <?php elseif ($active_tab === 'expenses'): ?>
-                <?php echo vat_expenses_tab(); ?>
+                <?php echo vat_expenses_tab($business_id); ?>
             <?php elseif ($active_tab === 'sales'): ?>
-                <?php echo vat_sales_tab(); ?>
+                <?php echo vat_sales_tab($business_id); ?>
             <?php elseif ($active_tab === 'quarterly'): ?>
-                <?php echo vat_quarterly_tab(); ?>
+                <?php echo vat_quarterly_tab($business_id); ?>
             <?php elseif ($active_tab === 'monthly'): ?>
-                <?php echo vat_monthly_tab(); ?>
+                <?php echo vat_monthly_tab($business_id); ?>
             <?php elseif ($active_tab === 'import'): ?>
-                <?php echo vat_import_tab(); ?>
+                <?php echo vat_import_tab($business_id); ?>
             <?php elseif ($active_tab === 'settings'): ?>
-                <?php echo vat_settings_tab(); ?>
+                <?php echo vat_settings_tab($business_id); ?>
             <?php endif; ?>
         </div>
     </div>
@@ -327,7 +334,7 @@ function bntm_shortcode_vm_dashboard() {
 // TAB RENDERING FUNCTIONS
 // ============================================================================
 
-function vat_overview_tab() {
+function vat_overview_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     
@@ -345,8 +352,8 @@ function vat_overview_tab() {
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
         FROM {$receipts_table}
-        WHERE year = %d AND quarter = %d AND status = 'active'
-    ", $current_year, $current_quarter));
+        WHERE business_id = %d AND year = %d AND quarter = %d AND status = 'active'
+    ", $business_id, $current_year, $current_quarter));
     
     $expense_vat = floatval($current_quarter_stats->expense_vat ?? 0);
     $sales_vat = floatval($current_quarter_stats->sales_vat ?? 0);
@@ -371,8 +378,8 @@ function vat_overview_tab() {
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
         FROM {$receipts_table}
-        WHERE year = %d AND status = 'active'
-    ", $current_year));
+        WHERE business_id = %d AND year = %d AND status = 'active'
+    ", $business_id, $current_year));
     
     $ytd_expense_vat = floatval($ytd_stats->expense_vat ?? 0);
     $ytd_sales_vat = floatval($ytd_stats->sales_vat ?? 0);
@@ -390,10 +397,10 @@ function vat_overview_tab() {
             SUM(CASE WHEN receipt_type = 'expense' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as expense_vat,
             SUM(CASE WHEN receipt_type = 'sales' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as sales_vat
         FROM {$receipts_table}
-        WHERE year = %d AND status = 'active'
+        WHERE business_id = %d AND year = %d AND status = 'active'
         GROUP BY quarter
         ORDER BY quarter
-    ", $current_year));
+    ", $business_id, $current_year));
     
     ob_start();
     ?>
@@ -563,22 +570,22 @@ function vat_overview_tab() {
     return ob_get_clean();
 }
 
-function vat_expenses_tab() {
+function vat_expenses_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     $categories_table = $wpdb->prefix . 'vat_categories';
     
     $receipts = $wpdb->get_results($wpdb->prepare("
         SELECT * FROM {$receipts_table}
-        WHERE receipt_type = 'expense' AND status = 'active'
+        WHERE business_id = %d AND receipt_type = 'expense' AND status = 'active'
         ORDER BY transaction_date DESC, created_at DESC
-    "));
+    ", $business_id));
     
     $categories = $wpdb->get_results($wpdb->prepare("
         SELECT * FROM {$categories_table}
-        WHERE category_type IN ('expense', 'both') AND is_active = 1
+        WHERE business_id = %d AND category_type IN ('expense', 'both') AND is_active = 1
         ORDER BY category_name
-    "));
+    ", $business_id));
     
     $nonce = wp_create_nonce('vm_receipt_action');
     
@@ -941,22 +948,22 @@ function vat_expenses_tab() {
     return ob_get_clean();
 }
 
-function vat_sales_tab() {
+function vat_sales_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     $categories_table = $wpdb->prefix . 'vat_categories';
     
     $receipts = $wpdb->get_results($wpdb->prepare("
         SELECT * FROM {$receipts_table}
-        WHERE receipt_type = 'sales' AND status = 'active'
+        WHERE business_id = %d AND receipt_type = 'sales' AND status = 'active'
         ORDER BY transaction_date DESC, created_at DESC
-    "));
+    ", $business_id));
     
     $categories = $wpdb->get_results($wpdb->prepare("
         SELECT * FROM {$categories_table}
-        WHERE category_type IN ('sales', 'both') AND is_active = 1
+        WHERE business_id = %d AND category_type IN ('sales', 'both') AND is_active = 1
         ORDER BY category_name
-    "));
+    ", $business_id));
     
     $nonce = wp_create_nonce('vm_receipt_action');
     
@@ -1216,7 +1223,7 @@ function vat_sales_tab() {
     return ob_get_clean();
 }
 
-function vat_quarterly_tab() {
+function vat_quarterly_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     
@@ -1225,9 +1232,9 @@ function vat_quarterly_tab() {
     
     $available_years = $wpdb->get_col($wpdb->prepare("
         SELECT DISTINCT year FROM {$receipts_table}
-        WHERE year IS NOT NULL
+        WHERE business_id = %d AND year IS NOT NULL
         ORDER BY year DESC
-    "));
+    ", $business_id));
     
     if (empty($available_years)) {
         $available_years = [date('Y')];
@@ -1250,8 +1257,8 @@ function vat_quarterly_tab() {
                 SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
                 SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
             FROM {$receipts_table}
-            WHERE year = %d AND quarter = %d AND status = 'active'
-        ", $current_year, $q));
+            WHERE business_id = %d AND year = %d AND quarter = %d AND status = 'active'
+        ", $business_id, $current_year, $q));
         
         $expense_vat = floatval($data->expense_vat ?? 0);
         $sales_vat = floatval($data->sales_vat ?? 0);
@@ -1368,7 +1375,7 @@ function vat_quarterly_tab() {
     return ob_get_clean();
 }
 
-function vat_monthly_tab() {
+function vat_monthly_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
 
@@ -1382,9 +1389,9 @@ function vat_monthly_tab() {
     $available_years = $wpdb->get_col($wpdb->prepare("
         SELECT DISTINCT YEAR(transaction_date) as report_year
         FROM {$receipts_table}
-        WHERE status = 'active'
+        WHERE business_id = %d AND status = 'active'
         ORDER BY report_year DESC
-    "));
+    ", $business_id));
 
     if (empty($available_years)) {
         $available_years = [date('Y')];
@@ -1401,7 +1408,7 @@ function vat_monthly_tab() {
         $type_params[] = $report_type;
     }
 
-    $summary_params = array_merge([$month_start, $month_end], $type_params);
+    $summary_params = array_merge([$business_id, $month_start, $month_end], $type_params);
     $summary = $wpdb->get_row($wpdb->prepare("
         SELECT
             SUM(CASE WHEN receipt_type = 'expense' THEN amount ELSE 0 END) as total_expenses,
@@ -1417,11 +1424,12 @@ function vat_monthly_tab() {
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'offset' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as offset_expense_vat,
             SUM(CASE WHEN receipt_type = 'expense' AND expense_type = 'company' AND vat_type = 'vat' THEN vat_amount ELSE 0 END) as company_expense_vat
         FROM {$receipts_table}
-        WHERE transaction_date BETWEEN %s AND %s
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
             AND status = 'active'{$type_sql}
     ", $summary_params));
 
-    $category_params = array_merge([$month_start, $month_end], $type_params);
+    $category_params = array_merge([$business_id, $month_start, $month_end], $type_params);
     $category_rows = $wpdb->get_results($wpdb->prepare("
         SELECT
             receipt_type,
@@ -1434,7 +1442,8 @@ function vat_monthly_tab() {
             SUM(amount) as total_amount,
             SUM(CASE WHEN vat_type = 'vat' THEN vat_amount ELSE 0 END) as total_vat
         FROM {$receipts_table}
-        WHERE transaction_date BETWEEN %s AND %s
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
             AND status = 'active'{$type_sql}
         GROUP BY receipt_type, COALESCE(NULLIF(category, ''), 'Uncategorized'),
             CASE
@@ -1444,11 +1453,12 @@ function vat_monthly_tab() {
         ORDER BY receipt_type ASC, total_amount DESC, category_name ASC
     ", $category_params));
 
-    $receipt_params = array_merge([$month_start, $month_end], $type_params);
+    $receipt_params = array_merge([$business_id, $month_start, $month_end], $type_params);
     $receipts = $wpdb->get_results($wpdb->prepare("
         SELECT transaction_date, receipt_type, or_number, store_name, category, expense_type, amount, vat_amount, vat_type
         FROM {$receipts_table}
-        WHERE transaction_date BETWEEN %s AND %s
+        WHERE business_id = %d
+            AND transaction_date BETWEEN %s AND %s
             AND status = 'active'{$type_sql}
         ORDER BY transaction_date DESC, created_at DESC
     ", $receipt_params));
@@ -1798,7 +1808,7 @@ function vat_monthly_tab() {
     return ob_get_clean();
 }
 
-function vat_import_tab() {
+function vat_import_tab($business_id) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     $fn_table = $wpdb->prefix . 'fn_transactions';
@@ -1807,13 +1817,15 @@ function vat_import_tab() {
         SELECT r.*,
             (SELECT COUNT(*) FROM {$fn_table} f
              WHERE f.reference_type = 'vm_company_expense'
-               AND f.reference_id = r.id) as is_imported
+               AND f.reference_id = r.id
+               AND f.business_id = r.business_id) as is_imported
         FROM {$receipts_table} r
-        WHERE r.receipt_type = 'expense'
+        WHERE r.business_id = %d
+            AND r.receipt_type = 'expense'
             AND r.expense_type = 'company'
             AND r.status = 'active'
         ORDER BY r.transaction_date DESC, r.created_at DESC
-    "));
+    ", $business_id));
 
     $nonce = wp_create_nonce('vm_fn_action');
 
@@ -2024,14 +2036,15 @@ function vat_import_tab() {
     return ob_get_clean();
 }
 
-function vat_settings_tab() {
+function vat_settings_tab($business_id) {
     global $wpdb;
     $categories_table = $wpdb->prefix . 'vat_categories';
     
     $categories = $wpdb->get_results($wpdb->prepare("
         SELECT * FROM {$categories_table}
+        WHERE business_id = %d
         ORDER BY category_type, category_name
-    "));
+    ", $business_id));
     
     $nonce = wp_create_nonce('vm_settings_action');
     
@@ -2206,6 +2219,7 @@ function bntm_ajax_vm_add_receipt() {
     
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
+    $business_id = get_current_user_id();
     
     $receipt_type = sanitize_text_field($_POST['receipt_type']);
     $transaction_date = sanitize_text_field($_POST['transaction_date']);
@@ -2237,6 +2251,7 @@ function bntm_ajax_vm_add_receipt() {
     
     $data = [
         'rand_id' => bntm_rand_id(),
+        'business_id' => $business_id,
         'receipt_type' => $receipt_type,
         'transaction_date' => $transaction_date,
         'store_name' => $store_name,
@@ -2254,7 +2269,7 @@ function bntm_ajax_vm_add_receipt() {
         'status' => 'active'
     ];
     
-    $format = ['%s','%s','%s','%s','%s','%f','%f','%f','%s','%s','%s','%d','%d','%s','%s','%s'];
+    $format = ['%s','%d','%s','%s','%s','%s','%f','%f','%f','%s','%s','%s','%d','%d','%s','%s','%s'];
     $result = $wpdb->insert($receipts_table, $data, $format);
     
     if ($result) {
@@ -2271,10 +2286,11 @@ function bntm_ajax_vm_delete_receipt() {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     $receipt_id = intval($_POST['receipt_id']);
+    $business_id = get_current_user_id();
     
     $receipt = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$receipts_table} WHERE id = %d",
-        $receipt_id
+        "SELECT * FROM {$receipts_table} WHERE id = %d AND business_id = %d",
+        $receipt_id, $business_id
     ));
     
     if (!$receipt) wp_send_json_error(['message' => 'Receipt not found']);
@@ -2294,6 +2310,7 @@ function bntm_ajax_vm_add_category() {
     
     global $wpdb;
     $categories_table = $wpdb->prefix . 'vat_categories';
+    $business_id = get_current_user_id();
     
     $category_name = sanitize_text_field($_POST['category_name']);
     $category_type = sanitize_text_field($_POST['category_type']);
@@ -2303,18 +2320,19 @@ function bntm_ajax_vm_add_category() {
     }
     
     $exists = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM {$categories_table} WHERE category_name = %s",
-        $category_name
+        "SELECT id FROM {$categories_table} WHERE category_name = %s AND business_id = %d",
+        $category_name, $business_id
     ));
     
     if ($exists) wp_send_json_error(['message' => 'Category already exists']);
     
     $result = $wpdb->insert($categories_table, [
         'rand_id' => bntm_rand_id(),
+        'business_id' => $business_id,
         'category_name' => $category_name,
         'category_type' => $category_type,
         'is_active' => 1
-    ], ['%s','%s','%s','%d']);
+    ], ['%s','%d','%s','%s','%d']);
     
     if ($result) {
         wp_send_json_success(['message' => 'Category added successfully']);
@@ -2330,15 +2348,16 @@ function bntm_ajax_vm_delete_category() {
     global $wpdb;
     $categories_table = $wpdb->prefix . 'vat_categories';
     $category_id = intval($_POST['category_id']);
+    $business_id = get_current_user_id();
     
     $category = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$categories_table} WHERE id = %d",
-        $category_id
+        "SELECT * FROM {$categories_table} WHERE id = %d AND business_id = %d",
+        $category_id, $business_id
     ));
     
     if (!$category) wp_send_json_error(['message' => 'Category not found']);
     
-    $result = $wpdb->delete($categories_table, ['id' => $category_id], ['%d']);
+    $result = $wpdb->delete($categories_table, ['id' => $category_id, 'business_id' => $business_id], ['%d', '%d']);
     
     if ($result) {
         wp_send_json_success(['message' => 'Category deleted successfully']);
@@ -2361,10 +2380,11 @@ function bntm_ajax_vm_import_company_expense() {
         SELECT *
         FROM {$receipts_table}
         WHERE id = %d
+            AND business_id = %d
             AND receipt_type = 'expense'
             AND expense_type = 'company'
             AND status = 'active'
-    ", $receipt_id));
+    ", $receipt_id, $business_id));
 
     if (!$receipt) {
         wp_send_json_error(['message' => 'Company expense receipt not found.']);
@@ -2495,14 +2515,14 @@ function vat_get_quarter_range($year, $quarter) {
     ];
 }
 
-function vat_get_stats($year = null, $quarter = null) {
+function vat_get_stats($business_id, $year = null, $quarter = null) {
     global $wpdb;
     $receipts_table = $wpdb->prefix . 'vat_receipts';
     
     if (!$year) $year = date('Y');
     
-    $where_clause = "year = %d AND status = 'active'";
-    $params = [$year];
+    $where_clause = "business_id = %d AND year = %d AND status = 'active'";
+    $params = [$business_id, $year];
     
     if ($quarter) {
         $where_clause .= " AND quarter = %d";
