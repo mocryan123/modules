@@ -65,18 +65,28 @@ function bntm_pos_get_tables() {
             transaction_number VARCHAR(50) UNIQUE NOT NULL,
             staff_id BIGINT UNSIGNED DEFAULT NULL,
             staff_name VARCHAR(255) DEFAULT NULL,
+            customer_id BIGINT UNSIGNED DEFAULT NULL,
+            customer_name VARCHAR(255) DEFAULT NULL,
+            customer_email VARCHAR(255) DEFAULT NULL,
+            customer_contact VARCHAR(50) DEFAULT NULL,
             subtotal DECIMAL(10,2) NOT NULL,
             discount DECIMAL(10,2) DEFAULT 0.00,
             tax DECIMAL(10,2) DEFAULT 0.00,
             total DECIMAL(10,2) NOT NULL,
+            payment_type VARCHAR(50) DEFAULT 'pay_now',
             payment_method VARCHAR(50) DEFAULT 'cash',
+            payment_status VARCHAR(50) DEFAULT 'paid',
+            payable_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             amount_paid DECIMAL(10,2) NOT NULL,
             change_amount DECIMAL(10,2) DEFAULT 0.00,
             status VARCHAR(50) DEFAULT 'completed',
             notes TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_staff (staff_id),
+            INDEX idx_customer (customer_id),
             INDEX idx_transaction_number (transaction_number),
+            INDEX idx_payment_status (payment_status),
             INDEX idx_status (status),
             INDEX idx_created (created_at)
         ) {$charset};",
@@ -139,6 +149,139 @@ function bntm_pos_create_tables() {
     }
     
     return count($tables);
+}
+
+function pos_ensure_extended_schema() {
+    static $schema_checked = false;
+    if ($schema_checked) {
+        return;
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_transactions';
+    $schema_checked = true;
+
+    $columns = [
+        'customer_id' => "ALTER TABLE {$table} ADD COLUMN customer_id BIGINT UNSIGNED DEFAULT NULL AFTER staff_name",
+        'customer_name' => "ALTER TABLE {$table} ADD COLUMN customer_name VARCHAR(255) DEFAULT NULL AFTER customer_id",
+        'customer_email' => "ALTER TABLE {$table} ADD COLUMN customer_email VARCHAR(255) DEFAULT NULL AFTER customer_name",
+        'customer_contact' => "ALTER TABLE {$table} ADD COLUMN customer_contact VARCHAR(50) DEFAULT NULL AFTER customer_email",
+        'payment_type' => "ALTER TABLE {$table} ADD COLUMN payment_type VARCHAR(50) DEFAULT 'pay_now' AFTER total",
+        'payment_status' => "ALTER TABLE {$table} ADD COLUMN payment_status VARCHAR(50) DEFAULT 'paid' AFTER payment_method",
+        'payable_amount' => "ALTER TABLE {$table} ADD COLUMN payable_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER payment_status",
+        'paid_amount' => "ALTER TABLE {$table} ADD COLUMN paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER payable_amount",
+    ];
+
+    foreach ($columns as $column => $sql) {
+        $exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", $column));
+        if (!$exists) {
+            $wpdb->query($sql);
+        }
+    }
+}
+
+function pos_get_business_id_for_context($user_id = 0) {
+    $primary_business_id = (int) get_option('bntm_primary_business_id', 0);
+    if ($primary_business_id > 0) {
+        return $primary_business_id;
+    }
+
+    return $user_id > 0 ? $user_id : get_current_user_id();
+}
+
+function pos_find_or_create_customer($customer_id, $customer_name, $customer_email, $customer_contact, $business_id) {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+
+    if (!$wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $customers_table))) {
+        return [
+            'id' => 0,
+            'name' => $customer_name,
+            'email' => $customer_email,
+            'contact_number' => $customer_contact,
+        ];
+    }
+
+    $customer_id = (int) $customer_id;
+    if ($customer_id > 0) {
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$customers_table} WHERE id = %d LIMIT 1",
+            $customer_id
+        ));
+
+        if ($existing) {
+            return (array) $existing;
+        }
+    }
+
+    $customer_name = trim((string) $customer_name);
+    $customer_email = sanitize_email($customer_email);
+    $customer_contact = sanitize_text_field($customer_contact);
+
+    if ($customer_name === '') {
+        return null;
+    }
+
+    $existing = null;
+    if ($customer_email !== '') {
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$customers_table} WHERE email = %s ORDER BY id DESC LIMIT 1",
+            $customer_email
+        ));
+    }
+
+    if (!$existing && $customer_contact !== '') {
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$customers_table} WHERE contact_number = %s ORDER BY id DESC LIMIT 1",
+            $customer_contact
+        ));
+    }
+
+    if (!$existing) {
+        $existing = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$customers_table} WHERE name = %s ORDER BY id DESC LIMIT 1",
+            $customer_name
+        ));
+    }
+
+    if ($existing) {
+        $update = [];
+        if ($customer_email !== '' && empty($existing->email)) {
+            $update['email'] = $customer_email;
+        }
+        if ($customer_contact !== '' && empty($existing->contact_number)) {
+            $update['contact_number'] = $customer_contact;
+        }
+        if (!empty($update)) {
+            $wpdb->update($customers_table, $update, ['id' => $existing->id]);
+        }
+        return [
+            'id' => (int) $existing->id,
+            'name' => $existing->name,
+            'email' => $customer_email !== '' ? $customer_email : $existing->email,
+            'contact_number' => $customer_contact !== '' ? $customer_contact : $existing->contact_number,
+        ];
+    }
+
+    $wpdb->insert($customers_table, [
+        'rand_id' => bntm_rand_id(),
+        'business_id' => $business_id,
+        'type' => 'customer',
+        'name' => $customer_name,
+        'email' => $customer_email,
+        'contact_number' => $customer_contact,
+        'status' => 'active',
+        'source' => 'POS',
+        'notes' => 'Customer created from POS sale.',
+        'created_at' => current_time('mysql'),
+    ], ['%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s']);
+
+    return [
+        'id' => (int) $wpdb->insert_id,
+        'name' => $customer_name,
+        'email' => $customer_email,
+        'contact_number' => $customer_contact,
+    ];
 }
 
 // Register shortcodes
@@ -1059,8 +1202,58 @@ function pos_get_dashboard_stats() {
 function pos_format_price($amount) {
     return '₱' . number_format(floatval($amount), 2);
 }
+
+function pos_get_customer_receivables_summary() {
+    pos_ensure_extended_schema();
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_transactions';
+
+    return $wpdb->get_results(
+        "SELECT customer_id,
+                COALESCE(NULLIF(customer_name, ''), 'Walk-in Customer') AS customer_name,
+                MAX(customer_email) AS customer_email,
+                MAX(customer_contact) AS customer_contact,
+                COUNT(*) AS total_transactions,
+                COALESCE(SUM(payable_amount), 0) AS total_payables,
+                MAX(created_at) AS last_transaction_at
+         FROM {$table}
+         WHERE payment_status IN ('unpaid', 'partial')
+         GROUP BY customer_id, customer_name
+         ORDER BY total_payables DESC, last_transaction_at DESC"
+    );
+}
+
+function pos_get_customer_statement_rows($customer_id, $month = '') {
+    pos_ensure_extended_schema();
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_transactions';
+    $where = [];
+    $params = [];
+
+    if ($customer_id > 0) {
+        $where[] = "customer_id = %d";
+        $params[] = $customer_id;
+    } else {
+        return [];
+    }
+
+    if ($month !== '' && preg_match('/^\d{4}-\d{2}$/', $month)) {
+        $where[] = "DATE_FORMAT(created_at, '%Y-%m') = %s";
+        $params[] = $month;
+    }
+
+    $sql = "SELECT id, transaction_number, created_at, total, payment_type, payment_method, payment_status, payable_amount, paid_amount
+            FROM {$table}
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY created_at DESC";
+
+    return $wpdb->get_results($wpdb->prepare($sql, ...$params));
+}
 /* ---------- RECENT TRANSACTIONS WITH PAGINATION ---------- */
 function pos_render_recent_transactions($limit = 10) {
+    pos_ensure_extended_schema();
     global $wpdb;
     $trans_table = $wpdb->prefix . 'pos_transactions';
     
@@ -1094,6 +1287,7 @@ function pos_render_recent_transactions($limit = 10) {
             <tr>
                 <th>Transaction #</th>
                 <th>Staff</th>
+                <th>Customer</th>
                 <th>Total</th>
                 <th>Payment</th>
                 <th>Status</th>
@@ -1106,11 +1300,12 @@ function pos_render_recent_transactions($limit = 10) {
                     <tr>
                         <td>#<?php echo esc_html($trans->transaction_number); ?></td>
                         <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
+                        <td><?php echo esc_html($trans->customer_name ?: 'Walk-in'); ?></td>
                         <td style="color: #059669; font-weight: 600;">₱<?php echo number_format($trans->total, 2); ?></td>
-                        <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $trans->payment_type ?? 'pay_now')) . ' / ' . ucfirst($trans->payment_method)); ?></td>
                         <td>
-                            <span class="pos-status-badge pos-status-<?php echo esc_attr($trans->status); ?>">
-                                <?php echo esc_html(ucfirst($trans->status)); ?>
+                            <span class="pos-status-badge pos-status-<?php echo esc_attr($trans->payment_status ?: $trans->status); ?>">
+                                <?php echo esc_html(ucfirst($trans->payment_status ?: $trans->status)); ?>
                             </span>
                         </td>
                         <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
@@ -1118,7 +1313,7 @@ function pos_render_recent_transactions($limit = 10) {
                 <?php endforeach; ?>
             <?php else: ?>
                 <tr>
-                    <td colspan="6" style="text-align: center;">No transactions found on this page.</td>
+                    <td colspan="7" style="text-align: center;">No transactions found on this page.</td>
                 </tr>
             <?php endif; ?>
         </tbody>
@@ -1647,9 +1842,11 @@ function pos_products_tab() {
 
 /* ---------- FINANCE TAB ---------- */
 function pos_finance_tab() {
+    pos_ensure_extended_schema();
     global $wpdb;
     $trans_table = $wpdb->prefix . 'pos_transactions';
     $fn_table = $wpdb->prefix . 'fn_transactions';
+    $receivables = pos_get_customer_receivables_summary();
     
     $transactions = $wpdb->get_results("
         SELECT t.*, 
@@ -1667,6 +1864,43 @@ function pos_finance_tab() {
     var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
     </script>
     
+    <div class="bntm-form-section">
+        <h3>Customer Payables</h3>
+        <p>Outstanding balances from POS sales marked as pay later.</p>
+
+        <div class="bntm-table-wrapper" style="margin-bottom: 24px;">
+           <table class="bntm-table">
+               <thead>
+                   <tr>
+                       <th>Customer</th>
+                       <th>Contact</th>
+                       <th>Open Transactions</th>
+                       <th>Total Payables</th>
+                       <th>Last Sale</th>
+                   </tr>
+               </thead>
+               <tbody>
+                   <?php if (empty($receivables)): ?>
+                   <tr><td colspan="5" style="text-align:center;">No outstanding payables.</td></tr>
+                   <?php else: foreach ($receivables as $row): ?>
+                   <tr>
+                       <td><strong><?php echo esc_html($row->customer_name); ?></strong></td>
+                       <td>
+                           <?php echo esc_html($row->customer_email ?: '-'); ?>
+                           <?php if (!empty($row->customer_contact)): ?>
+                               <div style="font-size:12px;color:#6b7280;"><?php echo esc_html($row->customer_contact); ?></div>
+                           <?php endif; ?>
+                       </td>
+                       <td><?php echo intval($row->total_transactions); ?></td>
+                       <td class="bntm-stat-income">₱<?php echo number_format((float) $row->total_payables, 2); ?></td>
+                       <td><?php echo esc_html(date('M d, Y h:i A', strtotime($row->last_transaction_at))); ?></td>
+                   </tr>
+                   <?php endforeach; endif; ?>
+               </tbody>
+           </table>
+        </div>
+    </div>
+
     <div class="bntm-form-section">
         <h3>POS Transactions</h3>
         <p>Import completed sales as income transactions to Finance module</p>
@@ -1700,6 +1934,7 @@ function pos_finance_tab() {
                        <th>Transaction #</th>
                        <th>Date</th>
                        <th>Staff</th>
+                       <th>Customer</th>
                        <th>Total</th>
                        <th>Payment</th>
                        <th>Status</th>
@@ -1707,7 +1942,7 @@ function pos_finance_tab() {
                </thead>
                <tbody>
                    <?php if (empty($transactions)): ?>
-                   <tr><td colspan="7" style="text-align:center;">No transactions found</td></tr>
+                   <tr><td colspan="8" style="text-align:center;">No transactions found</td></tr>
                    <?php else: foreach ($transactions as $trans): ?>
                    <tr>
                        <td>
@@ -1715,15 +1950,20 @@ function pos_finance_tab() {
                                   class="trans-checkbox <?php echo $trans->is_imported ? 'imported-trans' : 'not-imported-trans'; ?>" 
                                   data-id="<?php echo $trans->id; ?>"
                                   data-amount="<?php echo $trans->total; ?>"
-                                  data-imported="<?php echo $trans->is_imported ? '1' : '0'; ?>">
+                                  data-imported="<?php echo $trans->is_imported ? '1' : '0'; ?>"
+                                  data-payment-status="<?php echo esc_attr($trans->payment_status ?: 'paid'); ?>"
+                                  <?php disabled(($trans->payment_status ?? 'paid') !== 'paid'); ?>>
                        </td>
                        <td>#<?php echo $trans->transaction_number; ?></td>
                        <td><?php echo date('M d, Y H:i', strtotime($trans->created_at)); ?></td>
                        <td><?php echo esc_html($trans->staff_name ?: 'N/A'); ?></td>
+                       <td><?php echo esc_html($trans->customer_name ?: 'Walk-in'); ?></td>
                        <td class="bntm-stat-income">₱<?php echo number_format($trans->total, 2); ?></td>
-                       <td><?php echo esc_html(ucfirst($trans->payment_method)); ?></td>
+                       <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $trans->payment_type ?? 'pay_now')) . ' / ' . ucfirst($trans->payment_method)); ?></td>
                        <td>
-                           <?php if ($trans->is_imported): ?>
+                           <?php if (($trans->payment_status ?? 'paid') !== 'paid'): ?>
+                           <span style="color:#b45309;"><?php echo esc_html(ucfirst($trans->payment_status)); ?></span>
+                           <?php elseif ($trans->is_imported): ?>
                            <span style="color:#059669;">✓ Imported</span>
                            <?php else: ?>
                            <span style="color:#6b7280;">Not Imported</span>
@@ -1776,7 +2016,7 @@ function pos_finance_tab() {
         // Bulk Import
         document.getElementById('bulk-import-btn').addEventListener('click', function() {
             const selected = Array.from(document.querySelectorAll('.trans-checkbox:checked'))
-                .filter(cb => cb.dataset.imported === '0');
+                .filter(cb => cb.dataset.imported === '0' && cb.dataset.paymentStatus === 'paid');
             
             if (selected.length === 0) {
                 alert('Please select at least one transaction that is not imported');
@@ -2639,6 +2879,7 @@ add_action('wp_ajax_pos_save_settings', 'bntm_ajax_pos_save_settings');
 
 function bntm_ajax_pos_import_transaction() {
     check_ajax_referer('pos_nonce', 'nonce');
+    pos_ensure_extended_schema();
     
     if (!is_user_logged_in()) {
         wp_send_json_error(['message' => 'Unauthorized']);
@@ -2669,6 +2910,10 @@ function bntm_ajax_pos_import_transaction() {
     
     if (!$trans) {
         wp_send_json_error(['message' => 'Transaction not found']);
+    }
+
+    if (($trans->payment_status ?? 'paid') !== 'paid') {
+        wp_send_json_error(['message' => 'Only fully paid transactions can be imported to Finance']);
     }
     
     $data = [
@@ -2822,6 +3067,40 @@ function bntm_pos_shortcode_cashier() {
                     <h3>Current Sale</h3>
                     <button id="pos-clear-cart" class="bntm-btn-small bntm-btn-danger">Clear</button>
                 </div>
+
+                <div class="pos-customer-panel">
+                    <div class="pos-customer-panel-header">
+                        <h4>Customer</h4>
+                        <div class="pos-customer-mode-toggle">
+                            <button type="button" class="pos-customer-mode-btn active" data-mode="search">Search Existing</button>
+                            <button type="button" class="pos-customer-mode-btn" data-mode="new">Add New</button>
+                        </div>
+                    </div>
+
+                    <div id="pos-customer-search-mode">
+                        <input type="hidden" id="pos-customer-id" value="">
+                        <input type="text" id="pos-customer-search" placeholder="Search by name, email, or mobile number">
+                        <div id="pos-customer-search-results" class="pos-customer-search-results" style="display:none;"></div>
+                        <small class="pos-customer-help">Select an existing CRM customer, or switch to Add New if there’s no match.</small>
+                    </div>
+
+                    <div id="pos-customer-form-fields">
+                        <div class="bntm-form-group">
+                            <label>Customer Name *</label>
+                            <input type="text" id="pos-customer-name" placeholder="Enter customer name">
+                        </div>
+                        <div class="bntm-form-row">
+                            <div class="bntm-form-group">
+                                <label>Email</label>
+                                <input type="email" id="pos-customer-email" placeholder="customer@email.com">
+                            </div>
+                            <div class="bntm-form-group">
+                                <label>Contact Number</label>
+                                <input type="text" id="pos-customer-contact" placeholder="09XXXXXXXXX">
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="pos-cart-items" id="pos-cart-items">
                     <div class="pos-empty-cart">
@@ -2890,13 +3169,21 @@ function bntm_pos_shortcode_cashier() {
                 
                 <!-- Payment Method -->
                 <div class="bntm-form-group" style="margin-top: 20px;">
+                    <label>Payment Timing</label>
+                    <select id="modal-payment-type" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 16px; margin-bottom: 12px;">
+                        <option value="pay_now">Pay Now</option>
+                        <option value="pay_later">Pay Later</option>
+                    </select>
+
                     <label>Payment Method</label>
                     <select id="modal-payment-method" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 16px;">
                         <option value="cash">Cash</option>
-                        <option value="card">Card</option>
                         <option value="gcash">GCash</option>
-                        <option value="bank">Bank Transfer</option>
                     </select>
+                </div>
+
+                <div id="modal-pay-later-note" style="display: none; margin-top: 16px; padding: 16px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; color: #9a3412;">
+                    This sale will be saved as receivable. The customer will appear in CRM and in the POS payment monitoring section with their outstanding payable.
                 </div>
                 
                 <!-- Amount Display & Denominators (only for cash) -->
@@ -3337,6 +3624,85 @@ function bntm_pos_shortcode_cashier() {
         display: flex;
         flex-direction: column;
     }
+    .pos-customer-panel {
+        padding: 18px 20px;
+        border-bottom: 1px solid #e5e7eb;
+        background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    }
+    .pos-customer-panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    .pos-customer-panel-header h4 {
+        margin: 0;
+        font-size: 16px;
+        color: #111827;
+    }
+    .pos-customer-mode-toggle {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .pos-customer-mode-btn {
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #334155;
+        border-radius: 999px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .pos-customer-mode-btn.active {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+    }
+    #pos-customer-search,
+    #pos-customer-form-fields input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 14px;
+    }
+    .pos-customer-search-results {
+        margin-top: 8px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+        max-height: 220px;
+        overflow-y: auto;
+    }
+    .pos-customer-result {
+        padding: 12px;
+        border-bottom: 1px solid #f1f5f9;
+        cursor: pointer;
+    }
+    .pos-customer-result:last-child {
+        border-bottom: none;
+    }
+    .pos-customer-result:hover {
+        background: #f8fafc;
+    }
+    .pos-customer-result-name {
+        font-weight: 600;
+        color: #111827;
+    }
+    .pos-customer-result-meta {
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 4px;
+    }
+    .pos-customer-help {
+        display: block;
+        margin-top: 8px;
+        color: #64748b;
+        font-size: 12px;
+    }
     .pos-cart-header {
         padding: 20px;
         border-bottom: 2px solid #e5e7eb;
@@ -3433,6 +3799,114 @@ function bntm_pos_shortcode_cashier() {
         font-size: 18px;
         font-weight: 600;
     }
+    
+    /* Receivables & Statement Styles */
+    .bntm-receivables-container,
+    .bntm-statement-container,
+    .bntm-settings-container {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    }
+    
+    .bntm-receivables-container h2,
+    .bntm-statement-container h2,
+    .bntm-settings-container h2 {
+        color: #1f2937;
+        margin-bottom: 20px;
+    }
+    
+    .bntm-table {
+        font-size: 14px;
+    }
+    
+    .bntm-table thead th {
+        background-color: #f3f4f6;
+        color: #1f2937;
+        font-weight: 600;
+        text-align: left;
+        padding: 12px;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .bntm-table tbody td {
+        padding: 12px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .bntm-table tbody tr:hover {
+        background-color: #f9fafb;
+    }
+    
+    .bntm-btn-small {
+        padding: 6px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        transition: all 0.2s;
+    }
+    
+    .bntm-btn-small:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    .bntm-btn-primary {
+        background-color: #3b82f6;
+        color: white;
+    }
+    
+    .bntm-btn-primary:hover {
+        background-color: #2563eb;
+    }
+    
+    .bntm-btn-secondary {
+        background-color: #e5e7eb;
+        color: #1f2937;
+    }
+    
+    .bntm-btn-secondary:hover {
+        background-color: #d1d5db;
+    }
+    
+    .bntm-form-group {
+        margin-bottom: 20px;
+    }
+    
+    .bntm-form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #1f2937;
+        font-size: 14px;
+    }
+    
+    .bntm-form-group input,
+    .bntm-form-group select,
+    .bntm-form-group textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        font-size: 14px;
+        font-family: inherit;
+    }
+    
+    .bntm-form-group input:focus,
+    .bntm-form-group select:focus,
+    .bntm-form-group textarea:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    .bntm-notice {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+    }
     </style>
     
     <script>
@@ -3443,6 +3917,8 @@ function bntm_pos_shortcode_cashier() {
         let cart = [];
         let failedAttempts = 0;
         let isLocked = false;
+        let customerMode = 'search';
+        let customerSearchTimeout = null;
         const MAX_ATTEMPTS = 5;
         const LOCKOUT_TIME = 300000; // 5 minutes in milliseconds
         const PIN_LENGTH = 6;
@@ -3580,6 +4056,7 @@ function bntm_pos_shortcode_cashier() {
                 $('#pos-main-interface').fadeIn(300);
                 $('#pos-cashier-name').text('Cashier: ' + currentUserName);
                 loadQuickProducts();
+                setCustomerMode('search');
                 updateTime();
                 setInterval(updateTime, 1000);
             });
@@ -3599,6 +4076,7 @@ function bntm_pos_shortcode_cashier() {
             pinValue = '';
             failedAttempts = 0;
             isLocked = false;
+            resetCustomerForm();
             updatePinDisplay();
             
             $('#pos-main-interface').fadeOut(300, function() {
@@ -3642,6 +4120,90 @@ function bntm_pos_shortcode_cashier() {
                 });
             });
         }
+
+        function setCustomerMode(mode) {
+            customerMode = mode;
+            $('.pos-customer-mode-btn').removeClass('active');
+            $('.pos-customer-mode-btn[data-mode="' + mode + '"]').addClass('active');
+            $('#pos-customer-search-mode').toggle(mode === 'search');
+
+            if (mode !== 'search') {
+                $('#pos-customer-search-results').hide().empty();
+                $('#pos-customer-id').val('');
+            }
+        }
+
+        function fillCustomer(customer) {
+            $('#pos-customer-id').val(customer.id || '');
+            $('#pos-customer-name').val(customer.name || '');
+            $('#pos-customer-email').val(customer.email || '');
+            $('#pos-customer-contact').val(customer.contact_number || customer.contact || '');
+        }
+
+        function resetCustomerForm() {
+            $('#pos-customer-id').val('');
+            $('#pos-customer-search').val('');
+            $('#pos-customer-name').val('');
+            $('#pos-customer-email').val('');
+            $('#pos-customer-contact').val('');
+            $('#pos-customer-search-results').hide().empty();
+            setCustomerMode('search');
+        }
+
+        $('.pos-customer-mode-btn').on('click', function() {
+            setCustomerMode($(this).data('mode'));
+        });
+
+        $('#pos-customer-search').on('input', function() {
+            clearTimeout(customerSearchTimeout);
+            const query = $(this).val().trim();
+
+            if (query.length < 2) {
+                $('#pos-customer-search-results').hide().empty();
+                return;
+            }
+
+            customerSearchTimeout = setTimeout(function() {
+                $.post(ajaxurl, {
+                    action: 'pos_search_customers',
+                    nonce: posNonce,
+                    user_id: currentUserId,
+                    q: query
+                }).done(function(response) {
+                    if (!response.success || !Array.isArray(response.data) || response.data.length === 0) {
+                        $('#pos-customer-search-results').html('<div class="pos-customer-result"><div class="pos-customer-result-name">No customer found</div><div class="pos-customer-result-meta">Switch to Add New to save this customer to CRM.</div></div>').show();
+                        return;
+                    }
+
+                    $('#pos-customer-search-results').html(response.data.map(customer => `
+                        <div class="pos-customer-result" data-id="${customer.id}" data-name="${customer.name || ''}" data-email="${customer.email || ''}" data-contact="${customer.contact_number || ''}">
+                            <div class="pos-customer-result-name">${customer.name || 'Unnamed Customer'}</div>
+                            <div class="pos-customer-result-meta">${customer.email || 'No email'} ${customer.contact_number ? '• ' + customer.contact_number : ''}</div>
+                        </div>
+                    `).join('')).show();
+                });
+            }, 250);
+        });
+
+        $(document).on('click', '.pos-customer-result', function() {
+            if (!$(this).data('id')) {
+                return;
+            }
+
+            fillCustomer({
+                id: $(this).data('id'),
+                name: $(this).data('name'),
+                email: $(this).data('email'),
+                contact_number: $(this).data('contact')
+            });
+
+            $('#pos-customer-search').val($(this).data('name'));
+            $('#pos-customer-search-results').hide().empty();
+        });
+
+        $('#pos-customer-name, #pos-customer-email, #pos-customer-contact').on('input', function() {
+            $('#pos-customer-id').val('');
+        });
         
         // Product search
         let searchTimeout;
@@ -3785,6 +4347,7 @@ function bntm_pos_shortcode_cashier() {
             if (confirm('Clear all items from cart?')) {
                 cart = [];
                 renderCart();
+                resetCustomerForm();
             }
         });
         
@@ -3884,23 +4447,40 @@ function bntm_pos_shortcode_cashier() {
             }
         });
         
-        // Payment method change in modal
-        $('#modal-payment-method').on('change', function() {
-            const isCash = $(this).val() === 'cash';
-            $('#modal-cash-section').toggle(isCash);
-            $('#modal-noncash-section').toggle(!isCash);
+        function syncPaymentModalState() {
+            const paymentType = $('#modal-payment-type').val();
+            const paymentMethod = $('#modal-payment-method').val();
+            const isPayNow = paymentType === 'pay_now';
+            const isCash = paymentMethod === 'cash' && isPayNow;
+
+            // Show payment method label and select only for Pay Now
+            $('#modal-payment-method').closest('.bntm-form-group').find('label:contains("Payment Method")').toggle(isPayNow);
+            $('#modal-payment-method').toggle(isPayNow);
             
+            // Show/hide appropriate sections
+            $('#modal-pay-later-note').toggle(!isPayNow);
+            $('#modal-cash-section').toggle(isPayNow && isCash);
+            $('#modal-noncash-section').toggle(isPayNow && !isCash);
+            
+            // Reset amount input if not pay_now with cash
             if (!isCash) {
                 $('#modal-amount-input').val('');
                 $('#modal-change-display').text('');
                 $('#modal-numpad-section').hide();
                 $('#toggle-numpad-btn').text('Show Numpad');
             }
-        });
+        }
+
+        $('#modal-payment-type').on('change', syncPaymentModalState);
+        $('#modal-payment-method').on('change', syncPaymentModalState);
         
         // Open payment modal
         $('#pos-complete-sale').on('click', function() {
             if (cart.length === 0) return;
+            if (!$('#pos-customer-name').val().trim()) {
+                alert('Please select or enter a customer before completing the sale.');
+                return;
+            }
             
             const subtotal = parseFloat($('#pos-subtotal').text().replace('₱', ''));
             const discount = parseFloat($('#pos-discount').val()) || 0;
@@ -3916,11 +4496,11 @@ function bntm_pos_shortcode_cashier() {
             // Reset modal
             $('#modal-amount-input').val('');
             $('#modal-change-display').text('');
+            $('#modal-payment-type').val('pay_now');
             $('#modal-payment-method').val('cash');
-            $('#modal-cash-section').show();
-            $('#modal-noncash-section').hide();
             $('#modal-numpad-section').hide();
             $('#toggle-numpad-btn').text('Show Numpad');
+            syncPaymentModalState();
             
             // Show modal
             $('#pos-payment-modal').fadeIn(300);
@@ -3945,12 +4525,24 @@ function bntm_pos_shortcode_cashier() {
         });
         // Confirm payment
 $('#pos-modal-confirm').on('click', function() {
+    const paymentType = $('#modal-payment-type').val();
     const paymentMethod = $('#modal-payment-method').val();
     const total = parseFloat($('#modal-total').text().replace('₱', ''));
-    const amountPaid = paymentMethod === 'cash' ? 
-        (parseFloat($('#modal-amount-input').val()) || 0) : total;
+    const customerName = $('#pos-customer-name').val().trim();
+    const customerEmail = $('#pos-customer-email').val().trim();
+    const customerContact = $('#pos-customer-contact').val().trim();
+    const customerId = $('#pos-customer-id').val();
+    const finalPaymentMethod = paymentType === 'pay_later' ? 'pay_later' : paymentMethod;
+    const amountPaid = paymentType === 'pay_now'
+        ? (finalPaymentMethod === 'cash' ? (parseFloat($('#modal-amount-input').val()) || 0) : total)
+        : 0;
     
-    if (paymentMethod === 'cash' && amountPaid < total) {
+    if (!customerName) {
+        alert('Customer name is required.');
+        return;
+    }
+
+    if (paymentType === 'pay_now' && finalPaymentMethod === 'cash' && amountPaid < total) {
         alert('Insufficient payment amount');
         return;
     }
@@ -3970,9 +4562,14 @@ $('#pos-modal-confirm').on('click', function() {
         discount: $('#pos-discount').val(),
         tax: $('#modal-tax').text().replace('₱', ''),
         total: total,
-        payment_method: paymentMethod,
+        customer_id: customerId,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_contact: customerContact,
+        payment_type: paymentType,
+        payment_method: finalPaymentMethod,
         amount_paid: amountPaid,
-        change_amount: amountPaid - total
+        change_amount: paymentType === 'pay_now' ? amountPaid - total : 0
     })
     .done(function(response) {
         console.log('AJAX Response:', response); // ✅ Log full response
@@ -3981,6 +4578,7 @@ $('#pos-modal-confirm').on('click', function() {
             cart = [];
             renderCart();
             $('#pos-discount').val(0);
+            resetCustomerForm();
             loadQuickProducts();
             closeModal();
         } else {
@@ -4093,9 +4691,43 @@ function bntm_ajax_pos_search_product() {
 }
 add_action('wp_ajax_pos_search_product', 'bntm_ajax_pos_search_product');
 add_action('wp_ajax_nopriv_pos_search_product', 'bntm_ajax_pos_search_product');
+
+function bntm_ajax_pos_search_customers() {
+    check_ajax_referer('pos_nonce', 'nonce');
+
+    $user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : get_current_user_id();
+    if (!$user_id || !pos_user_can_access($user_id)) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $query = sanitize_text_field($_POST['q'] ?? '');
+
+    if ($query === '' || !$wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $customers_table))) {
+        wp_send_json_success([]);
+    }
+
+    $like = '%' . $wpdb->esc_like($query) . '%';
+    $customers = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, name, email, contact_number
+         FROM {$customers_table}
+         WHERE name LIKE %s OR email LIKE %s OR contact_number LIKE %s
+         ORDER BY name ASC
+         LIMIT 10",
+        $like,
+        $like,
+        $like
+    ), ARRAY_A);
+
+    wp_send_json_success($customers ?: []);
+}
+add_action('wp_ajax_pos_search_customers', 'bntm_ajax_pos_search_customers');
+add_action('wp_ajax_nopriv_pos_search_customers', 'bntm_ajax_pos_search_customers');
 // Complete sale
 function bntm_ajax_pos_complete_sale() {
     check_ajax_referer('pos_nonce', 'nonce');
+    pos_ensure_extended_schema();
     
     // Get user ID from POST (from PIN login)
     $user_id = isset($_POST['user_id']) ? intval($_POST['user_id']) : get_current_user_id();
@@ -4121,12 +4753,29 @@ function bntm_ajax_pos_complete_sale() {
     $discount = floatval($_POST['discount']);
     $tax = floatval($_POST['tax']);
     $total = floatval($_POST['total']);
+    $customer_id = intval($_POST['customer_id'] ?? 0);
+    $customer_name = sanitize_text_field($_POST['customer_name'] ?? '');
+    $customer_email = sanitize_email($_POST['customer_email'] ?? '');
+    $customer_contact = sanitize_text_field($_POST['customer_contact'] ?? '');
+    $payment_type = sanitize_text_field($_POST['payment_type'] ?? 'pay_now');
     $payment_method = sanitize_text_field($_POST['payment_method']);
     $amount_paid = floatval($_POST['amount_paid']);
     $change_amount = floatval($_POST['change_amount']);
     
     if (empty($cart)) {
         wp_send_json_error(['message' => 'Cart is empty']);
+    }
+
+    if ($customer_name === '') {
+        wp_send_json_error(['message' => 'Customer name is required']);
+    }
+
+    if (!in_array($payment_type, ['pay_now', 'pay_later'], true)) {
+        $payment_type = 'pay_now';
+    }
+
+    if (!in_array($payment_method, ['cash', 'gcash', 'pay_later'], true)) {
+        $payment_method = $payment_type === 'pay_later' ? 'pay_later' : 'cash';
     }
     
     // Generate transaction number
@@ -4152,11 +4801,26 @@ function bntm_ajax_pos_complete_sale() {
             ));
         }
     }
+
+    $business_id = pos_get_business_id_for_context($business_id ?: $user_id);
+
+    $is_pay_later = $payment_type === 'pay_later';
+    $payment_status = $is_pay_later ? 'unpaid' : 'paid';
+    $paid_amount = $is_pay_later ? 0 : $total;
+    $payable_amount = $is_pay_later ? $total : 0;
+    if (!$is_pay_later && $payment_method === 'cash' && $amount_paid < $total) {
+        wp_send_json_error(['message' => 'Insufficient payment amount']);
+    }
     
     // Start DB transaction
     $wpdb->query('START TRANSACTION');
     
     try {
+        $customer = pos_find_or_create_customer($customer_id, $customer_name, $customer_email, $customer_contact, $business_id);
+        if (!$customer) {
+            throw new Exception('Unable to save customer details.');
+        }
+
         // **VALIDATE STOCK AVAILABILITY FIRST**
         foreach ($cart as $item) {
             $product = $wpdb->get_row($wpdb->prepare(
@@ -4179,16 +4843,24 @@ function bntm_ajax_pos_complete_sale() {
             'transaction_number' => $transaction_number,
             'staff_id' => $user_id,
             'staff_name' => $staff_name,
+            'customer_id' => intval($customer['id'] ?? 0),
+            'customer_name' => $customer['name'] ?? $customer_name,
+            'customer_email' => $customer['email'] ?? $customer_email,
+            'customer_contact' => $customer['contact_number'] ?? $customer_contact,
             'subtotal' => $subtotal,
             'discount' => $discount,
             'tax' => $tax,
             'total' => $total,
+            'payment_type' => $payment_type,
             'payment_method' => $payment_method,
+            'payment_status' => $payment_status,
+            'payable_amount' => $payable_amount,
+            'paid_amount' => $paid_amount,
             'amount_paid' => $amount_paid,
             'change_amount' => $change_amount,
             'status' => 'completed',
             'created_at' => current_time('mysql')
-        ], ['%s', '%s', '%d', '%s', '%f', '%f', '%f', '%f', '%s', '%f', '%f', '%s', '%s']);
+        ], ['%s', '%s', '%d', '%s', '%d', '%s', '%s', '%s', '%f', '%f', '%f', '%f', '%s', '%s', '%s', '%f', '%f', '%f', '%f', '%s', '%s']);
         
         if (!$result) {
             throw new Exception('Failed to create transaction');
@@ -4314,4 +4986,9 @@ function bntm_ajax_pos_complete_sale() {
 }
 add_action('wp_ajax_pos_complete_sale', 'bntm_ajax_pos_complete_sale');
 add_action('wp_ajax_nopriv_pos_complete_sale', 'bntm_ajax_pos_complete_sale');
+
 /* ---------- POS DASHBOARD SHORTCODE ---------- */
+function bntm_shortcode_pos_dashboard() {
+    // TODO: Add POS dashboard implementation
+    return '<div class="bntm-notice">POS Dashboard</div>';
+}

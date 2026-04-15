@@ -24,7 +24,11 @@ function bntm_op_get_pages() {
     return [
         'Online Payments' => '[op_dashboard]',
         'Invoice' => '[op_invoice]',
-        'Payment' => '[op_payment_page]'
+        'Payment' => '[op_payment_page]',
+        'Accounts Receivable' => '[op_receivables]',
+        'Customer Statement' => '[op_customer_statement]',
+        'Transactions' => '[op_payable_transactions]',
+        'Payment Settings' => '[op_payment_settings]'
     ];
 }
 
@@ -137,6 +141,29 @@ function bntm_op_get_tables() {
             INDEX idx_business (business_id),
             INDEX idx_gateway (gateway),
             INDEX idx_active (is_active)
+        ) {$charset};",
+        
+        'op_email_settings' => "CREATE TABLE {$prefix}op_email_settings (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            business_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            sender_name VARCHAR(255) DEFAULT 'Payment System',
+            sender_email VARCHAR(255) NOT NULL,
+            smtp_enabled BOOLEAN DEFAULT 0,
+            smtp_host VARCHAR(255),
+            smtp_port INT DEFAULT 587,
+            smtp_username VARCHAR(255),
+            smtp_password VARCHAR(255),
+            enable_statement_email BOOLEAN DEFAULT 1,
+            statement_email_template LONGTEXT,
+            enable_auto_send BOOLEAN DEFAULT 0,
+            auto_send_frequency VARCHAR(50) DEFAULT 'weekly',
+            auto_send_day_of_week INT DEFAULT 1,
+            auto_send_time TIME DEFAULT '08:00:00',
+            last_auto_send DATETIME,
+            next_auto_send DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_business (business_id)
         ) {$charset};"
     ];
 }
@@ -148,7 +175,11 @@ function bntm_op_get_shortcodes() {
     return [
         'op_dashboard' => 'bntm_shortcode_op_dashboard',
         'op_invoice' => 'bntm_shortcode_op_invoice',
-        'op_payment_page' => 'bntm_shortcode_op_payment_page'
+        'op_payment_page' => 'bntm_shortcode_op_payment_page',
+        'op_receivables' => 'bntm_op_shortcode_receivables',
+        'op_customer_statement' => 'bntm_op_shortcode_customer_statement',
+        'op_payable_transactions' => 'bntm_op_shortcode_payable_transactions',
+        'op_payment_settings' => 'bntm_op_shortcode_settings'
     ];
 }
 
@@ -307,6 +338,8 @@ function bntm_shortcode_op_dashboard() {
             <a href="?tab=invoices" class="bntm-tab <?php echo $active_tab === 'invoices' ? 'active' : ''; ?>">Invoices</a>
             <a href="?tab=import-products" class="bntm-tab <?php echo $active_tab === 'import-products' ? 'active' : ''; ?>">Import Products</a>
             <a href="?tab=payments" class="bntm-tab <?php echo $active_tab === 'payments' ? 'active' : ''; ?>">Payments</a>
+            <a href="?tab=receivables" class="bntm-tab <?php echo $active_tab === 'receivables' ? 'active' : ''; ?>">Customer Payables</a>
+            <a href="?tab=payable-transactions" class="bntm-tab <?php echo $active_tab === 'payable-transactions' ? 'active' : ''; ?>">Payable Transactions</a>
             <?php if (bntm_is_module_enabled('fn') && bntm_is_module_visible('fn')): ?>
             <a href="?tab=import" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">Import Finance</a>
             <?php endif; ?>
@@ -322,6 +355,10 @@ function bntm_shortcode_op_dashboard() {
                 <?php echo op_import_products_tab($business_id); ?>
             <?php elseif ($active_tab === 'payments'): ?>
                 <?php echo op_payments_tab($business_id); ?>
+            <?php elseif ($active_tab === 'receivables'): ?>
+                <?php echo op_customer_payables_tab($business_id); ?>
+            <?php elseif ($active_tab === 'payable-transactions'): ?>
+                <?php echo op_payable_transactions_tab($business_id); ?>
             <?php elseif ($active_tab === 'import'): ?>
                 <?php echo op_import_finance_tab($business_id); ?>
             <?php elseif ($active_tab === 'settings'): ?>
@@ -3865,4 +3902,1460 @@ function op_format_price($amount = '') {
     
     return $symbol . number_format($amount, 2);
 }
+
+function op_get_pos_receivables_summary() {
+    if (function_exists('pos_get_customer_receivables_summary')) {
+        return pos_get_customer_receivables_summary();
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_transactions';
+    $exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table));
+
+    if (!$exists) {
+        return [];
+    }
+
+    return $wpdb->get_results(
+        "SELECT customer_id,
+                COALESCE(NULLIF(customer_name, ''), 'Walk-in Customer') AS customer_name,
+                MAX(customer_email) AS customer_email,
+                MAX(customer_contact) AS customer_contact,
+                COUNT(*) AS total_transactions,
+                COALESCE(SUM(payable_amount), 0) AS total_payables,
+                MAX(created_at) AS last_transaction_at
+         FROM {$table}
+         WHERE payment_status IN ('unpaid', 'partial')
+         GROUP BY customer_id, customer_name
+         ORDER BY total_payables DESC, last_transaction_at DESC"
+    );
+}
+
+function op_get_pos_customer_statement_data($customer_id, $month = '') {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $customer_id = (int) $customer_id;
+
+    if ($customer_id <= 0) {
+        return null;
+    }
+
+    $customer = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$customers_table} WHERE id = %d", $customer_id));
+    if (!$customer) {
+        return null;
+    }
+
+    $rows = function_exists('pos_get_customer_statement_rows')
+        ? pos_get_customer_statement_rows($customer_id, $month)
+        : [];
+
+    $summary = [
+        'month' => preg_match('/^\d{4}-\d{2}$/', $month) ? $month : current_time('Y-m'),
+        'total_sales' => 0,
+        'total_paid' => 0,
+        'total_payables' => 0,
+        'transactions' => count($rows),
+    ];
+
+    foreach ($rows as $row) {
+        $summary['total_sales'] += (float) $row->total;
+        $summary['total_paid'] += (float) $row->paid_amount;
+        $summary['total_payables'] += (float) $row->payable_amount;
+    }
+
+    return [
+        'customer' => $customer,
+        'rows' => $rows,
+        'summary' => $summary,
+    ];
+}
+
+function op_get_pos_payable_transactions($customer_id = 0, $month = '') {
+    global $wpdb;
+    $table = $wpdb->prefix . 'pos_transactions';
+    $exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table));
+
+    if (!$exists) {
+        return [];
+    }
+
+    $where = ["payment_status IN ('unpaid', 'partial')"];
+    $params = [];
+    $customer_id = (int) $customer_id;
+
+    if ($customer_id > 0) {
+        $where[] = "customer_id = %d";
+        $params[] = $customer_id;
+    }
+
+    if ($month !== '' && preg_match('/^\d{4}-\d{2}$/', $month)) {
+        $where[] = "DATE_FORMAT(created_at, '%Y-%m') = %s";
+        $params[] = $month;
+    }
+
+    $sql = "SELECT id, transaction_number, created_at, customer_id, customer_name, customer_email, customer_contact, total, payment_type, payment_method, payment_status, payable_amount, paid_amount
+            FROM {$table}
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY created_at DESC";
+
+    return empty($params)
+        ? $wpdb->get_results($sql)
+        : $wpdb->get_results($wpdb->prepare($sql, ...$params));
+}
+
+function op_render_pos_customer_statement($customer_id, $month = '', $back_url = '') {
+    $data = op_get_pos_customer_statement_data($customer_id, $month);
+
+    if (!$data) {
+        return '<div class="bntm-notice bntm-notice-error">Customer statement not found.</div>';
+    }
+
+    $customer = $data['customer'];
+    $rows = $data['rows'];
+    $summary = $data['summary'];
+    $month_label = date_i18n('F Y', strtotime($summary['month'] . '-01'));
+    $back_url = $back_url ?: add_query_arg(['tab' => 'receivables'], remove_query_arg(['customer_id', 'month']));
+    $statement_link = op_get_customer_statement_url([
+        'customer_id' => (int) $customer_id,
+        'month' => $summary['month']
+    ]);
+    $payment_methods = op_get_active_payment_methods((int) ($customer->business_id ?? 0));
+
+    ob_start();
+    ?>
+    <div class="bntm-statement-container" style="background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px;">
+        <div style="display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
+            <div>
+                <h3 style="margin:0 0 8px 0;">Customer Statement</h3>
+                <div style="color:#6b7280;"><?php echo esc_html($customer->name); ?></div>
+            </div>
+            <a href="<?php echo esc_url($back_url); ?>" class="bntm-btn-secondary">Back to Customers</a>
+        </div>
+
+        <div style="margin-bottom:20px; padding:16px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px;">
+            <div style="font-size:12px; color:#64748b; font-weight:700; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px;">Statement Link</div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <input type="text" value="<?php echo esc_attr($statement_link); ?>" readonly onclick="this.select();" style="flex:1; min-width:260px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff;">
+                <button type="button" class="op-copy-statement-link bntm-btn-secondary" data-link="<?php echo esc_attr($statement_link); ?>">Copy Link</button>
+            </div>
+            <div style="margin-top:8px; font-size:13px; color:#6b7280;">Share this customer statement link directly with the customer.</div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+            <div style="padding:14px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px;">
+                <div style="font-size:12px; color:#1d4ed8; font-weight:600;">Month</div>
+                <div style="font-size:20px; font-weight:700;"><?php echo esc_html($month_label); ?></div>
+            </div>
+            <div style="padding:14px; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:10px;">
+                <div style="font-size:12px; color:#047857; font-weight:600;">Total Sales</div>
+                <div style="font-size:20px; font-weight:700;"><?php echo esc_html(op_format_price($summary['total_sales'])); ?></div>
+            </div>
+            <div style="padding:14px; background:#fef3c7; border:1px solid #fde68a; border-radius:10px;">
+                <div style="font-size:12px; color:#b45309; font-weight:600;">Total Paid</div>
+                <div style="font-size:20px; font-weight:700;"><?php echo esc_html(op_format_price($summary['total_paid'])); ?></div>
+            </div>
+            <div style="padding:14px; background:#fee2e2; border:1px solid #fecaca; border-radius:10px;">
+                <div style="font-size:12px; color:#b91c1c; font-weight:600;">Outstanding</div>
+                <div style="font-size:20px; font-weight:700;"><?php echo esc_html(op_format_price($summary['total_payables'])); ?></div>
+            </div>
+        </div>
+
+        <div class="bntm-table-wrapper">
+            <table class="bntm-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Transaction #</th>
+                        <th>Total</th>
+                        <th>Payment</th>
+                        <th>Status</th>
+                        <th>Outstanding</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($rows)): ?>
+                    <tr><td colspan="6" style="text-align:center;">No transactions found for this month.</td></tr>
+                    <?php else: foreach ($rows as $row): ?>
+                    <tr>
+                        <td><?php echo esc_html(date('M d, Y h:i A', strtotime($row->created_at))); ?></td>
+                        <td>#<?php echo esc_html($row->transaction_number); ?></td>
+                        <td><?php echo esc_html(op_format_price($row->total)); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_type)) . ' / ' . ucfirst(str_replace('_', ' ', $row->payment_method))); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_status))); ?></td>
+                        <td><?php echo esc_html(op_format_price($row->payable_amount)); ?></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="margin-top:20px; border:1px solid #e5e7eb; border-radius:12px; overflow:hidden;">
+            <div style="padding:16px 18px; background:#f8fafc; border-bottom:1px solid #e5e7eb; font-weight:700; color:#0f172a;">Payment Methods</div>
+            <div style="padding:18px;">
+                <?php if (empty($payment_methods)): ?>
+                <div style="color:#6b7280;">No payment methods configured yet.</div>
+                <?php else: foreach ($payment_methods as $method): ?>
+                <?php $config = json_decode($method->config ?? '{}', true); if (!is_array($config)) { $config = []; } ?>
+                <div style="padding:14px 0; border-bottom:1px solid #e5e7eb;">
+                    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+                        <strong><?php echo esc_html($method->name); ?></strong>
+                        <span style="font-size:12px; font-weight:700; text-transform:uppercase; color:#475569;"><?php echo esc_html($method->gateway); ?></span>
+                    </div>
+                    <?php if (!empty($config['instructions'])): ?>
+                    <div style="color:#475569; margin-bottom:6px;"><?php echo nl2br(esc_html($config['instructions'])); ?></div>
+                    <?php endif; ?>
+                    <?php if ($method->gateway === 'manual'): ?>
+                    <?php if (!empty($config['bank_name'])): ?>
+                    <div><strong>Bank:</strong> <?php echo esc_html($config['bank_name']); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($config['account_name'])): ?>
+                    <div><strong>Account Name:</strong> <?php echo esc_html($config['account_name']); ?></div>
+                    <?php endif; ?>
+                    <?php if (!empty($config['account_number'])): ?>
+                    <div><strong>Account Number:</strong> <?php echo esc_html($config['account_number']); ?></div>
+                    <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; endif; ?>
+            </div>
+        </div>
+    </div>
+    <script>
+    jQuery(function($) {
+        $('.op-copy-statement-link').on('click', function() {
+            const link = $(this).data('link') || '';
+            if (!link) {
+                return;
+            }
+
+            navigator.clipboard.writeText(link).then(function() {
+                alert('Statement link copied.');
+            }).catch(function() {
+                alert('Unable to copy the statement link.');
+            });
+        });
+    });
+    </script>
+    <?php
+
+    return ob_get_clean();
+}
+
+function op_customer_payables_tab($business_id) {
+    $selected_month = sanitize_text_field($_GET['month'] ?? current_time('Y-m'));
+    $receivables = op_get_pos_receivables_summary();
+    $statement_email_nonce = wp_create_nonce('op_statement_email');
+    $total_outstanding = 0;
+
+    foreach ($receivables as $row) {
+        $total_outstanding += (float) $row->total_payables;
+    }
+
+    ob_start();
+    ?>
+    <style>
+    .op-table-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .op-table-action-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 118px;
+        padding: 8px 12px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.2;
+        text-decoration: none;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+
+    .op-table-action-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+    }
+
+    .op-table-action-btn:disabled {
+        opacity: 0.7;
+        cursor: wait;
+        transform: none;
+        box-shadow: none;
+    }
+
+    .op-table-action-btn-primary {
+        background: #2563eb;
+        color: #fff;
+    }
+
+    .op-table-action-btn-success {
+        background: #059669;
+        color: #fff;
+    }
+
+    .op-table-action-btn-neutral {
+        background: #334155;
+        color: #fff;
+    }
+
+    @media (max-width: 768px) {
+        .op-table-actions {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .op-table-action-btn {
+            width: 100%;
+            min-width: 0;
+        }
+    }
+    </style>
+    <div class="bntm-form-section">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
+            <div>
+                <h3 style="margin:0;">Customer Payables</h3>
+                <p style="margin:6px 0 0; color:#6b7280;">CRM customers with open payables from POS sales.</p>
+            </div>
+            <div style="font-weight:700; color:#b91c1c;">Total Outstanding: <?php echo esc_html(op_format_price($total_outstanding)); ?></div>
+        </div>
+
+        <div class="bntm-table-wrapper">
+            <table class="bntm-table">
+                <thead>
+                    <tr>
+                        <th>Customer</th>
+                        <th>Contact</th>
+                        <th>Open Transactions</th>
+                        <th>Total Payables</th>
+                        <th>Last Sale</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($receivables)): ?>
+                    <tr><td colspan="6" style="text-align:center;">No outstanding customer payables found.</td></tr>
+                    <?php else: foreach ($receivables as $row): ?>
+                    <tr>
+                        <td><strong><?php echo esc_html($row->customer_name); ?></strong></td>
+                        <td>
+                            <?php echo esc_html($row->customer_email ?: '-'); ?>
+                            <?php if (!empty($row->customer_contact)): ?>
+                            <div style="font-size:12px; color:#6b7280;"><?php echo esc_html($row->customer_contact); ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo intval($row->total_transactions); ?></td>
+                        <td><strong style="color:#b91c1c;"><?php echo esc_html(op_format_price($row->total_payables)); ?></strong></td>
+                        <td><?php echo esc_html(date('M d, Y h:i A', strtotime($row->last_transaction_at))); ?></td>
+                        <td>
+                            <?php if (!empty($row->customer_id)): ?>
+                            <div class="op-table-actions">
+                                <a class="op-table-action-btn op-table-action-btn-primary" href="<?php echo esc_url(op_get_customer_statement_url(['customer_id' => intval($row->customer_id), 'month' => $selected_month])); ?>">View Statement</a>
+                                <button type="button" class="op-table-action-btn op-table-action-btn-neutral op-copy-statement-link-btn" data-link="<?php echo esc_attr(op_get_customer_statement_url(['customer_id' => intval($row->customer_id), 'month' => $selected_month])); ?>">Copy Link</button>
+                                <button type="button" class="op-table-action-btn op-table-action-btn-success op-send-statement-btn" data-customer-id="<?php echo esc_attr(intval($row->customer_id)); ?>" data-customer-name="<?php echo esc_attr($row->customer_name); ?>" data-customer-email="<?php echo esc_attr($row->customer_email); ?>">Send Email</button>
+                                <a class="op-table-action-btn op-table-action-btn-neutral" href="<?php echo esc_url(op_get_payable_transactions_url(['customer_id' => intval($row->customer_id), 'month' => $selected_month])); ?>">View Payables</a>
+                            </div>
+                            <?php else: ?>
+                            <span style="color:#9ca3af;">No linked CRM record</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    jQuery(function($) {
+        const ajaxUrl = '<?php echo esc_js(admin_url('admin-ajax.php')); ?>';
+
+        $('.op-copy-statement-link-btn').on('click', function() {
+            const link = $(this).data('link') || '';
+
+            if (!link) {
+                alert('Statement link not available.');
+                return;
+            }
+
+            navigator.clipboard.writeText(link).then(function() {
+                alert('Statement link copied.');
+            }).catch(function() {
+                alert('Unable to copy statement link.');
+            });
+        });
+
+        $('.op-send-statement-btn').on('click', function() {
+            const button = $(this);
+            const customerId = parseInt(button.data('customer-id'), 10) || 0;
+            const customerName = button.data('customer-name') || 'Customer';
+            const customerEmail = button.data('customer-email') || '';
+
+            if (!customerId) {
+                alert('Customer record not found.');
+                return;
+            }
+
+            if (!customerEmail) {
+                alert('This customer does not have an email address on file.');
+                return;
+            }
+
+            if (!confirm('Send statement email to ' + customerName + '?')) {
+                return;
+            }
+
+            const originalText = button.text();
+            button.prop('disabled', true).text('Sending...');
+
+            $.post(ajaxUrl, {
+                action: 'op_send_statement_email',
+                nonce: '<?php echo esc_js($statement_email_nonce); ?>',
+                customer_id: customerId,
+                month: '<?php echo esc_js($selected_month); ?>'
+            }).done(function(response) {
+                alert(response && response.data && response.data.message ? response.data.message : 'Statement email sent.');
+            }).fail(function() {
+                alert('Failed to send statement email.');
+            }).always(function() {
+                button.prop('disabled', false).text(originalText);
+            });
+        });
+    });
+    </script>
+    <?php
+
+    return ob_get_clean();
+}
+
+function op_payable_transactions_tab($business_id) {
+    $selected_customer_id = intval($_GET['customer_id'] ?? 0);
+    $selected_month = sanitize_text_field($_GET['month'] ?? '');
+    $transactions = op_get_pos_payable_transactions($selected_customer_id, $selected_month);
+
+    ob_start();
+    ?>
+    <div class="bntm-form-section">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
+            <div>
+                <h3 style="margin:0;">Transaction of All Payables</h3>
+                <p style="margin:6px 0 0; color:#6b7280;">All POS transactions that still have unpaid or partial customer balances.</p>
+            </div>
+            <form method="get" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+                <input type="hidden" name="tab" value="payable-transactions">
+                <?php if ($selected_customer_id > 0): ?>
+                <input type="hidden" name="customer_id" value="<?php echo esc_attr($selected_customer_id); ?>">
+                <?php endif; ?>
+                <div>
+                    <label style="display:block; margin-bottom:6px;">Month</label>
+                    <input type="month" name="month" value="<?php echo esc_attr($selected_month); ?>">
+                </div>
+                <button type="submit" class="bntm-btn-primary">Filter</button>
+            </form>
+        </div>
+
+        <div class="bntm-table-wrapper">
+            <table class="bntm-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Transaction #</th>
+                        <th>Customer</th>
+                        <th>Total</th>
+                        <th>Payment Type</th>
+                        <th>Payment Method</th>
+                        <th>Status</th>
+                        <th>Outstanding</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($transactions)): ?>
+                    <tr><td colspan="8" style="text-align:center;">No payable transactions found.</td></tr>
+                    <?php else: foreach ($transactions as $row): ?>
+                    <tr>
+                        <td><?php echo esc_html(date('M d, Y h:i A', strtotime($row->created_at))); ?></td>
+                        <td>#<?php echo esc_html($row->transaction_number); ?></td>
+                        <td>
+                            <strong><?php echo esc_html($row->customer_name ?: 'Walk-in Customer'); ?></strong>
+                            <?php if (!empty($row->customer_email)): ?>
+                            <div style="font-size:12px; color:#6b7280;"><?php echo esc_html($row->customer_email); ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo esc_html(op_format_price($row->total)); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_type))); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_method))); ?></td>
+                        <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_status))); ?></td>
+                        <td><strong style="color:#b91c1c;"><?php echo esc_html(op_format_price($row->payable_amount)); ?></strong></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <?php
+
+    return ob_get_clean();
+}
+
+function bntm_op_shortcode_payable_transactions() {
+    if (!is_user_logged_in()) {
+        return '<div class="bntm-notice">Please log in to view transactions.</div>';
+    }
+
+    return op_payable_transactions_tab(get_current_user_id());
+}
+
+function op_get_statement_email_settings($business_id) {
+    global $wpdb;
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+
+    return $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$settings_table} WHERE business_id = %d LIMIT 1",
+        $business_id
+    ));
+}
+
+function op_get_customer_receivable_record($customer_id, $business_id = 0) {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $transactions_table = $wpdb->prefix . 'pos_transactions';
+
+    $customer_id = (int) $customer_id;
+    $business_id = (int) $business_id;
+
+    if ($customer_id <= 0) {
+        return null;
+    }
+
+    return $wpdb->get_row($wpdb->prepare(
+        "SELECT c.id AS customer_id,
+                c.business_id,
+                c.name AS customer_name,
+                c.email AS customer_email,
+                c.contact_number AS customer_contact,
+                COUNT(p.id) AS total_transactions,
+                COALESCE(SUM(p.payable_amount), 0) AS total_payables,
+                MAX(p.created_at) AS last_transaction_at
+         FROM {$customers_table} c
+         LEFT JOIN {$transactions_table} p
+           ON p.customer_id = c.id
+          AND p.payment_status IN ('unpaid', 'partial')
+         WHERE c.id = %d
+           AND (%d = 0 OR c.business_id = %d)
+         GROUP BY c.id, c.business_id, c.name, c.email, c.contact_number
+         LIMIT 1",
+        $customer_id,
+        $business_id,
+        $business_id
+    ));
+}
+
+function op_get_customers_for_auto_send($business_id) {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $transactions_table = $wpdb->prefix . 'pos_transactions';
+
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT c.id AS customer_id,
+                c.name AS customer_name,
+                c.email AS customer_email,
+                c.contact_number AS customer_contact,
+                COUNT(p.id) AS total_transactions,
+                COALESCE(SUM(p.payable_amount), 0) AS total_payables,
+                MAX(p.created_at) AS last_transaction_at
+         FROM {$customers_table} c
+         INNER JOIN {$transactions_table} p
+           ON p.customer_id = c.id
+          AND p.payment_status IN ('unpaid', 'partial')
+         WHERE c.business_id = %d
+           AND c.email IS NOT NULL
+           AND c.email != ''
+         GROUP BY c.id, c.name, c.email, c.contact_number
+         ORDER BY c.name ASC",
+        $business_id
+    ));
+}
+
+function op_build_customer_statement_email($customer_id, $month = '', $business_id = 0) {
+    $record = op_get_customer_receivable_record($customer_id, $business_id);
+
+    if (!$record) {
+        return new WP_Error('not_found', 'Customer not found.');
+    }
+
+    if (empty($record->customer_email)) {
+        return new WP_Error('missing_email', 'Customer has no email address on file.');
+    }
+
+    $data = op_get_pos_customer_statement_data($customer_id, $month);
+    if (!$data) {
+        return new WP_Error('statement_missing', 'Customer statement not found.');
+    }
+
+    $month_label = $month !== ''
+        ? date_i18n('F Y', strtotime($data['summary']['month'] . '-01'))
+        : 'All Outstanding Payables';
+    $rows = $data['rows'];
+    $summary = $data['summary'];
+
+    $subject = 'Statement of Account - ' . $month_label;
+    $statement_link = op_get_customer_statement_url([
+        'customer_id' => (int) $customer_id,
+        'month' => $summary['month']
+    ]);
+    $body = '<h2>Statement of Account</h2>';
+    $body .= '<p>Dear ' . esc_html($record->customer_name) . ',</p>';
+    $body .= '<p>Here is your customer payable statement for <strong>' . esc_html($month_label) . '</strong>.</p>';
+    $body .= '<p><strong>Total Outstanding:</strong> ' . esc_html(op_format_price($summary['total_payables'])) . '</p>';
+    $body .= '<p><strong>Statement Link:</strong> <a href="' . esc_url($statement_link) . '">' . esc_html($statement_link) . '</a></p>';
+    $body .= '<table style="width:100%; border-collapse:collapse;">';
+    $body .= '<tr style="background:#f3f4f6;">';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:left;">Date</th>';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:left;">Transaction #</th>';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:right;">Total</th>';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:left;">Payment</th>';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:left;">Status</th>';
+    $body .= '<th style="padding:10px; border:1px solid #d1d5db; text-align:right;">Outstanding</th>';
+    $body .= '</tr>';
+
+    if (empty($rows)) {
+        $body .= '<tr><td colspan="6" style="padding:12px; border:1px solid #d1d5db; text-align:center;">No payable transactions for this period.</td></tr>';
+    } else {
+        foreach ($rows as $row) {
+            $body .= '<tr>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db;">' . esc_html(date('M d, Y h:i A', strtotime($row->created_at))) . '</td>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db;">#' . esc_html($row->transaction_number) . '</td>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db; text-align:right;">' . esc_html(op_format_price($row->total)) . '</td>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db;">' . esc_html(ucfirst(str_replace('_', ' ', $row->payment_type)) . ' / ' . ucfirst(str_replace('_', ' ', $row->payment_method))) . '</td>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db;">' . esc_html(ucfirst(str_replace('_', ' ', $row->payment_status))) . '</td>';
+            $body .= '<td style="padding:10px; border:1px solid #d1d5db; text-align:right;">' . esc_html(op_format_price($row->payable_amount)) . '</td>';
+            $body .= '</tr>';
+        }
+    }
+
+    $body .= '</table>';
+    $body .= '<p style="margin-top:20px;">Please settle your outstanding balance at your earliest convenience.</p>';
+
+    return [
+        'customer' => $record,
+        'subject' => $subject,
+        'body' => $body,
+        'summary' => $summary,
+    ];
+}
+
+function op_send_customer_statement_email($customer_id, $month = '', $business_id = 0) {
+    $business_id = (int) $business_id;
+    $email_data = op_build_customer_statement_email($customer_id, $month, $business_id);
+
+    if (is_wp_error($email_data)) {
+        return $email_data;
+    }
+
+    $settings = op_get_statement_email_settings($business_id);
+    $sender_name = $settings->sender_name ?? get_option('blogname', 'Business');
+    $sender_email = $settings->sender_email ?? get_option('admin_email');
+
+    if (empty($sender_email)) {
+        return new WP_Error('missing_sender', 'Email sender not configured. Please check Payment Settings.');
+    }
+
+    $headers = [
+        'Content-Type: text/html; charset=UTF-8',
+        'From: ' . $sender_name . ' <' . $sender_email . '>'
+    ];
+
+    $sent = wp_mail($email_data['customer']->customer_email, $email_data['subject'], $email_data['body'], $headers);
+
+    if (!$sent) {
+        return new WP_Error('send_failed', 'Failed to send email. Please check server mail configuration.');
+    }
+
+    return [
+        'message' => 'Statement email sent to ' . $email_data['customer']->customer_email,
+        'customer' => $email_data['customer'],
+    ];
+}
+
+function op_get_payable_transactions_url($args = []) {
+    $transactions_page = get_page_by_path('transactions');
+
+    if ($transactions_page) {
+        return add_query_arg($args, get_page_link($transactions_page));
+    }
+
+    return add_query_arg(array_merge(['tab' => 'payable-transactions'], $args));
+}
+
+function op_get_customer_statement_url($args = []) {
+    $statement_page = get_page_by_path('customer-statement');
+
+    if (!empty($args['customer_id'])) {
+        $args['token'] = op_get_customer_statement_token((int) $args['customer_id']);
+    }
+
+    if ($statement_page) {
+        return add_query_arg($args, get_page_link($statement_page));
+    }
+
+    return add_query_arg(array_merge(['tab' => 'receivables'], $args));
+}
+
+function op_get_customer_statement_token($customer_id) {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $customer_id = (int) $customer_id;
+
+    if ($customer_id <= 0) {
+        return '';
+    }
+
+    $customer = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, business_id, email FROM {$customers_table} WHERE id = %d LIMIT 1",
+        $customer_id
+    ));
+
+    if (!$customer) {
+        return '';
+    }
+
+    return hash_hmac('sha256', $customer->id . '|' . $customer->business_id . '|' . strtolower((string) $customer->email), wp_salt('auth'));
+}
+
+function op_is_valid_customer_statement_token($customer_id, $token) {
+    $expected = op_get_customer_statement_token($customer_id);
+
+    if ($expected === '' || $token === '') {
+        return false;
+    }
+
+    return hash_equals($expected, (string) $token);
+}
+
+function op_get_active_payment_methods($business_id) {
+    global $wpdb;
+    $methods_table = $wpdb->prefix . 'op_payment_methods';
+
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$methods_table}
+         WHERE business_id = %d AND is_active = 1
+         ORDER BY priority ASC, id ASC",
+        (int) $business_id
+    ));
+}
+
+/* ---------- RECEIVABLES SHORTCODE ---------- */
+function bntm_op_shortcode_receivables() {
+    if (!is_user_logged_in()) {
+        return '<div class="bntm-notice">Please log in to view receivables.</div>';
+    }
+
+    return op_customer_payables_tab(get_current_user_id());
+}
+
+/* ---------- CUSTOMER STATEMENT SHORTCODE ---------- */
+function bntm_op_shortcode_customer_statement() {
+    $customer_id = intval($_GET['customer_id'] ?? 0);
+    $selected_month = sanitize_text_field($_GET['month'] ?? current_time('Y-m'));
+    $token = sanitize_text_field($_GET['token'] ?? '');
+
+    if ($customer_id <= 0) {
+        return '<div class="bntm-notice">No customer selected.</div>';
+    }
+
+    if (!is_user_logged_in() && !op_is_valid_customer_statement_token($customer_id, $token)) {
+        return '<div class="bntm-notice">Please log in to view statements.</div>';
+    }
+
+    return op_render_pos_customer_statement($customer_id, $selected_month, wp_get_referer());
+
+    $user_id = get_current_user_id();
+    $business_id = (int) get_option('bntm_primary_business_id', 0) ?: $user_id;
+    $customer_name = isset($_GET['customer_name']) ? sanitize_text_field($_GET['customer_name']) : '';
+    $selected_month = isset($_GET['month']) ? sanitize_text_field($_GET['month']) : date('Y-m');
+    
+    if (!$customer_name) {
+        return '<div class="bntm-notice">No customer selected.</div>';
+    }
+    
+    global $wpdb;
+    $invoices_table = $wpdb->prefix . 'op_invoices';
+    
+    // Get all invoices for this customer
+    $all_invoices = $wpdb->get_results($wpdb->prepare("
+        SELECT *
+        FROM {$invoices_table}
+        WHERE business_id = %d AND customer_name = %s
+        ORDER BY created_at DESC
+    ", $business_id, $customer_name));
+    
+    // Get invoices for selected month
+    $month_invoices = $wpdb->get_results($wpdb->prepare("
+        SELECT *
+        FROM {$invoices_table}
+        WHERE business_id = %d AND customer_name = %s AND DATE_FORMAT(created_at, '%Y-%m') = %s
+        ORDER BY created_at DESC
+    ", $business_id, $customer_name, $selected_month));
+    
+    // Calculate totals
+    $total_paid = 0;
+    $total_unpaid = 0;
+    foreach ($all_invoices as $invoice) {
+        if ($invoice->payment_status === 'paid') {
+            $total_paid += $invoice->total;
+        } else {
+            $total_unpaid += $invoice->total;
+        }
+    }
+    
+    ob_start();
+    ?>
+    <div class="bntm-statement-container" style="max-width: 900px; margin: 20px auto; padding: 20px;">
+        <div style="margin-bottom: 30px; padding: 20px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <h2 style="margin: 0 0 10px 0;">Statement of Account</h2>
+                    <p style="margin: 0; color: #6b7280;">Customer: <strong><?php echo esc_html($customer_name); ?></strong></p>
+                </div>
+                <div style="text-align: right;">
+                    <p style="margin: 0; font-size: 12px; color: #9ca3af;">Generated: <?php echo date('F d, Y H:i'); ?></p>
+                </div>
+            </div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 30px;">
+            <div style="padding: 15px; background: #dcfce7; border: 1px solid #86efac; border-radius: 8px;">
+                <p style="margin: 0 0 10px 0; font-size: 12px; color: #16a34a; font-weight: 600;">Total Paid</p>
+                <p style="margin: 0; font-size: 24px; font-weight: 700; color: #059669;"><?php echo bntm_format_currency($total_paid, 'PHP'); ?></p>
+            </div>
+            <div style="padding: 15px; background: #fee2e2; border: 1px solid #fecaca; border-radius: 8px;">
+                <p style="margin: 0 0 10px 0; font-size: 12px; color: #991b1b; font-weight: 600;">Outstanding Balance</p>
+                <p style="margin: 0; font-size: 24px; font-weight: 700; color: #dc2626;"><?php echo bntm_format_currency($total_unpaid, 'PHP'); ?></p>
+            </div>
+            <div style="padding: 15px; background: #dbeafe; border: 1px solid #bfdbfe; border-radius: 8px;">
+                <p style="margin: 0 0 10px 0; font-size: 12px; color: #1e40af; font-weight: 600;">Total Invoices</p>
+                <p style="margin: 0; font-size: 24px; font-weight: 700; color: #2563eb;"><?php echo count($all_invoices); ?></p>
+            </div>
+        </div>
+        
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 10px; font-weight: 600;">Filter by Month:</label>
+            <input type="month" value="<?php echo esc_attr($selected_month); ?>" onchange="window.location = window.location.pathname + '?customer_name=<?php echo urlencode($customer_name); ?>&month=' + this.value" style="padding: 10px; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 16px;">
+        </div>
+        
+        <table class="bntm-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f3f4f6; border-bottom: 2px solid #e5e7eb;">
+                    <th style="padding: 12px; text-align: left; font-weight: 600;">Invoice #</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600;">Date</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600;">Amount</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600;">Status</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600;">Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($month_invoices): ?>
+                    <?php foreach ($month_invoices as $invoice): ?>
+                        <tr style="border-bottom: 1px solid #e5e7eb;">
+                            <td style="padding: 12px;"><strong><?php echo esc_html($invoice->reference_number ?: '#INV-' . $invoice->id); ?></strong></td>
+                            <td style="padding: 12px;"><?php echo date('M d, Y H:i', strtotime($invoice->created_at)); ?></td>
+                            <td style="padding: 12px; text-align: right;"><strong><?php echo bntm_format_currency($invoice->total, 'PHP'); ?></strong></td>
+                            <td style="padding: 12px;">
+                                <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; <?php echo $invoice->payment_status === 'paid' ? 'background: #dcfce7; color: #16a34a;' : 'background: #fee2e2; color: #991b1b;'; ?>">
+                                    <?php echo ucfirst($invoice->payment_status); ?>
+                                </span>
+                            </td>
+                            <td style="padding: 12px; text-align: right;">
+                                <?php if ($invoice->payment_status === 'unpaid'): ?>
+                                    <strong style="color: #dc2626;"><?php echo bntm_format_currency($invoice->total, 'PHP'); ?></strong>
+                                <?php else: ?>
+                                    <span style="color: #6b7280;">0.00</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="5" style="padding: 20px; text-align: center; color: #9ca3af;">No invoices for <?php echo date('F Y', strtotime($selected_month . '-01')); ?></td>
+                    </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+        
+        <div style="margin-top: 30px;">
+            <a href="<?php echo wp_get_referer(); ?>" class="bntm-btn-secondary" style="padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">← Back to Receivables</a>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- PAYMENT SETTINGS SHORTCODE ---------- */
+function bntm_op_shortcode_settings() {
+    if (!is_user_logged_in()) {
+        return '<div class="bntm-notice">Please log in to access settings.</div>';
+    }
+
+    $user_id = get_current_user_id();
+    $business_id = (int) get_option('bntm_primary_business_id', 0) ?: $user_id;
+    
+    global $wpdb;
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+    
+    // Handle form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['op_email_save'])) {
+        check_admin_referer('op_email_settings', 'op_nonce');
+        
+        // Get or create settings
+        $existing = $wpdb->get_row($wpdb->prepare("
+            SELECT id FROM {$settings_table}
+            WHERE business_id = %d
+            LIMIT 1
+        ", $business_id));
+        
+        $sender_name = sanitize_text_field($_POST['sender_name'] ?? 'Payment System');
+        $sender_email = sanitize_email($_POST['sender_email'] ?? '');
+        $enable_auto_send = isset($_POST['enable_auto_send']) ? 1 : 0;
+        $auto_send_frequency = sanitize_text_field($_POST['auto_send_frequency'] ?? 'weekly');
+        $auto_send_day_of_week = intval($_POST['auto_send_day_of_week'] ?? 1);
+        $auto_send_day_of_month = intval($_POST['auto_send_day_of_month'] ?? 1);
+        $auto_send_day_value = $auto_send_frequency === 'monthly'
+            ? max(1, min(28, $auto_send_day_of_month))
+            : max(0, min(6, $auto_send_day_of_week));
+        $auto_send_time = sanitize_text_field($_POST['auto_send_time'] ?? '08:00:00');
+        
+        if (empty($sender_email)) {
+            $sender_email = get_option('admin_email');
+        }
+        
+        $data = [
+            'sender_name' => $sender_name,
+            'sender_email' => $sender_email,
+            'enable_statement_email' => isset($_POST['enable_statement_email']) ? 1 : 0,
+            'enable_auto_send' => $enable_auto_send,
+            'auto_send_frequency' => $auto_send_frequency,
+            'auto_send_day_of_week' => $auto_send_day_value,
+            'auto_send_time' => $auto_send_time,
+            'updated_at' => current_time('mysql')
+        ];
+        
+        if ($existing) {
+            $wpdb->update($settings_table, $data, ['id' => $existing->id]);
+        } else {
+            $data['business_id'] = $business_id;
+            $data['created_at'] = current_time('mysql');
+            $wpdb->insert($settings_table, $data);
+        }
+        
+        // Schedule next auto-send if enabled
+        if ($enable_auto_send) {
+            bntm_schedule_auto_send($business_id, $auto_send_frequency, $auto_send_day_value, $auto_send_time);
+        }
+        
+        echo '<div class="bntm-notice" style="background: #dcfce7; border: 1px solid #86efac; color: #16a34a; padding: 12px; border-radius: 6px; margin-bottom: 20px;">Settings saved successfully!</div>';
+    }
+    
+    // Get current settings
+    $settings = $wpdb->get_row($wpdb->prepare("
+        SELECT * FROM {$settings_table}
+        WHERE business_id = %d
+        LIMIT 1
+    ", $business_id));
+    
+    $sender_name = $settings->sender_name ?? 'Payment System';
+    $sender_email = $settings->sender_email ?? get_option('admin_email');
+    $enable_statement_email = $settings->enable_statement_email ?? 1;
+    $enable_auto_send = $settings->enable_auto_send ?? 0;
+    $auto_send_frequency = $settings->auto_send_frequency ?? 'weekly';
+    $auto_send_day_of_week = $settings->auto_send_day_of_week ?? 1;
+    $auto_send_day_of_month = max(1, min(28, intval($settings->auto_send_day_of_week ?? 1)));
+    $auto_send_time = $settings->auto_send_time ?? '08:00:00';
+    $next_auto_send = $settings->next_auto_send ?? 'Not scheduled';
+    
+    ob_start();
+    ?>
+    <div class="bntm-settings-container" style="max-width: 700px; margin: 20px auto; padding: 20px;">
+        <h2>Payment Email Settings</h2>
+        
+        <form method="POST" style="background: #f9fafb; padding: 20px; border-radius: 8px; border: 1px solid #e5e7eb;">
+            <?php wp_nonce_field('op_email_settings', 'op_nonce'); ?>
+            
+            <!-- MANUAL EMAIL SECTION -->
+            <div style="margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #e5e7eb;">
+                <h3 style="margin-top: 0;">Manual Email Settings</h3>
+                
+                <div class="bntm-form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Email Sender Name</label>
+                    <input type="text" name="sender_name" value="<?php echo esc_attr($sender_name); ?>" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;" placeholder="Your Company Name">
+                    <small style="color: #6b7280; display: block; margin-top: 5px;">This name will appear in the email "From" field</small>
+                </div>
+                
+                <div class="bntm-form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; font-weight: 600; margin-bottom: 8px;">Email Address</label>
+                    <input type="email" name="sender_email" value="<?php echo esc_attr($sender_email); ?>" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;" required>
+                    <small style="color: #6b7280; display: block; margin-top: 5px;">The email address used to send statements and notifications</small>
+                </div>
+                
+                <div class="bntm-form-group" style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" name="enable_statement_email" value="1" <?php checked($enable_statement_email, 1); ?> style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                        <span style="font-weight: 600;">Enable Manual Statement Email</span>
+                    </label>
+                    <small style="color: #6b7280; display: block; margin-top: 5px;">Allow sending statement emails manually from the Receivables section</small>
+                </div>
+            </div>
+            
+            <!-- AUTOMATED EMAIL SECTION -->
+            <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 2px solid #e5e7eb;">
+                <h3 style="margin-top: 0;">Automated Email Scheduling</h3>
+                
+                <div class="bntm-form-group" style="margin-bottom: 20px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enable_auto_send" name="enable_auto_send" value="1" <?php checked($enable_auto_send, 1); ?> style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                        <span style="font-weight: 600;">Enable Automatic Customer Statement Emails</span>
+                    </label>
+                    <small style="color: #6b7280; display: block; margin-top: 5px;">Automatically send statements to customers with outstanding balances</small>
+                </div>
+                
+                <div id="auto_send_options" style="<?php echo $enable_auto_send ? '' : 'display: none;'; ?> background: #f0fdf4; padding: 15px; border-radius: 6px; border: 1px solid #86efac;">
+                    <div class="bntm-form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px;">Send Frequency</label>
+                        <select name="auto_send_frequency" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                            <option value="daily" <?php selected($auto_send_frequency, 'daily'); ?>>Daily</option>
+                            <option value="weekly" <?php selected($auto_send_frequency, 'weekly'); ?>>Weekly</option>
+                            <option value="monthly" <?php selected($auto_send_frequency, 'monthly'); ?>>Monthly</option>
+                        </select>
+                    </div>
+                    
+                    <div id="weekly_options" style="<?php echo $auto_send_frequency === 'weekly' ? '' : 'display: none;'; ?>" class="bntm-form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px;">Day of Week</label>
+                        <select name="auto_send_day_of_week" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                            <option value="0" <?php selected($auto_send_day_of_week, 0); ?>>Sunday</option>
+                            <option value="1" <?php selected($auto_send_day_of_week, 1); ?>>Monday</option>
+                            <option value="2" <?php selected($auto_send_day_of_week, 2); ?>>Tuesday</option>
+                            <option value="3" <?php selected($auto_send_day_of_week, 3); ?>>Wednesday</option>
+                            <option value="4" <?php selected($auto_send_day_of_week, 4); ?>>Thursday</option>
+                            <option value="5" <?php selected($auto_send_day_of_week, 5); ?>>Friday</option>
+                            <option value="6" <?php selected($auto_send_day_of_week, 6); ?>>Saturday</option>
+                        </select>
+                    </div>
+
+                    <div id="monthly_options" style="<?php echo $auto_send_frequency === 'monthly' ? '' : 'display: none;'; ?>" class="bntm-form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px;">Day of Month</label>
+                        <input type="number" name="auto_send_day_of_month" min="1" max="28" value="<?php echo esc_attr($auto_send_day_of_month); ?>" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                        <small style="color: #6b7280; display: block; margin-top: 5px;">Choose 1 to 28 so the schedule works every month.</small>
+                    </div>
+                    
+                    <div class="bntm-form-group" style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px;">Send Time</label>
+                        <input type="time" name="auto_send_time" value="<?php echo esc_attr($auto_send_time); ?>" style="width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 14px;">
+                        <small style="color: #6b7280; display: block; margin-top: 5px;">Emails will be sent at this time (server timezone)</small>
+                    </div>
+                    
+                    <div style="background: white; padding: 12px; border-radius: 6px; margin-top: 15px;">
+                        <p style="margin: 0; color: #059669; font-weight: 600;">Next scheduled send:</p>
+                        <p style="margin: 5px 0 0 0; font-size: 14px; color: #111827;"><?php echo $next_auto_send instanceof DateTime ? $next_auto_send->format('M d, Y @ h:i A') : $next_auto_send; ?></p>
+                    </div>
+                </div>
+                
+                <div style="background: #fef3c7; border: 1px solid #fde047; padding: 12px; border-radius: 6px; margin-top: 15px;">
+                    <p style="margin: 0; color: #92400e; font-weight: 600;">ℹ️ How it works</p>
+                    <ul style="margin: 5px 0 0 0; padding-left: 20px; color: #b45309; font-size: 13px;">
+                        <li>Each scheduled run sends to all customers with open payables</li>
+                        <li>Each customer receives one email regardless of invoice count</li>
+                        <li>Emails contain the customer's payable transactions and statement summary</li>
+                        <li>Requires WordPress to run (schedule needs WP-Cron or similar)</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+                <p style="margin: 0; color: #16a34a; font-weight: 600;">✓ Email Features</p>
+                <ul style="margin: 10px 0 0 0; padding-left: 20px; color: #059669; font-size: 14px;">
+                    <li>Statements sent as HTML formatted emails</li>
+                    <li>Includes all outstanding payable transactions</li>
+                    <li>Manual send from Receivables section anytime</li>
+                    <li>Automatic scheduled sends (when enabled)</li>
+                </ul>
+            </div>
+            
+            <button type="submit" name="op_email_save" class="bntm-btn-primary" style="background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; width: 100%; font-size: 16px;">
+                Save Settings
+            </button>
+        </form>
+        
+        <div style="margin-top: 20px; padding: 15px; background: #fef3c7; border: 1px solid #fde047; border-radius: 6px;">
+            <p style="margin: 0; color: #92400e; font-weight: 600;">ℹ️ Note</p>
+            <p style="margin: 5px 0 0 0; color: #b45309; font-size: 14px;">WordPress uses your server's mail configuration to send emails. Ensure your email settings are properly configured.</p>
+        </div>
+    </div>
+    
+    <script>
+    jQuery(document).ready(function($) {
+        function syncAutoSendOptions() {
+            const frequency = $('select[name="auto_send_frequency"]').val();
+            $('#weekly_options').toggle(frequency === 'weekly');
+            $('#monthly_options').toggle(frequency === 'monthly');
+        }
+
+        $('#enable_auto_send').on('change', function() {
+            $('#auto_send_options').toggle(this.checked);
+        });
+        
+        $('select[name="auto_send_frequency"]').on('change', function() {
+            syncAutoSendOptions();
+        });
+
+        syncAutoSendOptions();
+    });
+    </script>
+    <?php
+    return ob_get_clean();
+}
+
+/* ---------- AJAX: SEND STATEMENT EMAIL ---------- */
+function bntm_ajax_op_send_statement_email() {
+    check_ajax_referer('op_statement_email', 'nonce');
+    
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $customer_id = intval($_POST['customer_id'] ?? 0);
+    $month = sanitize_text_field($_POST['month'] ?? current_time('Y-m'));
+    $user_id = get_current_user_id();
+    $business_id = (int) get_option('bntm_primary_business_id', 0) ?: $user_id;
+
+    if ($customer_id > 0) {
+        $result = op_send_customer_statement_email($customer_id, $month, $business_id);
+
+        if (is_wp_error($result)) {
+            wp_send_json_error(['message' => $result->get_error_message()]);
+        }
+
+        wp_send_json_success(['message' => $result['message']]);
+    }
+    
+    $customer_name = sanitize_text_field($_POST['customer_name'] ?? '');
+    
+    if (!$customer_name) {
+        wp_send_json_error(['message' => 'Invalid customer name']);
+    }
+    
+    global $wpdb;
+    $invoices_table = $wpdb->prefix . 'op_invoices';
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+    
+    // Get customer info and invoices
+    $customer_invoices = $wpdb->get_results($wpdb->prepare("
+        SELECT * FROM {$invoices_table}
+        WHERE business_id = %d AND customer_name = %s AND payment_status = 'unpaid'
+        ORDER BY created_at DESC
+    ", $business_id, $customer_name));
+    
+    if (empty($customer_invoices)) {
+        wp_send_json_error(['message' => 'No unpaid invoices found for this customer']);
+    }
+    
+    $customer_email = $customer_invoices[0]->customer_email;
+    
+    if (empty($customer_email)) {
+        wp_send_json_error(['message' => 'Customer email not found']);
+    }
+    
+    // Get email settings
+    $settings = $wpdb->get_row($wpdb->prepare("
+        SELECT * FROM {$settings_table}
+        WHERE business_id = %d
+        LIMIT 1
+    ", $business_id));
+    
+    $sender_name = $settings->sender_name ?? get_option('blogname', 'Business');
+    $sender_email = $settings->sender_email ?? get_option('admin_email');
+    
+    if (empty($sender_email)) {
+        wp_send_json_error(['message' => 'Email sender not configured. Please check Payment Settings.']);
+    }
+    
+    $total_payable = 0;
+    foreach ($customer_invoices as $invoice) {
+        $total_payable += $invoice->total;
+    }
+    
+    // Format currency helper
+    $currency_symbol = '₱';
+    
+    // Build email content
+    $email_subject = 'Your Statement of Account - ' . $customer_name;
+    $email_body = "<h2>Statement of Account</h2>";
+    $email_body .= "<p>Dear " . esc_html($customer_name) . ",</p>";
+    $email_body .= "<p>Please find below your outstanding account balances:</p>";
+    $email_body .= "<h3>Outstanding Balance: " . $currency_symbol . number_format($total_payable, 2) . "</h3>";
+    $email_body .= "<table style='width: 100%; border-collapse: collapse;'>";
+    $email_body .= "<tr style='background: #f0f0f0;'><th style='padding: 10px; border: 1px solid #ddd;'>Invoice #</th><th style='padding: 10px; border: 1px solid #ddd;'>Date</th><th style='padding: 10px; border: 1px solid #ddd;'>Amount</th><th style='padding: 10px; border: 1px solid #ddd;'>Balance</th></tr>";
+    
+    foreach ($customer_invoices as $invoice) {
+        $email_body .= "<tr>";
+        $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . esc_html($invoice->reference_number ?: '#INV-' . $invoice->id) . "</td>";
+        $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . date('M d, Y', strtotime($invoice->created_at)) . "</td>";
+        $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . $currency_symbol . number_format((float)$invoice->total, 2) . "</td>";
+        $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . $currency_symbol . number_format((float)$invoice->total, 2) . "</td>";
+        $email_body .= "</tr>";
+    }
+    
+    $email_body .= "</table>";
+    $email_body .= "<p style='margin-top: 20px;'>Please settle your outstanding balance at your earliest convenience.</p>";
+    $email_body .= "<p>Thank you for your business!</p>";
+    
+    // Set headers for HTML email with proper From address
+    $headers = array(
+        'Content-Type: text/html; charset=UTF-8',
+        'From: ' . $sender_name . ' <' . $sender_email . '>'
+    );
+    
+    // Send email with error logging
+    $sent = wp_mail($customer_email, $email_subject, $email_body, $headers);
+    
+    if ($sent) {
+        wp_send_json_success(['message' => 'Email sent successfully to ' . $customer_email]);
+    } else {
+        error_log("BNTM Payment Email Failed - Customer: $customer_name, Email: $customer_email, Sender: $sender_email");
+        wp_send_json_error(['message' => 'Failed to send email. Please check server mail configuration or contact administrator.']);
+    }
+}
+add_action('wp_ajax_op_send_statement_email', 'bntm_ajax_op_send_statement_email');
+add_action('wp_ajax_nopriv_op_send_statement_email', 'bntm_ajax_op_send_statement_email');
+
+/* ---------- AUTOMATED EMAIL SCHEDULING ---------- */
+function bntm_schedule_auto_send($business_id, $frequency = 'weekly', $day_of_week = 1, $time = '08:00:00') {
+    global $wpdb;
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+    
+    $next_send = bntm_calculate_next_send_time($frequency, $day_of_week, $time);
+    
+    $wpdb->update(
+        $settings_table,
+        ['next_auto_send' => $next_send->format('Y-m-d H:i:s')],
+        ['business_id' => $business_id],
+        ['%s'],
+        ['%d']
+    );
+    
+    // Schedule WP-Cron event if not already scheduled
+    if (!wp_next_scheduled('bntm_send_auto_statements')) {
+        wp_schedule_event(time(), 'hourly', 'bntm_send_auto_statements');
+    }
+}
+
+function bntm_calculate_next_send_time($frequency, $day_of_week = 1, $time = '08:00:00') {
+    $time_parts = explode(':', $time);
+    $hour = intval($time_parts[0] ?? 8);
+    $minute = intval($time_parts[1] ?? 0);
+    $second = intval($time_parts[2] ?? 0);
+    
+    $now = new DateTime('now', wp_timezone_get());
+    $next = new DateTime('now', wp_timezone_get());
+    $next->setTime($hour, $minute, $second);
+    
+    if ($frequency === 'daily') {
+        if ($next <= $now) {
+            $next->modify('+1 day');
+        }
+    } elseif ($frequency === 'weekly') {
+        $current_day = intval($now->format('w'));
+        $days_ahead = $day_of_week - $current_day;
+        
+        if ($days_ahead <= 0) {
+            $days_ahead += 7;
+        }
+        
+        $next->modify("+$days_ahead days");
+        
+        if ($days_ahead === 0 && $next <= $now) {
+            $next->modify('+7 days');
+        }
+    } elseif ($frequency === 'monthly') {
+        $target_day = max(1, min(28, intval($day_of_week)));
+        $next->setDate((int) $now->format('Y'), (int) $now->format('n'), $target_day);
+
+        if ($next <= $now) {
+            $next->modify('first day of next month');
+            $next->setDate((int) $next->format('Y'), (int) $next->format('n'), $target_day);
+        }
+    }
+    
+    return $next;
+}
+
+function bntm_send_auto_statements() {
+    global $wpdb;
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+    $invoices_table = $wpdb->prefix . 'op_invoices';
+
+    $now = current_time('mysql');
+    $settings_list = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$settings_table}
+        WHERE enable_auto_send = 1 AND next_auto_send <= %s
+        ORDER BY next_auto_send ASC",
+        $now
+    ));
+
+    if (empty($settings_list)) {
+        return;
+    }
+
+    foreach ($settings_list as $settings) {
+        $sender_email = $settings->sender_email ?? get_option('admin_email');
+
+        if (empty($sender_email)) {
+            error_log("BNTM Auto-Send: Skipping business {$settings->business_id} - no sender email configured");
+            bntm_reschedule_auto_send($settings);
+            continue;
+        }
+
+        $sent_count = 0;
+        $failed_count = 0;
+        $customers = op_get_customers_for_auto_send((int) $settings->business_id);
+
+        foreach ($customers as $customer) {
+            $result = op_send_customer_statement_email((int) $customer->customer_id, '', (int) $settings->business_id);
+
+            if (is_wp_error($result)) {
+                $failed_count++;
+                error_log("BNTM Auto-Send Failed: Customer {$customer->customer_name} ({$customer->customer_email})");
+            } else {
+                $sent_count++;
+            }
+        }
+
+        error_log("BNTM Auto-Send completed for business {$settings->business_id}: $sent_count sent, $failed_count failed");
+        bntm_reschedule_auto_send($settings);
+    }
+
+    return;
+    
+    // Get all enabled auto-send settings ready to run
+    $now = current_time('mysql');
+    $settings_list = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$settings_table}
+        WHERE enable_auto_send = 1 AND next_auto_send <= %s
+        ORDER BY next_auto_send ASC",
+        $now
+    ));
+    
+    if (empty($settings_list)) {
+        return;
+    }
+    
+    foreach ($settings_list as $settings) {
+        // Get all customers with unpaid invoices
+        $customers = $wpdb->get_results($wpdb->prepare(
+            "SELECT DISTINCT customer_name, customer_email
+            FROM {$invoices_table}
+            WHERE business_id = %d AND payment_status = 'unpaid' AND customer_email IS NOT NULL AND customer_email != ''
+            ORDER BY customer_name",
+            $settings->business_id
+        ));
+        
+        $sender_name = $settings->sender_name ?? get_option('blogname', 'Business');
+        $sender_email = $settings->sender_email ?? get_option('admin_email');
+        
+        if (empty($sender_email)) {
+            error_log("BNTM Auto-Send: Skipping business {$settings->business_id} - no sender email configured");
+            bntm_reschedule_auto_send($settings);
+            continue;
+        }
+        
+        $sent_count = 0;
+        $failed_count = 0;
+        
+        foreach ($customers as $customer) {
+            // Get unpaid invoices for this customer
+            $invoices = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM {$invoices_table}
+                WHERE business_id = %d AND customer_name = %s AND payment_status = 'unpaid'
+                ORDER BY created_at DESC",
+                $settings->business_id,
+                $customer->customer_name
+            ));
+            
+            if (empty($invoices)) {
+                continue;
+            }
+            
+            // Calculate total payable
+            $total_payable = array_sum(array_column($invoices, 'total'));
+            
+            // Build email
+            $email_subject = 'Your Statement of Account - ' . $customer->customer_name;
+            $email_body = "<h2>Statement of Account</h2>";
+            $email_body .= "<p>Dear " . esc_html($customer->customer_name) . ",</p>";
+            $email_body .= "<p>Please find below your outstanding account balances:</p>";
+            $email_body .= "<h3>Outstanding Balance: ₱" . number_format($total_payable, 2) . "</h3>";
+            $email_body .= "<table style='width: 100%; border-collapse: collapse;'>";
+            $email_body .= "<tr style='background: #f0f0f0;'><th style='padding: 10px; border: 1px solid #ddd;'>Invoice #</th><th style='padding: 10px; border: 1px solid #ddd;'>Date</th><th style='padding: 10px; border: 1px solid #ddd;'>Amount</th></tr>";
+            
+            foreach ($invoices as $invoice) {
+                $email_body .= "<tr>";
+                $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . esc_html($invoice->reference_number ?: '#INV-' . $invoice->id) . "</td>";
+                $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>" . date('M d, Y', strtotime($invoice->created_at)) . "</td>";
+                $email_body .= "<td style='padding: 10px; border: 1px solid #ddd;'>₱" . number_format($invoice->total, 2) . "</td>";
+                $email_body .= "</tr>";
+            }
+            
+            $email_body .= "</table>";
+            $email_body .= "<p style='margin-top: 20px;'>Please settle your outstanding balance at your earliest convenience.</p>";
+            $email_body .= "<p>Thank you for your business!</p>";
+            
+            // Send email
+            $headers = array(
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . $sender_name . ' <' . $sender_email . '>'
+            );
+            
+            if (wp_mail($customer->customer_email, $email_subject, $email_body, $headers)) {
+                $sent_count++;
+            } else {
+                $failed_count++;
+                error_log("BNTM Auto-Send Failed: Customer {$customer->customer_name} ({$customer->customer_email})");
+            }
+        }
+        
+        // Log the send
+        error_log("BNTM Auto-Send completed for business {$settings->business_id}: $sent_count sent, $failed_count failed");
+        
+        // Reschedule next send
+        bntm_reschedule_auto_send($settings);
+    }
+}
+
+function bntm_reschedule_auto_send($settings) {
+    $next_send = bntm_calculate_next_send_time(
+        $settings->auto_send_frequency ?? 'weekly',
+        $settings->auto_send_day_of_week ?? 1,
+        $settings->auto_send_time ?? '08:00:00'
+    );
+    
+    global $wpdb;
+    $settings_table = $wpdb->prefix . 'op_email_settings';
+    
+    $wpdb->update(
+        $settings_table,
+        [
+            'last_auto_send' => current_time('mysql'),
+            'next_auto_send' => $next_send->format('Y-m-d H:i:s')
+        ],
+        ['id' => $settings->id],
+        ['%s', '%s'],
+        ['%d']
+    );
+}
+
+add_action('bntm_send_auto_statements', 'bntm_send_auto_statements');
+
 ?>

@@ -736,11 +736,7 @@ return ob_get_clean();
 function crm_customers_tab($business_id) {
     global $wpdb;
     $customers_table = $wpdb->prefix . 'crm_customers';
-    
-    $customers = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM $customers_table  ORDER BY created_at DESC",
-        $business_id
-    ));
+    $customers = $wpdb->get_results("SELECT * FROM {$customers_table} ORDER BY created_at DESC");
  
     
    // Get current customer count
@@ -1060,6 +1056,7 @@ function crm_customers_tab($business_id) {
                 });
             });
         });
+
     })();
     </script>
     <?php
@@ -1674,6 +1671,155 @@ function bntm_ajax_crm_save_pipeline_stages() {
     wp_send_json_success(['message' => 'Pipeline stages saved successfully!']);
 }
 
+/* STATEMENT FUNCTIONS MOVED TO PAYMENT MODULE */
+/*
+function crm_get_customer_statement_data($customer_id, $month = '') {
+    global $wpdb;
+    $customers_table = $wpdb->prefix . 'crm_customers';
+    $customer = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$customers_table} WHERE id = %d", $customer_id));
+
+    if (!$customer) {
+        return null;
+    }
+
+    $rows = function_exists('pos_get_customer_statement_rows')
+        ? pos_get_customer_statement_rows($customer_id, $month)
+        : [];
+
+    $summary = [
+        'month' => $month !== '' ? $month : current_time('Y-m'),
+        'total_sales' => 0,
+        'total_paid' => 0,
+        'total_payables' => 0,
+        'transactions' => count($rows),
+    ];
+
+    foreach ($rows as $row) {
+        $summary['total_sales'] += (float) $row->total;
+        $summary['total_paid'] += (float) $row->paid_amount;
+        $summary['total_payables'] += (float) $row->payable_amount;
+    }
+
+    return [
+        'customer' => $customer,
+        'rows' => $rows,
+        'summary' => $summary,
+    ];
+}
+
+function crm_render_customer_statement_html($customer_id, $month = '') {
+    $data = crm_get_customer_statement_data($customer_id, $month);
+    if (!$data) {
+        return '<div class="bntm-notice bntm-notice-error">Customer not found.</div>';
+    }
+
+    $customer = $data['customer'];
+    $rows = $data['rows'];
+    $summary = $data['summary'];
+    $month_label = date_i18n('F Y', strtotime($summary['month'] . '-01'));
+
+    ob_start();
+    ?>
+    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:16px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px;">
+            <div><strong>Customer</strong><div><?php echo esc_html($customer->name); ?></div></div>
+            <div><strong>Month</strong><div><?php echo esc_html($month_label); ?></div></div>
+            <div><strong>Total Sales</strong><div><?php echo esc_html(crm_format_price($summary['total_sales'])); ?></div></div>
+            <div><strong>Total Paid</strong><div><?php echo esc_html(crm_format_price($summary['total_paid'])); ?></div></div>
+            <div><strong>Total Payables</strong><div><?php echo esc_html(crm_format_price($summary['total_payables'])); ?></div></div>
+        </div>
+    </div>
+
+    <div class="bntm-table-wrapper">
+        <table class="bntm-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Transaction #</th>
+                    <th>Total</th>
+                    <th>Payment Type</th>
+                    <th>Method</th>
+                    <th>Status</th>
+                    <th>Outstanding</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (empty($rows)): ?>
+                <tr><td colspan="7" style="text-align:center;">No transactions for this month.</td></tr>
+                <?php else: foreach ($rows as $row): ?>
+                <tr>
+                    <td><?php echo esc_html(date('M d, Y h:i A', strtotime($row->created_at))); ?></td>
+                    <td>#<?php echo esc_html($row->transaction_number); ?></td>
+                    <td><?php echo esc_html(crm_format_price($row->total)); ?></td>
+                    <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_type))); ?></td>
+                    <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_method))); ?></td>
+                    <td><?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_status))); ?></td>
+                    <td><?php echo esc_html(crm_format_price($row->payable_amount)); ?></td>
+                </tr>
+                <?php endforeach; endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+function bntm_ajax_crm_get_customer_statement() {
+    check_ajax_referer('crm_nonce', 'nonce');
+
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $customer_id = intval($_POST['customer_id'] ?? 0);
+    $month = sanitize_text_field($_POST['month'] ?? '');
+    wp_send_json_success(['html' => crm_render_customer_statement_html($customer_id, $month)]);
+}
+
+function bntm_ajax_crm_send_customer_statement() {
+    check_ajax_referer('crm_nonce', 'nonce');
+
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+
+    $customer_id = intval($_POST['customer_id'] ?? 0);
+    $month = sanitize_text_field($_POST['month'] ?? '');
+    $data = crm_get_customer_statement_data($customer_id, $month);
+
+    if (!$data) {
+        wp_send_json_error(['message' => 'Customer not found']);
+    }
+
+    $customer = $data['customer'];
+    if (empty($customer->email)) {
+        wp_send_json_error(['message' => 'Customer has no email address on file']);
+    }
+
+    $month_key = $data['summary']['month'];
+    $month_label = date_i18n('F Y', strtotime($month_key . '-01'));
+    $subject_template = bntm_get_setting('crm_statement_email_subject', 'Statement of Account - {month}');
+    $subject = str_replace('{month}', $month_label, $subject_template);
+    $from_email = bntm_get_setting('crm_statement_sender_email', get_option('admin_email'));
+    $headers = ['Content-Type: text/html; charset=UTF-8'];
+    if (!empty($from_email)) {
+        $headers[] = 'From: ' . wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES) . ' <' . sanitize_email($from_email) . '>';
+        $headers[] = 'Reply-To: ' . sanitize_email($from_email);
+    }
+
+    $message = '<p>Hello ' . esc_html($customer->name) . ',</p>';
+    $message .= '<p>Here is your statement of account for <strong>' . esc_html($month_label) . '</strong>.</p>';
+    $message .= crm_render_customer_statement_html($customer_id, $month);
+    $message .= '<p>Please contact us if you need any clarification on your previous transactions or outstanding balance.</p>';
+
+    $sent = wp_mail($customer->email, $subject, $message, $headers);
+    if ($sent) {
+        wp_send_json_success(['message' => 'Statement email sent to ' . $customer->email]);
+    }
+
+    wp_send_json_error(['message' => 'Failed to send email']);
+}
+
 add_action('wp_ajax_crm_save_general_settings', 'bntm_ajax_crm_save_general_settings');
 function bntm_ajax_crm_save_general_settings() {
     check_ajax_referer('crm_nonce', 'nonce');
@@ -1684,6 +1830,7 @@ function bntm_ajax_crm_save_general_settings() {
 
     bntm_set_setting('crm_quotation_validity', intval($_POST['quotation_validity_days'] ?? 30));
     bntm_set_setting('crm_currency', sanitize_text_field($_POST['currency'] ?? 'PHP'));
+    // Statement email settings moved to payment module (op_email_settings)
 
     wp_send_json_success(['message' => 'Settings saved successfully!']);
 }

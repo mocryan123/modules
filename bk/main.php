@@ -224,6 +224,8 @@ add_action('wp_ajax_nopriv_bk_get_available_slots', 'bntm_ajax_bk_get_available_
 add_action('wp_ajax_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_nopriv_bk_book_appointment', 'bntm_ajax_bk_book_appointment');
 add_action('wp_ajax_bk_update_booking_status', 'bntm_ajax_bk_update_booking_status');
+add_action('wp_ajax_bk_retry_payment', 'bntm_ajax_bk_retry_payment');
+add_action('wp_ajax_nopriv_bk_retry_payment', 'bntm_ajax_bk_retry_payment');
 add_action('wp_ajax_bk_add_closed_date', 'bntm_ajax_bk_add_closed_date');
 add_action('wp_ajax_bk_remove_closed_date', 'bntm_ajax_bk_remove_closed_date');
 
@@ -5971,11 +5973,34 @@ function bntm_shortcode_bk_transaction() {
     
     $payment_methods = json_decode(bntm_get_setting('bk_payment_methods', '[]'), true);
     $payment_method_data = null;
+    $booking_metadata = get_option('bk_booking_' . $booking->rand_id . '_data', []);
+    if (!is_array($booking_metadata)) {
+        $booking_metadata = [];
+    }
+    $statement_rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT rand_id, booking_date, start_time, end_time, customer_name, customer_email, status, payment_status, total, payment_method
+         FROM {$bookings_table}
+         WHERE business_id = %d AND customer_email = %s
+         ORDER BY booking_date DESC, start_time DESC, created_at DESC",
+        $booking->business_id,
+        $booking->customer_email
+    ));
+    $statement_summary = [
+        'total_bookings' => count($statement_rows),
+        'total_paid' => 0,
+        'total_outstanding' => 0,
+        'total_amount' => 0,
+    ];
     $is_dashboard_viewer = is_user_logged_in() && bk_current_user_can_access_staff_booking_tools();
     $dashboard_page = get_page_by_path('booking');
     $dashboard_bookings_url = $dashboard_page ? add_query_arg('tab', 'bookings', get_permalink($dashboard_page)) : '';
     $booking_page = get_page_by_path('book-appointment');
     $booking_page_url = $booking_page ? get_permalink($booking_page) : '';
+    $payment_source = bntm_get_setting('bk_payment_source', 'bk');
+    $can_retry_online_payment = false;
+    $retry_gateway = '';
+    $retry_method_name = '';
+    $retry_payment_nonce = wp_create_nonce('bk_retry_payment_' . $booking->rand_id);
     
     if (is_array($payment_methods) && !empty($booking->payment_method)) {
         foreach ($payment_methods as $method) {
@@ -5983,6 +6008,34 @@ function bntm_shortcode_bk_transaction() {
                 $payment_method_data = $method;
                 break;
             }
+        }
+    }
+
+    foreach ($statement_rows as $statement_row) {
+        $statement_summary['total_amount'] += (float) $statement_row->total;
+        if (in_array($statement_row->payment_status, ['paid', 'verified'], true)) {
+            $statement_summary['total_paid'] += (float) $statement_row->total;
+        } elseif (!in_array($statement_row->payment_status, ['dropped', 'cancelled'], true)) {
+            $statement_summary['total_outstanding'] += (float) $statement_row->total;
+        }
+    }
+
+    if (
+        $payment_source === 'op'
+        && in_array($booking->payment_status, ['waiting_payment', 'pending', 'unpaid'], true)
+        && !empty($booking_metadata['op_method_id'])
+    ) {
+        global $wpdb;
+        $op_methods_table = $wpdb->prefix . 'op_payment_methods';
+        $op_method = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM {$op_methods_table} WHERE id = %d AND is_active = 1 LIMIT 1",
+            intval($booking_metadata['op_method_id'])
+        ));
+
+        if ($op_method && in_array($op_method->gateway, ['paypal', 'paymaya'], true)) {
+            $can_retry_online_payment = true;
+            $retry_gateway = $op_method->gateway;
+            $retry_method_name = $op_method->name;
         }
     }
 
@@ -6040,6 +6093,25 @@ function bntm_shortcode_bk_transaction() {
                 <div class="bk-summary-card bk-summary-total">
                     <span class="bk-summary-label">Total Amount</span>
                     <strong class="bk-summary-value"><?php echo bk_format_price($booking->total); ?></strong>
+                </div>
+            </div>
+
+            <div class="bk-transaction-summary bk-statement-summary">
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Customer Bookings</span>
+                    <strong class="bk-summary-value"><?php echo esc_html($statement_summary['total_bookings']); ?></strong>
+                </div>
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Total Billed</span>
+                    <strong class="bk-summary-value"><?php echo bk_format_price($statement_summary['total_amount']); ?></strong>
+                </div>
+                <div class="bk-summary-card">
+                    <span class="bk-summary-label">Total Paid</span>
+                    <strong class="bk-summary-value"><?php echo bk_format_price($statement_summary['total_paid']); ?></strong>
+                </div>
+                <div class="bk-summary-card bk-summary-total">
+                    <span class="bk-summary-label">Outstanding Balance</span>
+                    <strong class="bk-summary-value"><?php echo bk_format_price($statement_summary['total_outstanding']); ?></strong>
                 </div>
             </div>
 
@@ -6146,9 +6218,110 @@ function bntm_shortcode_bk_transaction() {
                     <?php endif; ?>
                 </div>
                 <?php endif; ?>
+
+                <?php if ($can_retry_online_payment): ?>
+                <div class="bk-payment-action-panel">
+                    <div>
+                        <strong>Continue Payment</strong>
+                        <p>Use <?php echo esc_html($retry_method_name); ?> to complete this booking payment from this page.</p>
+                    </div>
+                    <button type="button" class="bntm-btn-primary" id="bk-retry-payment-btn" data-booking-id="<?php echo esc_attr($booking->rand_id); ?>" data-nonce="<?php echo esc_attr($retry_payment_nonce); ?>">
+                        Pay Now with <?php echo esc_html(ucfirst($retry_gateway)); ?>
+                    </button>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="bntm-form-section bk-transaction-section">
+                <h3>Statement of Account</h3>
+                <div class="bk-soa-intro">
+                    Full booking transaction history for <?php echo esc_html($booking->customer_name); ?> with attached payment status and balances.
+                </div>
+                <div class="bntm-table-wrapper">
+                    <table class="bk-soa-table">
+                        <thead>
+                            <tr>
+                                <th>Booking #</th>
+                                <th>Date</th>
+                                <th>Schedule</th>
+                                <th>Total</th>
+                                <th>Payment Method</th>
+                                <th>Payment Status</th>
+                                <th>Balance</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($statement_rows)): ?>
+                            <tr><td colspan="8" style="text-align:center;">No booking transactions found for this customer.</td></tr>
+                            <?php else: foreach ($statement_rows as $row): ?>
+                            <?php
+                            $row_balance = in_array($row->payment_status, ['paid', 'verified'], true) ? 0 : (float) $row->total;
+                            $row_tracking_url = bk_get_booking_tracking_url($row->rand_id);
+                            ?>
+                            <tr class="<?php echo $row->rand_id === $booking->rand_id ? 'bk-soa-current-row' : ''; ?>">
+                                <td>#<?php echo esc_html($row->rand_id); ?></td>
+                                <td><?php echo esc_html(date('M d, Y', strtotime($row->booking_date))); ?></td>
+                                <td><?php echo esc_html(date('g:i A', strtotime($row->start_time)) . ' - ' . date('g:i A', strtotime($row->end_time))); ?></td>
+                                <td><?php echo bk_format_price($row->total); ?></td>
+                                <td><?php echo esc_html($row->payment_method ?: 'Not set'); ?></td>
+                                <td>
+                                    <span class="bk-payment-badge payment-<?php echo esc_attr($row->payment_status); ?>">
+                                        <?php echo esc_html(ucfirst(str_replace('_', ' ', $row->payment_status))); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo bk_format_price($row_balance); ?></td>
+                                <td>
+                                    <?php if ($row->rand_id === $booking->rand_id): ?>
+                                    <span class="bk-soa-current-label">Current</span>
+                                    <?php elseif ($row_tracking_url): ?>
+                                    <a href="<?php echo esc_url($row_tracking_url); ?>" class="bntm-btn-small">Open</a>
+                                    <?php else: ?>
+                                    <span style="color:#9ca3af;">N/A</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
+
+    <script>
+    jQuery(function($) {
+        const retryButton = $('#bk-retry-payment-btn');
+
+        if (!retryButton.length) {
+            return;
+        }
+
+        retryButton.on('click', function() {
+            const button = $(this);
+            const originalText = button.text();
+
+            button.prop('disabled', true).text('Preparing Payment...');
+
+            $.post('<?php echo esc_js(admin_url('admin-ajax.php')); ?>', {
+                action: 'bk_retry_payment',
+                booking_id: button.data('booking-id'),
+                nonce: button.data('nonce')
+            }).done(function(response) {
+                if (response && response.success && response.data && response.data.redirect_url) {
+                    window.location.href = response.data.redirect_url;
+                    return;
+                }
+
+                alert(response && response.data && response.data.message ? response.data.message : 'Unable to continue payment.');
+            }).fail(function() {
+                alert('Unable to continue payment right now.');
+            }).always(function() {
+                button.prop('disabled', false).text(originalText);
+            });
+        });
+    });
+    </script>
 
     <style>
     .bk-transaction-actions {
@@ -6334,6 +6507,64 @@ function bntm_shortcode_bk_transaction() {
         line-height: 1.7;
     }
 
+    .bk-payment-action-panel {
+        margin: 20px 24px 24px;
+        padding: 18px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 12px;
+    }
+
+    .bk-payment-action-panel p {
+        margin: 6px 0 0;
+        color: #475569;
+    }
+
+    .bk-soa-intro {
+        padding: 18px 24px 0;
+        color: #64748b;
+    }
+
+    .bk-soa-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .bk-soa-table th,
+    .bk-soa-table td {
+        padding: 14px 16px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        vertical-align: middle;
+    }
+
+    .bk-soa-table th {
+        background: #f8fafc;
+        color: #475569;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+
+    .bk-soa-current-row {
+        background: #f8fafc;
+    }
+
+    .bk-soa-current-label {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #dbeafe;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
     @media (max-width: 768px) {
         .bk-transaction-actions {
             flex-direction: column;
@@ -6348,6 +6579,10 @@ function bntm_shortcode_bk_transaction() {
             font-size: 24px;
         }
 
+        .bk-payment-action-panel {
+            align-items: stretch;
+        }
+
         .bk-transaction-table td {
             display: block;
             width: 100%;
@@ -6358,6 +6593,11 @@ function bntm_shortcode_bk_transaction() {
             width: 100%;
             border-bottom: none;
             padding-bottom: 4px;
+        }
+
+        .bk-soa-table th,
+        .bk-soa-table td {
+            white-space: nowrap;
         }
     }
     </style>
@@ -7027,6 +7267,98 @@ function op_bk_process_paymaya_payment($invoice, $payment_method, $config, $amou
         'redirect_url' => $checkout_url,
         'transaction_id' => $response_data['checkoutId']
     ];
+}
+
+function bntm_ajax_bk_retry_payment() {
+    $booking_rand_id = sanitize_text_field($_POST['booking_id'] ?? '');
+
+    if ($booking_rand_id === '') {
+        wp_send_json_error(['message' => 'Invalid booking reference.']);
+    }
+
+    check_ajax_referer('bk_retry_payment_' . $booking_rand_id, 'nonce');
+
+    global $wpdb;
+    $bookings_table = $wpdb->prefix . 'bk_bookings';
+    $op_methods_table = $wpdb->prefix . 'op_payment_methods';
+    $op_payments_table = $wpdb->prefix . 'op_payments';
+
+    $booking = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$bookings_table} WHERE rand_id = %s LIMIT 1",
+        $booking_rand_id
+    ));
+
+    if (!$booking) {
+        wp_send_json_error(['message' => 'Booking not found.']);
+    }
+
+    if (in_array($booking->payment_status, ['paid', 'verified'], true)) {
+        wp_send_json_error(['message' => 'This booking is already paid.']);
+    }
+
+    $metadata = get_option('bk_booking_' . $booking_rand_id . '_data', []);
+    if (!is_array($metadata) || empty($metadata['op_method_id'])) {
+        wp_send_json_error(['message' => 'No online payment method is attached to this booking.']);
+    }
+
+    $payment_method = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$op_methods_table} WHERE id = %d AND is_active = 1 LIMIT 1",
+        intval($metadata['op_method_id'])
+    ));
+
+    if (!$payment_method) {
+        wp_send_json_error(['message' => 'Payment method is no longer available.']);
+    }
+
+    if (!in_array($payment_method->gateway, ['paypal', 'paymaya'], true)) {
+        wp_send_json_error(['message' => 'This booking uses manual payment instructions only.']);
+    }
+
+    $config = json_decode($payment_method->config, true);
+    if (!is_array($config)) {
+        $config = [];
+    }
+
+    $mock_invoice = (object) [
+        'id' => $booking->id,
+        'rand_id' => $booking->rand_id,
+        'business_id' => $booking->business_id,
+        'total' => $booking->total,
+        'currency' => bntm_get_setting('bk_currency', 'PHP'),
+        'customer_email' => $booking->customer_email,
+    ];
+
+    if ($payment_method->gateway === 'paypal') {
+        $payment_result = op_bk_process_paypal_payment($mock_invoice, $payment_method, $config, $booking->total);
+    } else {
+        $payment_result = op_bk_process_paymaya_payment($mock_invoice, $payment_method, $config, $booking->total);
+    }
+
+    if (empty($payment_result['success'])) {
+        wp_send_json_error(['message' => $payment_result['message'] ?? 'Unable to create payment session.']);
+    }
+
+    if (!empty($payment_result['transaction_id']) && !empty($metadata['payment_rand_id'])) {
+        $wpdb->update(
+            $op_payments_table,
+            [
+                'transaction_id' => $payment_result['transaction_id'],
+                'status' => 'pending-payment',
+                'attempted_at' => current_time('mysql')
+            ],
+            ['rand_id' => $metadata['payment_rand_id']],
+            ['%s', '%s', '%s'],
+            ['%s']
+        );
+
+        $metadata['transaction_id'] = $payment_result['transaction_id'];
+        update_option('bk_booking_' . $booking_rand_id . '_data', $metadata);
+    }
+
+    wp_send_json_success([
+        'message' => $payment_result['message'] ?? 'Redirecting to payment.',
+        'redirect_url' => $payment_result['redirect_url'] ?? ''
+    ]);
 }
 
 /* ---------- BK BOOKING PAYMENT COMPLETION ---------- */
