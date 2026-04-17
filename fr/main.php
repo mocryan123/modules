@@ -168,7 +168,6 @@ function bntm_shortcode_forms_dashboard() {
             <?php endif; ?>
         </div>
     </div>
-    </div>
     <?php
     $content = ob_get_clean();
     return bntm_universal_container('Forms Manager', $content);
@@ -325,16 +324,6 @@ function forms_list_tab($business_id) {
                         <option value="inactive">Inactive - Not accepting submissions</option>
                     </select>
                 </div>
-
-                <div style="margin-top: 24px; padding: 20px; border: 1px solid #dbe4f0; border-radius: 12px; background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);">
-                    <h3 style="margin: 0 0 8px; color: #1f2937;">Public Page Appearance</h3>
-                    <p style="margin: 0 0 18px; color: #6b7280; font-size: 14px;">Customize how this public form page looks when someone opens the link.</p>
-                    <div class="bntm-form-group" style="margin-bottom: 0;">
-                        <label>Accent Color</label>
-                        <input type="color" id="form-accent-color" name="form_accent_color" value="#0f766e">
-                        <small>This color is also used for the public page background theme.</small>
-                    </div>
-                </div>
                 
                 <hr style="margin: 20px 0;">
                 
@@ -383,9 +372,7 @@ function forms_list_tab($business_id) {
             </div>
         </div>
     </div>
-    </div>
     
-    </div>
     <style>
     .bntm-dashboard-stats {
         display: grid;
@@ -680,10 +667,6 @@ function forms_list_tab($business_id) {
             'checkbox': 'Checkboxes',
             'file': 'File Upload'
         };
-
-        const defaultAppearanceSettings = {
-            accent_color: '#0f766e'
-        };
         
         // Modal functions
         function openModal(modalId) {
@@ -715,7 +698,6 @@ function forms_list_tab($business_id) {
             document.getElementById('form-id').value = '';
             document.getElementById('form-fields-container').innerHTML = '';
             fieldCounter = 0;
-            applyAppearanceSettings(defaultAppearanceSettings);
             
             // Add default field
             addFormField({
@@ -754,7 +736,6 @@ function forms_list_tab($business_id) {
                     document.getElementById('form-description').value = form.description || '';
                     document.getElementById('form-visibility').value = form.visibility;
                     document.getElementById('form-status').value = form.status;
-                    applyAppearanceSettings(parseAppearanceSettings(form.settings));
                     
                     // Load fields
                     const fields = JSON.parse(form.fields);
@@ -776,31 +757,6 @@ function forms_list_tab($business_id) {
         document.getElementById('add-field-btn').addEventListener('click', function() {
             addFormField({type: 'text', label: '', required: false});
         });
-
-        function parseAppearanceSettings(rawSettings) {
-            if (!rawSettings) {
-                return {...defaultAppearanceSettings};
-            }
-
-            try {
-                const parsed = JSON.parse(rawSettings);
-                return {
-                    ...defaultAppearanceSettings,
-                    ...(parsed || {})
-                };
-            } catch (e) {
-                return {...defaultAppearanceSettings};
-            }
-        }
-
-        function applyAppearanceSettings(settings) {
-            const safeSettings = {
-                ...defaultAppearanceSettings,
-                ...(settings || {})
-            };
-
-            document.getElementById('form-accent-color').value = safeSettings.accent_color;
-        }
         
         // Add form field
         function addFormField(field) {
@@ -912,9 +868,6 @@ function forms_list_tab($business_id) {
             submitData.append('visibility', formData.get('form_visibility'));
             submitData.append('status', formData.get('form_status'));
             submitData.append('fields', JSON.stringify(fields));
-            submitData.append('settings', JSON.stringify({
-                accent_color: formData.get('form_accent_color') || defaultAppearanceSettings.accent_color
-            }));
             
             const btn = this.querySelector('button[type="submit"]');
             btn.disabled = true;
@@ -1179,7 +1132,6 @@ function forms_templates_tab($business_id) {
             <?php endforeach; ?>
         </div>
     </div>
-    </div>
     
     <style>
     .templates-grid {
@@ -1325,64 +1277,6 @@ function forms_settings_tab($business_id) {
 // PUBLIC FORM SHORTCODE
 // ============================================================================
 
-function forms_sanitize_appearance_settings($raw_settings) {
-    $defaults = [
-        'accent_color' => '#0f766e'
-    ];
-
-    if (empty($raw_settings)) {
-        return $defaults;
-    }
-
-    if (is_string($raw_settings)) {
-        $decoded = json_decode(stripslashes($raw_settings), true);
-        $raw_settings = is_array($decoded) ? $decoded : [];
-    }
-
-    $settings = array_merge($defaults, is_array($raw_settings) ? $raw_settings : []);
-
-    $settings['accent_color'] = sanitize_hex_color($settings['accent_color']);
-    if (empty($settings['accent_color'])) {
-        $settings['accent_color'] = $defaults['accent_color'];
-    }
-
-    return $settings;
-}
-
-function forms_hex_to_rgb_components($hex_color) {
-    $hex_color = ltrim((string) $hex_color, '#');
-
-    if (strlen($hex_color) === 3) {
-        $hex_color = $hex_color[0] . $hex_color[0]
-            . $hex_color[1] . $hex_color[1]
-            . $hex_color[2] . $hex_color[2];
-    }
-
-    if (strlen($hex_color) !== 6 || !ctype_xdigit($hex_color)) {
-        $hex_color = '0f766e';
-    }
-
-    return [
-        hexdec(substr($hex_color, 0, 2)),
-        hexdec(substr($hex_color, 2, 2)),
-        hexdec(substr($hex_color, 4, 2))
-    ];
-}
-
-function forms_build_accent_background_styles($accent_color) {
-    [$red, $green, $blue] = forms_hex_to_rgb_components($accent_color);
-
-    return [
-        'page_bg' => sprintf(
-            'linear-gradient(135deg, rgba(%1$d, %2$d, %3$d, 0.24) 0%%, rgba(255, 255, 255, 0.96) 48%%, rgba(%1$d, %2$d, %3$d, 0.14) 100%%)',
-            $red,
-            $green,
-            $blue
-        ),
-        'card_bg' => sprintf('rgba(255, 255, 255, 0.88)')
-    ];
-}
-
 function bntm_shortcode_forms_public_form() {
     $form_rand_id = isset($_GET['form']) ? sanitize_text_field($_GET['form']) : '';
     
@@ -1403,8 +1297,6 @@ function bntm_shortcode_forms_public_form() {
     }
     
     $fields = json_decode($form->fields, true);
-    $appearance = forms_sanitize_appearance_settings($form->settings ?? '');
-    $theme_style = forms_build_accent_background_styles($appearance['accent_color']);
     
     ob_start();
     ?>
@@ -1412,18 +1304,16 @@ function bntm_shortcode_forms_public_form() {
     var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
     </script>
     
-    <div class="bntm-public-form-shell" style="--forms-accent: <?php echo esc_attr($appearance['accent_color']); ?>; --forms-page-bg: <?php echo esc_attr($theme_style['page_bg']); ?>; --forms-card-bg: <?php echo esc_attr($theme_style['card_bg']); ?>;">
-        <div class="bntm-public-form-container">
-            <div class="bntm-public-form-header">
-                <span class="bntm-public-form-kicker">Online Form</span>
-                <h1><?php echo esc_html($form->title); ?></h1>
-                <?php if ($form->description): ?>
-                <p class="form-description"><?php echo esc_html($form->description); ?></p>
-                <?php endif; ?>
-            </div>
-            
-            <form id="public-form-submit" class="bntm-public-form">
-                <input type="hidden" name="form_rand_id" value="<?php echo esc_attr($form->rand_id); ?>">
+    <div class="bntm-public-form-container">
+        <div class="bntm-public-form-header">
+            <h1><?php echo esc_html($form->title); ?></h1>
+            <?php if ($form->description): ?>
+            <p class="form-description"><?php echo esc_html($form->description); ?></p>
+            <?php endif; ?>
+        </div>
+        
+        <form id="public-form-submit" class="bntm-public-form">
+            <input type="hidden" name="form_rand_id" value="<?php echo esc_attr($form->rand_id); ?>">
             
             <?php foreach ($fields as $index => $field): ?>
                 <div class="bntm-form-group">
@@ -1454,27 +1344,21 @@ function bntm_shortcode_forms_public_form() {
                             break;
                             
                         case 'radio':
-                            echo "<div class='bntm-choice-group bntm-choice-group-radio'>";
                             foreach ($field['options'] as $option) {
-                                echo "<label class='bntm-choice-card'>";
+                                echo "<label class='radio-label'>";
                                 echo "<input type='radio' name='$fieldName' value='" . esc_attr($option) . "' $required>";
-                                echo "<span class='bntm-choice-indicator'></span>";
-                                echo "<span class='bntm-choice-label-text'>" . esc_html($option) . "</span>";
+                                echo " " . esc_html($option);
                                 echo "</label>";
                             }
-                            echo "</div>";
                             break;
                             
                         case 'checkbox':
-                            echo "<div class='bntm-choice-group bntm-choice-group-checkbox'>";
                             foreach ($field['options'] as $option) {
-                                echo "<label class='bntm-choice-card'>";
+                                echo "<label class='checkbox-label'>";
                                 echo "<input type='checkbox' name='{$fieldName}[]' value='" . esc_attr($option) . "'>";
-                                echo "<span class='bntm-choice-indicator'></span>";
-                                echo "<span class='bntm-choice-label-text'>" . esc_html($option) . "</span>";
+                                echo " " . esc_html($option);
                                 echo "</label>";
                             }
-                            echo "</div>";
                             break;
                             
                         case 'file':
@@ -1498,71 +1382,43 @@ function bntm_shortcode_forms_public_form() {
             <p>Your submission has been received successfully.</p>
         </div>
     </div>
-    </div>
     
     <style>
-    .bntm-public-form-shell {
-        min-height: 100vh;
-        padding: 32px 18px;
-        background: var(--forms-page-bg);
-    }
-
     .bntm-public-form-container {
-        max-width: 760px;
-        margin: 0 auto;
-        padding: 38px;
-        background: var(--forms-card-bg);
-        border: 1px solid rgba(255, 255, 255, 0.5);
-        border-radius: 28px;
-        box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
-        backdrop-filter: blur(18px);
+        max-width: 700px;
+        margin: 40px auto;
+        padding: 40px;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
     .bntm-public-form-header {
         text-align: center;
-        margin-bottom: 34px;
-    }
-
-    .bntm-public-form-kicker {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 14px;
-        padding: 7px 14px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.65);
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        color: var(--forms-accent);
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+        margin-bottom: 40px;
     }
     
     .bntm-public-form-header h1 {
         margin: 0 0 10px 0;
-        color: #0f172a;
-        font-size: clamp(30px, 5vw, 42px);
-        line-height: 1.05;
+        color: #111827;
+        font-size: 32px;
     }
     
     .form-description {
-        color: #475569;
+        color: #6b7280;
         font-size: 16px;
-        margin: 0 auto;
-        max-width: 560px;
-        line-height: 1.65;
+        margin: 0;
     }
     
     .bntm-public-form .bntm-form-group {
-        margin-bottom: 24px;
+        margin-bottom: 25px;
     }
     
     .bntm-public-form label {
         display: block;
-        margin-bottom: 9px;
-        font-weight: 700;
-        color: #1f2937;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #374151;
     }
     
     .required {
@@ -1574,139 +1430,42 @@ function bntm_shortcode_forms_public_form() {
     .bntm-public-form input[type="phone"],
     .bntm-public-form input[type="number"],
     .bntm-public-form input[type="date"],
-    .bntm-public-form input[type="file"],
     .bntm-public-form textarea,
     .bntm-public-form select {
         width: 100%;
-        padding: 14px 16px;
-        border: 1px solid #cbd5e1;
-        border-radius: 16px;
+        padding: 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
         font-size: 15px;
-        color: #0f172a;
-        background: rgba(255, 255, 255, 0.86);
-        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        transition: border-color 0.2s;
     }
     
     .bntm-public-form input:focus,
     .bntm-public-form textarea:focus,
     .bntm-public-form select:focus {
         outline: none;
-        border-color: var(--forms-accent);
-        box-shadow: 0 0 0 4px color-mix(in srgb, var(--forms-accent) 18%, white);
-        transform: translateY(-1px);
+        border-color: #059669;
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.1);
     }
-
-    .bntm-public-form textarea {
-        min-height: 130px;
-        resize: vertical;
-    }
-
-    .bntm-choice-group {
-        display: grid;
-        gap: 12px;
-        margin-top: 10px;
-    }
-
-    .bntm-choice-card {
-        display: flex !important;
-        align-items: center;
-        gap: 12px;
-        margin: 0 !important;
-        padding: 14px 16px;
-        border-radius: 18px;
-        border: 1px solid #dbe4f0;
-        background: rgba(255, 255, 255, 0.76);
+    
+    .radio-label,
+    .checkbox-label {
+        display: block;
+        padding: 8px 0;
+        font-weight: normal !important;
         cursor: pointer;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
     }
-
-    .bntm-choice-card:hover {
-        transform: translateY(-1px);
-        border-color: color-mix(in srgb, var(--forms-accent) 32%, #dbe4f0);
-        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-    }
-
-    .bntm-choice-card input {
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
-    }
-
-    .bntm-choice-indicator {
-        width: 22px;
-        height: 22px;
-        flex-shrink: 0;
-        border: 2px solid #94a3b8;
-        background: #fff;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s ease;
-    }
-
-    .bntm-choice-group-radio .bntm-choice-indicator {
-        border-radius: 999px;
-    }
-
-    .bntm-choice-group-checkbox .bntm-choice-indicator {
-        border-radius: 7px;
-    }
-
-    .bntm-choice-indicator::after {
-        content: '';
-        width: 10px;
-        height: 10px;
-        border-radius: inherit;
-        background: transparent;
-        transform: scale(0.35);
-        transition: all 0.2s ease;
-    }
-
-    .bntm-choice-group-checkbox .bntm-choice-indicator::after {
-        width: 6px;
-        height: 10px;
-        border-radius: 0;
-        border: solid white;
-        border-width: 0 2px 2px 0;
-        transform: rotate(45deg) scale(0);
-        background: transparent;
-    }
-
-    .bntm-choice-card input:checked + .bntm-choice-indicator {
-        border-color: var(--forms-accent);
-        background: var(--forms-accent);
-        box-shadow: 0 0 0 6px color-mix(in srgb, var(--forms-accent) 12%, white);
-    }
-
-    .bntm-choice-group-radio .bntm-choice-card input:checked + .bntm-choice-indicator::after {
-        background: white;
-        transform: scale(1);
-    }
-
-    .bntm-choice-group-checkbox .bntm-choice-card input:checked + .bntm-choice-indicator::after {
-        transform: rotate(45deg) scale(1);
-    }
-
-    .bntm-choice-card:has(input:checked) {
-        border-color: color-mix(in srgb, var(--forms-accent) 40%, #dbe4f0);
-        background: color-mix(in srgb, var(--forms-accent) 10%, white);
-    }
-
-    .bntm-choice-label-text {
-        font-weight: 600;
-        color: #1e293b;
-        line-height: 1.4;
+    
+    .radio-label input,
+    .checkbox-label input {
+        margin-right: 8px;
     }
     
     .bntm-btn-large {
         width: 100%;
-        padding: 16px 18px;
+        padding: 15px;
         font-size: 16px;
-        font-weight: 700;
-        border-radius: 18px;
-        background: linear-gradient(180deg, color-mix(in srgb, var(--forms-accent) 88%, white), var(--forms-accent));
-        border: none;
-        box-shadow: 0 18px 34px color-mix(in srgb, var(--forms-accent) 24%, transparent);
+        font-weight: 600;
     }
     
     #success-message {
@@ -1715,15 +1474,14 @@ function bntm_shortcode_forms_public_form() {
     }
     
     .success-checkmark {
-        width: 86px;
-        height: 86px;
-        margin: 0 auto 22px;
-        background: var(--forms-accent);
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 20px;
+        background: #059669;
         color: white;
         font-size: 48px;
-        line-height: 86px;
+        line-height: 80px;
         border-radius: 50%;
-        box-shadow: 0 18px 30px color-mix(in srgb, var(--forms-accent) 28%, transparent);
     }
     
     #success-message h2 {
@@ -1734,21 +1492,6 @@ function bntm_shortcode_forms_public_form() {
     #success-message p {
         color: #6b7280;
         font-size: 16px;
-    }
-
-    @media (max-width: 768px) {
-        .bntm-public-form-shell {
-            padding: 18px 12px;
-        }
-
-        .bntm-public-form-container {
-            padding: 24px 18px;
-            border-radius: 22px;
-        }
-
-        .bntm-choice-card {
-            padding: 13px 14px;
-        }
     }
     </style>
     
@@ -1809,7 +1552,6 @@ function bntm_ajax_forms_create_form() {
     $visibility = sanitize_text_field($_POST['visibility']);
     $status = sanitize_text_field($_POST['status']);
     $fields = stripslashes($_POST['fields']);
-    $settings = wp_json_encode(forms_sanitize_appearance_settings($_POST['settings'] ?? ''));
     
     // Validate
     if (empty($title)) {
@@ -1824,11 +1566,10 @@ function bntm_ajax_forms_create_form() {
         'title' => $title,
         'description' => $description,
         'fields' => $fields,
-        'settings' => $settings,
         'visibility' => $visibility,
         'status' => $status,
         'entry_count' => 0
-    ], ['%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d']);
+    ], ['%s', '%d', '%s', '%s', '%s', '%s', '%s', '%d']);
     
     if ($result) {
         wp_send_json_success(['message' => 'Form created successfully!']);
@@ -1854,7 +1595,6 @@ function bntm_ajax_forms_update_form() {
     $visibility = sanitize_text_field($_POST['visibility']);
     $status = sanitize_text_field($_POST['status']);
     $fields = stripslashes($_POST['fields']);
-    $settings = wp_json_encode(forms_sanitize_appearance_settings($_POST['settings'] ?? ''));
     
     $business_id = get_current_user_id();
     
@@ -1872,10 +1612,9 @@ function bntm_ajax_forms_update_form() {
         'title' => $title,
         'description' => $description,
         'fields' => $fields,
-        'settings' => $settings,
         'visibility' => $visibility,
         'status' => $status
-    ], ['id' => $form_id], ['%s', '%s', '%s', '%s', '%s', '%s'], ['%d']);
+    ], ['id' => $form_id], ['%s', '%s', '%s', '%s', '%s'], ['%d']);
     
     if ($result !== false) {
         wp_send_json_success(['message' => 'Form updated successfully!']);

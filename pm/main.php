@@ -82,7 +82,6 @@ function bntm_pm_get_tables()
             tags VARCHAR(500),
             milestone_id BIGINT UNSIGNED DEFAULT NULL,
             recurring VARCHAR(50) DEFAULT 'none',
-            google_calendar_event_id VARCHAR(255),
             sort_order INT DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -296,15 +295,10 @@ add_action("wp_ajax_pm_update_task_status", "bntm_ajax_pm_update_task_status");
 add_action("wp_ajax_pm_delete_task", "bntm_ajax_pm_delete_task");
 add_action("wp_ajax_pm_reorder_tasks", "bntm_ajax_pm_reorder_tasks");
 add_action('wp_ajax_pm_import_tasks', 'bntm_ajax_pm_import_tasks');
-add_action('wp_ajax_pm_export_tasks', 'bntm_ajax_pm_export_tasks');
-add_action('wp_ajax_pm_export_tasks', 'bntm_ajax_pm_export_tasks');
 add_action("wp_ajax_pm_create_milestone", "bntm_ajax_pm_create_milestone");
 add_action("wp_ajax_pm_update_milestone", "bntm_ajax_pm_update_milestone");
 add_action("wp_ajax_pm_delete_milestone", "bntm_ajax_pm_delete_milestone");
 add_action("wp_ajax_pm_reorder_milestones", "bntm_ajax_pm_reorder_milestones");
-add_action("wp_ajax_pm_export_to_google_calendar", "bntm_ajax_pm_export_to_google_calendar");
-add_action("wp_ajax_pm_save_google_calendar_settings", "bntm_ajax_pm_save_google_calendar_settings");
-add_action("wp_ajax_pm_get_google_calendar_auth_url", "bntm_ajax_pm_get_google_calendar_auth_url");
 add_action("wp_ajax_pm_add_team_member", "bntm_ajax_pm_add_team_member");
 add_action("wp_ajax_pm_remove_team_member", "bntm_ajax_pm_remove_team_member");
 add_action("wp_ajax_pm_add_time_log", "bntm_ajax_pm_add_time_log");
@@ -575,101 +569,6 @@ function pm_overview_tab($business_id)
     $projects_table = $wpdb->prefix . "pm_projects";
     $tasks_table = $wpdb->prefix . "pm_tasks";
     $time_logs_table = $wpdb->prefix . "pm_time_logs";
-    $team_table = $wpdb->prefix . "pm_team_members";
-
-    // --- ACCESS CONTROL: determine visible project scope ---
-    $current_user = wp_get_current_user();
-    $is_wp_admin = current_user_can('manage_options');
-    $current_role = bntm_get_user_role($current_user->ID);
-    $can_manage_globally = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
-
-    if ($can_manage_globally) {
-        // No project filter — see everything
-        $project_filter_sql = "";         // for WHERE clauses that start with WHERE
-        $project_filter_and = "";         // for WHERE clauses that already have a WHERE
-        $project_join = "";               // no join needed
-    } else {
-        // Get the IDs of projects this user belongs to
-        $member_project_ids = $wpdb->get_col($wpdb->prepare(
-            "SELECT project_id FROM {$team_table} WHERE user_id = %d",
-            $current_user->ID
-        ));
-
-        if (empty($member_project_ids)) {
-            // User has no projects — show zeros/empty everywhere
-            $member_project_ids = [0]; // safe dummy that matches nothing
-        }
-
-        $ids_in = implode(',', array_map('intval', $member_project_ids));
-        $project_filter_sql = "WHERE id IN ({$ids_in})";
-        $project_filter_and = "AND project_id IN ({$ids_in})";
-        $project_join = "INNER JOIN {$team_table} tm ON p.id = tm.project_id AND tm.user_id = {$current_user->ID}";
-    }
-
-    // Get statistics (scoped)
-    $total_projects = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$projects_table} {$project_filter_sql}"
-    );
-    $active_projects = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$projects_table} 
-         WHERE status NOT IN ('completed', 'cancelled', 'on_hold')
-         " . ($can_manage_globally ? "" : "AND id IN (" . implode(',', array_map('intval', $member_project_ids)) . ")")
-    );
-    $total_tasks = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$tasks_table} WHERE 1=1 {$project_filter_and}"
-    );
-    $completed_tasks = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$tasks_table} 
-         WHERE status IN ('completed', 'closed') {$project_filter_and}"
-    );
-    $overdue_tasks = $wpdb->get_var(
-        "SELECT COUNT(*) FROM {$tasks_table} 
-         WHERE due_date < CURDATE() 
-           AND status NOT IN ('completed', 'closed') 
-           {$project_filter_and}"
-    );
-
-    // Total hours logged (scoped)
-    $total_hours = $wpdb->get_var(
-        "SELECT SUM(tl.hours) FROM {$time_logs_table} tl 
-         INNER JOIN {$tasks_table} t ON tl.task_id = t.id 
-         WHERE 1=1 {$project_filter_and}"
-    );
-    $total_hours = $total_hours ? floatval($total_hours) : 0;
-
-    // Recent projects (scoped)
-    $recent_projects = $wpdb->get_results(
-        "SELECT * FROM {$projects_table} 
-         {$project_filter_sql}
-         ORDER BY updated_at DESC LIMIT 5"
-    );
-
-    // Upcoming tasks (scoped)
-    $upcoming_tasks = $wpdb->get_results(
-        "SELECT t.*, p.name as project_name, p.color as project_color 
-         FROM {$tasks_table} t 
-         INNER JOIN {$projects_table} p ON t.project_id = p.id 
-         WHERE t.status NOT IN ('completed', 'closed') 
-           AND t.due_date IS NOT NULL
-           {$project_filter_and}
-         ORDER BY t.due_date ASC LIMIT 10"
-    );
-
-    // Project status distribution (scoped)
-    $status_stats = $wpdb->get_results(
-        "SELECT status, COUNT(*) as count 
-         FROM {$projects_table} 
-         {$project_filter_sql}
-         GROUP BY status"
-    );
-
-    // Task priority distribution (scoped)
-    $priority_stats = $wpdb->get_results(
-        "SELECT priority, COUNT(*) as count 
-         FROM {$tasks_table} 
-         WHERE status NOT IN ('completed', 'closed') {$project_filter_and}
-         GROUP BY priority"
-    );
 
     // Get statistics
     $total_projects = $wpdb->get_var(
@@ -728,11 +627,6 @@ function pm_overview_tab($business_id)
                 </div>
                 <div class="stat-content">
                     <h3>Total Projects</h3>
-                    <p class="stat-number"><?php echo number_format( $total_projects ); ?></p>
-                    <span class="stat-label"><?php echo $active_projects; ?> active</span>
-                </div>
-            </div>
-
                     <p class="stat-number"><?php echo number_format(
                         $total_projects
                     ); ?></p>
@@ -748,11 +642,6 @@ function pm_overview_tab($business_id)
                 </div>
                 <div class="stat-content">
                     <h3>Total Tasks</h3>
-                    <p class="stat-number"><?php echo number_format( $total_tasks ); ?></p>
-                    <span class="stat-label"><?php echo $completed_tasks; ?> completed</span>
-                </div>
-            </div>
-
                     <p class="stat-number"><?php echo number_format(
                         $total_tasks
                     ); ?></p>
@@ -768,11 +657,6 @@ function pm_overview_tab($business_id)
                 </div>
                 <div class="stat-content">
                     <h3>Hours Logged</h3>
-                    <p class="stat-number"><?php echo number_format( $total_hours, 1 ); ?></p>
-                    <span class="stat-label">Total time tracked</span>
-                </div>
-            </div>
-
                     <p class="stat-number"><?php echo number_format(
                         $total_hours,
                         1
@@ -789,7 +673,6 @@ function pm_overview_tab($business_id)
                 </div>
                 <div class="stat-content">
                     <h3>Overdue Tasks</h3>
-                    <p class="stat-number" style="color: #ef4444;"><?php echo number_format( $overdue_tasks ); ?></p>
                     <p class="stat-number" style="color: #ef4444;"><?php echo number_format(
                         $overdue_tasks
                     ); ?></p>
@@ -797,50 +680,70 @@ function pm_overview_tab($business_id)
                 </div>
             </div>
         </div>
-
+        
         <!-- Charts Row -->
         <div class="pm-charts-row">
             <div class="pm-chart-card">
                 <h3>Project Status Distribution</h3>
                 <div class="pm-chart-content">
-                    <?php if ( ! empty( $status_stats ) ) : ?>
+                    <?php if (!empty($status_stats)): ?>
                         <div class="pm-bar-chart">
                             <?php
-                            $max_count = max( array_column( $status_stats, 'count' ) );
-                            foreach ( $status_stats as $stat ) :
-                                $percentage = $max_count > 0 ? ( $stat->count / $max_count ) * 100 : 0;
-                                $color      = pm_get_status_color( $stat->status );
-                            ?>
+                            $max_count = max(
+                                array_column($status_stats, "count")
+                            );
+                            foreach ($status_stats as $stat):
+
+                                $percentage =
+                                    $max_count > 0
+                                        ? ($stat->count / $max_count) * 100
+                                        : 0;
+                                $color = pm_get_status_color($stat->status);
+                                ?>
                                 <div class="chart-bar-item">
-                                    <div class="chart-bar-label"><?php echo ucfirst( $stat->status ); ?></div>
+                                    <div class="chart-bar-label"><?php echo ucfirst(
+                                        $stat->status
+                                    ); ?></div>
                                     <div class="chart-bar-wrapper">
                                         <div class="chart-bar" style="width: <?php echo $percentage; ?>%; background: <?php echo $color; ?>"></div>
                                         <span class="chart-bar-value"><?php echo $stat->count; ?></span>
                                     </div>
                                 </div>
-                            <?php endforeach; ?>
+                            <?php
+                            endforeach;
+                            ?>
                         </div>
-                    <?php else : ?>
+                    <?php else: ?>
                         <p class="pm-empty-state">No projects yet</p>
                     <?php endif; ?>
                 </div>
             </div>
-
+            
             <div class="pm-chart-card">
                 <h3>Task Priority Distribution</h3>
                 <div class="pm-chart-content">
-                    <?php if ( ! empty( $priority_stats ) ) : ?>
+                    <?php if (!empty($priority_stats)): ?>
                         <div class="pm-priority-chart">
                             <?php
-                            $total_priority_tasks = array_sum( array_column( $priority_stats, 'count' ) );
-                            foreach ( $priority_stats as $stat ) :
-                                $percentage = $total_priority_tasks > 0 ? ( $stat->count / $total_priority_tasks ) * 100 : 0;
-                                $color      = pm_get_priority_color( $stat->priority );
-                            ?>
+                            $total_priority_tasks = array_sum(
+                                array_column($priority_stats, "count")
+                            );
+                            foreach ($priority_stats as $stat):
+
+                                $percentage =
+                                    $total_priority_tasks > 0
+                                        ? ($stat->count /
+                                                $total_priority_tasks) *
+                                            100
+                                        : 0;
+                                $color = pm_get_priority_color($stat->priority);
+                                ?>
                                 <div class="priority-item">
                                     <div class="priority-header">
                                         <span class="priority-badge" style="background: <?php echo $color; ?>">
-                                            <?php echo ucfirst( $stat->priority ); ?>
+                                            <?php echo ucfirst(
+                                                $stat->priority
+                                            ); ?>
                                         </span>
                                         <span class="priority-count"><?php echo $stat->count; ?> tasks</span>
                                     </div>
@@ -848,15 +751,17 @@ function pm_overview_tab($business_id)
                                         <div class="priority-fill" style="width: <?php echo $percentage; ?>%; background: <?php echo $color; ?>"></div>
                                     </div>
                                 </div>
-                            <?php endforeach; ?>
+                            <?php
+                            endforeach;
+                            ?>
                         </div>
-                    <?php else : ?>
+                    <?php else: ?>
                         <p class="pm-empty-state">No active tasks</p>
                     <?php endif; ?>
                 </div>
             </div>
         </div>
-
+        
         <!-- Recent Projects -->
         <div class="pm-section-card">
             <div class="section-header">
@@ -864,178 +769,546 @@ function pm_overview_tab($business_id)
                 <a href="?tab=projects" class="bntm-btn-link">View All →</a>
             </div>
             <div class="pm-projects-list">
-                <?php if ( ! empty( $recent_projects ) ) : ?>
-                    <?php foreach ( $recent_projects as $project ) :
-                        $tasks_count = $wpdb->get_var( $wpdb->prepare(
-                            "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d",
-                            $project->id
-                        ) );
-                        $completed_count = $wpdb->get_var( $wpdb->prepare(
-                            "SELECT COUNT(*) FROM {$tasks_table}
-                             WHERE project_id = %d AND status IN ('completed','closed')",
-                            $project->id
-                        ) );
-                        $progress = $tasks_count > 0 ? round( ( $completed_count / $tasks_count ) * 100 ) : 0;
-                    ?>
+                <?php if (!empty($recent_projects)): ?>
+                    <?php foreach ($recent_projects as $project):
+
+                        $tasks_count = $wpdb->get_var(
+                            $wpdb->prepare(
+                                "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d",
+                                $project->id
+                            )
+                        );
+                        $completed_count = $wpdb->get_var(
+                            $wpdb->prepare(
+                                "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d AND status IN ('completed', 'closed')",
+                                $project->id
+                            )
+                        );
+                        $progress =
+                            $tasks_count > 0
+                                ? round(($completed_count / $tasks_count) * 100)
+                                : 0;
+                        ?>
                         <div class="pm-project-item" onclick="window.location.href='?project_id=<?php echo $project->id; ?>'">
-                            <div class="project-color-bar" style="background: <?php echo esc_attr( $project->color ); ?>"></div>
+                            <div class="project-color-bar" style="background: <?php echo esc_attr(
+                                $project->color
+                            ); ?>"></div>
                             <div class="project-info">
-                                <h4><?php echo esc_html( $project->name ); ?></h4>
+                                <h4><?php echo esc_html($project->name); ?></h4>
                                 <div class="project-meta">
-                                    <span class="project-status" style="background: <?php echo pm_get_status_color( $project->status ); ?>">
-                                        <?php echo ucfirst( $project->status ); ?>
-                                    </span>
-                                    <?php if ( $project->client_name ) : ?>
-                                        <span class="project-client">
-                                            <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
-                                            </svg>
-                                            <?php echo esc_html( $project->client_name ); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                    <span class="project-tasks"><?php echo $completed_count; ?>/<?php echo $tasks_count; ?> tasks</span>
-                                </div>
-                                <div class="project-progress">
-                                    <div class="progress-bar">
-                                        <div class="progress-fill" style="width: <?php echo $progress; ?>%; background: <?php echo esc_attr( $project->color ); ?>"></div>
-                                    </div>
-                                    <span class="progress-text"><?php echo $progress; ?>%</span>
-                                </div>
+                                    <span class="project-status" style="background: <?php echo pm_get_status_color(
+                                        $project->status
+                                    ); ?>">
+                                        <?php echo ucfirst($project->status); ?>
+</span>
+<?php if ($project->client_name): ?>
+<span class="project-client">
+<svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+</svg>
+<?php echo esc_html($project->client_name); ?>
+</span>
+<?php endif; ?>
+<span class="project-tasks"><?php echo $completed_count; ?>/<?php echo $tasks_count; ?> tasks</span>
+</div>
+<div class="project-progress">
+<div class="progress-bar">
+<div class="progress-fill" style="width: <?php echo $progress; ?>%; background: <?php echo esc_attr(
+    $project->color
+); ?>"></div>
+</div>
+<span class="progress-text"><?php echo $progress; ?>%</span>
+</div>
+</div>
+<?php if ($project->due_date): ?>
+<div class="project-due-date">
+<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+</svg>
+<?php echo date("M d, Y", strtotime($project->due_date)); ?>
+</div>
+<?php endif; ?>
+</div>
+<?php
+                    endforeach; ?>
+<?php else: ?>
+<p class="pm-empty-state">No projects yet. <a href="?tab=projects">Create your first project</a></p>
+<?php endif; ?>
+</div>
+</div>
+    <!-- Upcoming Tasks -->
+    <div class="pm-section-card">
+        <div class="section-header">
+            <h3>Upcoming Tasks</h3>
+            <a href="?tab=board" class="bntm-btn-link">View Board →</a>
+        </div>
+        <div class="pm-tasks-list">
+            <?php if (!empty($upcoming_tasks)): ?>
+                <?php foreach ($upcoming_tasks as $task):
+
+                    $is_overdue = strtotime($task->due_date) < time();
+                    $assigned_user = $task->assigned_to
+                        ? get_userdata($task->assigned_to)
+                        : null;
+                    ?>
+                    <div class="pm-task-item <?php echo $is_overdue
+                        ? "overdue"
+                        : ""; ?>">
+                        <div class="task-checkbox">
+                            <input type="checkbox" <?php echo $task->status ===
+                            "completed"
+                                ? "checked"
+                                : ""; ?> disabled>
+                        </div>
+                        <div class="task-content">
+                            <div class="task-header">
+                                <h4><?php echo esc_html($task->title); ?></h4>
+                                <span class="task-priority priority-<?php echo $task->priority; ?>">
+                                    <?php echo ucfirst($task->priority); ?>
+                                </span>
                             </div>
-                            <?php if ( $project->due_date ) : ?>
-                                <div class="project-due-date">
-                                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <div class="task-meta">
+                                <span class="task-project" style="color: <?php echo esc_attr(
+                                    $task->project_color
+                                ); ?>">
+                                    <?php echo esc_html($task->project_name); ?>
+                                </span>
+                                <?php if ($assigned_user): ?>
+                                    <span class="task-assignee">
+                                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                        </svg>
+                                        <?php echo esc_html(
+                                            $assigned_user->display_name
+                                        ); ?>
+                                    </span>
+                                <?php endif; ?>
+                                <span class="task-due-date <?php echo $is_overdue
+                                    ? "overdue"
+                                    : ""; ?>">
+                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                                     </svg>
-                                    <?php echo date( 'M d, Y', strtotime( $project->due_date ) ); ?>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                <?php else : ?>
-                    <p class="pm-empty-state">No projects yet. <a href="?tab=projects">Create your first project</a></p>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <!-- Upcoming Tasks -->
-        <div class="pm-section-card">
-            <div class="section-header">
-                <h3>Upcoming Tasks</h3>
-                <a href="?tab=board" class="bntm-btn-link">View Board →</a>
-            </div>
-            <div class="pm-tasks-list">
-                <?php if ( ! empty( $upcoming_tasks ) ) : ?>
-                    <?php foreach ( $upcoming_tasks as $task ) :
-                        $is_overdue    = strtotime( $task->due_date ) < time();
-                        $assigned_user = $task->assigned_to ? get_userdata( $task->assigned_to ) : null;
-                    ?>
-                        <div class="pm-task-item <?php echo $is_overdue ? 'overdue' : ''; ?>">
-                            <div class="task-checkbox">
-                                <input type="checkbox" <?php echo $task->status === 'completed' ? 'checked' : ''; ?> disabled>
-                            </div>
-                            <div class="task-content">
-                                <div class="task-header">
-                                    <h4><?php echo esc_html( $task->title ); ?></h4>
-                                    <span class="task-priority priority-<?php echo $task->priority; ?>">
-                                        <?php echo ucfirst( $task->priority ); ?>
-                                    </span>
-                                </div>
-                                <div class="task-meta">
-                                    <span class="task-project" style="color: <?php echo esc_attr( $task->project_color ); ?>">
-                                        <?php echo esc_html( $task->project_name ); ?>
-                                    </span>
-                                    <?php if ( $assigned_user ) : ?>
-                                        <span class="task-assignee">
-                                            <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
-                                            </svg>
-                                            <?php echo esc_html( $assigned_user->display_name ); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                    <span class="task-due-date <?php echo $is_overdue ? 'overdue' : ''; ?>">
-                                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                                        </svg>
-                                        <?php echo date( 'M d', strtotime( $task->due_date ) ); ?>
-                                    </span>
-                                </div>
+                                    <?php echo date(
+                                        "M d",
+                                        strtotime($task->due_date)
+                                    ); ?>
+                                </span>
                             </div>
                         </div>
-                    <?php endforeach; ?>
-                <?php else : ?>
-                    <p class="pm-empty-state">No upcoming tasks</p>
-                <?php endif; ?>
-            </div>
+                    </div>
+                <?php
+                endforeach; ?>
+            <?php else: ?>
+                <p class="pm-empty-state">No upcoming tasks</p>
+            <?php endif; ?>
         </div>
     </div>
 </div>
 
-    <style>
-    .pm-overview-grid { display: grid; gap: 24px; }
-    .bntm-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; }
-    .bntm-stat-card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; gap: 16px; align-items: flex-start; }
-    .stat-icon { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .stat-content { flex: 1; }
-    .stat-content h3 { margin: 0 0 8px 0; font-size: 14px; color: #6b7280; font-weight: 500; }
-    .stat-number { margin: 0 0 4px 0; font-size: 32px; font-weight: 700; color: #111827; line-height: 1; }
-    .stat-label { font-size: 13px; color: #9ca3af; }
-    .pm-charts-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px; }
-    .pm-chart-card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .pm-chart-card h3 { margin: 0 0 20px 0; font-size: 16px; font-weight: 600; color: #111827; }
-    .pm-bar-chart { display: flex; flex-direction: column; gap: 16px; }
-    .chart-bar-item { display: flex; align-items: center; gap: 12px; }
-    .chart-bar-label { min-width: 100px; font-size: 14px; color: #4b5563; font-weight: 500; }
-    .chart-bar-wrapper { flex: 1; display: flex; align-items: center; gap: 8px; }
-    .chart-bar { height: 32px; border-radius: 6px; transition: width 0.3s ease; min-width: 40px; }
-    .chart-bar-value { font-size: 13px; font-weight: 600; color: #374151; }
-    .pm-priority-chart { display: flex; flex-direction: column; gap: 16px; }
-    .priority-item { display: flex; flex-direction: column; gap: 8px; }
-    .priority-header { display: flex; justify-content: space-between; align-items: center; }
-    .priority-badge { padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 600; color: white; }
-    .priority-count { font-size: 13px; color: #6b7280; font-weight: 500; }
-    .priority-bar { height: 8px; background: #f3f4f6; border-radius: 4px; overflow: hidden; }
-    .priority-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
-    .pm-section-card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .section-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #111827; }
-    .pm-projects-list { display: grid; gap: 16px; }
-    .pm-project-item { position: relative; background: #f9fafb; border-radius: 8px; padding: 16px 16px 16px 20px; cursor: pointer; transition: all 0.2s; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-    .pm-project-item:hover { background: #f3f4f6; transform: translateY(-2px); box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .project-color-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 8px 0 0 8px; }
-    .project-info { flex: 1; }
-    .project-info h4 { margin: 0 0 8px 0; font-size: 15px; font-weight: 600; color: #111827; }
-    .project-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; align-items: center; }
-    .project-status { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: white; }
-    .project-client, .project-tasks { font-size: 13px; color: #6b7280; display: flex; align-items: center; gap: 4px; }
-    .project-progress { display: flex; align-items: center; gap: 12px; }
-    .progress-bar { flex: 1; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; }
-    .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
-    .progress-text { font-size: 13px; font-weight: 600; color: #374151; min-width: 40px; text-align: right; }
-    .project-due-date { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #6b7280; padding: 8px 12px; background: white; border-radius: 6px; }
-    .pm-tasks-list { display: grid; gap: 12px; }
-    .pm-task-item { display: flex; gap: 12px; padding: 12px; background: #f9fafb; border-radius: 8px; transition: background 0.2s; }
-    .pm-task-item:hover { background: #f3f4f6; }
-    .pm-task-item.overdue { background: #fef2f2; }
-    .task-checkbox input { width: 18px; height: 18px; cursor: pointer; }
-    .task-content { flex: 1; }
-    .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-    .task-content h4 { margin: 0; font-size: 14px; font-weight: 600; color: #111827; }
-    .task-priority { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
-    .task-priority.priority-low { background: #dbeafe; color: #1e40af; }
-    .task-priority.priority-medium { background: #fef3c7; color: #92400e; }
-    .task-priority.priority-high { background: #fee2e2; color: #991b1b; }
-    .task-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; }
-    .task-project { font-weight: 600; }
-    .task-assignee, .task-due-date { display: flex; align-items: center; gap: 4px; color: #6b7280; }
-    .task-due-date.overdue { color: #ef4444; font-weight: 600; }
-    .pm-empty-state { text-align: center; padding: 40px 20px; color: #9ca3af; font-size: 14px; }
-    .pm-empty-state a { color: #3b82f6; text-decoration: none; font-weight: 600; }
-    .pm-empty-state a:hover { text-decoration: underline; }
-    </style>
-    <?php
-    return ob_get_clean();
+<style>
+.pm-overview-grid {
+    display: grid;
+    gap: 24px;
 }
+
+.bntm-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.bntm-stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.stat-number {
+    margin: 0 0 4px 0;
+    font-size: 32px;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1;
+}
+
+.stat-label {
+    font-size: 13px;
+    color: #9ca3af;
+}
+
+.pm-charts-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 24px;
+}
+
+.pm-chart-card {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.pm-chart-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.chart-bar-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.chart-bar-label {
+    min-width: 100px;
+    font-size: 14px;
+    color: #4b5563;
+    font-weight: 500;
+}
+
+.chart-bar-wrapper {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-bar {
+    height: 32px;
+    border-radius: 6px;
+    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    min-width: 40px;
+}
+
+.chart-bar-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.pm-priority-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.priority-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.priority-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.priority-badge {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+}
+
+.priority-count {
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.priority-bar {
+    height: 8px;
+    background: #f3f4f6;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.priority-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.pm-section-card {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-projects-list {
+    display: grid;
+    gap: 16px;
+}
+
+.pm-project-item {
+    position: relative;
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 16px;
+    padding-left: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.pm-project-item:hover {
+    background: #f3f4f6;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.project-color-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: 8px 0 0 8px;
+}
+
+.project-info {
+    flex: 1;
+}
+
+.project-info h4 {
+    margin: 0 0 8px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.project-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.project-status {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+}
+
+.project-client, .project-tasks {
+    font-size: 13px;
+    color: #6b7280;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.project-progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    min-width: 40px;
+    text-align: right;
+}
+
+.project-due-date {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #6b7280;
+    padding: 8px 12px;
+    background: white;
+    border-radius: 6px;
+}
+
+.pm-tasks-list {
+    display: grid;
+    gap: 12px;
+}
+
+.pm-task-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.pm-task-item:hover {
+    background: #f3f4f6;
+}
+
+.pm-task-item.overdue {
+    background: #fef2f2;
+}
+
+.task-checkbox input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.task-content {
+    flex: 1;
+}
+
+.task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.task-content h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.task-priority {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.task-priority.priority-low {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.task-priority.priority-medium {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.task-priority.priority-high {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.task-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 13px;
+}
+
+.task-project {
+    font-weight: 600;
+}
+
+.task-assignee, .task-due-date {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #6b7280;
+}
+
+.task-due-date.overdue {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+.pm-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+.pm-empty-state a {
+    color: #3b82f6;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.pm-empty-state a:hover {
+    text-decoration: underline;
+}
+</style>
+<?php return ob_get_clean();
+} 
 /**
  * Projects Tab with Role-Based Permissions
  */
@@ -1051,38 +1324,17 @@ function pm_projects_tab($business_id)
     $current_role = bntm_get_user_role($current_user->ID);
     $can_manage_globally = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
     
-    // Fetch projects based on role
-    if ($can_manage_globally) {
-        // Admins, owners, managers see ALL projects
-        $projects = $wpdb->get_results("SELECT * FROM {$projects_table}
-            ORDER BY 
-                CASE 
-                    WHEN status = 'cancelled' THEN 3
-                    WHEN status = 'on_hold' THEN 2
-                    WHEN status = 'completed' THEN 1
-                    ELSE 0
-                END ASC,
-                status ASC,
-                created_at DESC");
-    } else {
-        // Members and project managers only see projects they belong to
-        $projects = $wpdb->get_results($wpdb->prepare(
-            "SELECT p.* FROM {$projects_table} p
-            INNER JOIN {$team_table} tm ON p.id = tm.project_id
-            WHERE tm.user_id = %d
-            ORDER BY 
-                CASE 
-                    WHEN p.status = 'cancelled' THEN 3
-                    WHEN p.status = 'on_hold' THEN 2
-                    WHEN p.status = 'completed' THEN 1
-                    ELSE 0
-                END ASC,
-                p.status ASC,
-                p.created_at DESC",
-            $current_user->ID
-        ));
-    }
-    
+    // Custom ORDER BY to prioritize active statuses and push completed/on_hold/cancelled to bottom
+    $projects = $wpdb->get_results("SELECT * FROM {$projects_table}
+        ORDER BY 
+            CASE 
+                WHEN status = 'cancelled' THEN 3
+                WHEN status = 'on_hold' THEN 2
+                WHEN status = 'completed' THEN 1
+                ELSE 0
+            END ASC,
+            status ASC,
+            created_at DESC");
     
     $nonce = wp_create_nonce("pm_project_nonce");
     ob_start();
@@ -1099,7 +1351,7 @@ function pm_projects_tab($business_id)
          </button>
          <?php endif; ?>
      </div>
- <div class="pm-projects-table-container bntm-table-wrapper">
+ <div class="pm-projects-table-container">
      <table class="bntm-table pm-projects-table">
          <thead>
              <tr>
@@ -1481,560 +1733,6 @@ document.getElementById('pm-project-form').addEventListener('submit', function(e
 /**
  * Project Board Tab
  */
-function pm_board_tab( $business_id ) {
-    global $wpdb;
-
-    $projects_table = $wpdb->prefix . 'pm_projects';
-    $tasks_table    = $wpdb->prefix . 'pm_tasks';
-
-    // Task visibility filter
-    $vis = pm_get_task_visibility( 't' );
-
-    $projects = $wpdb->get_results(
-        "SELECT * FROM {$projects_table}
-         WHERE status NOT IN ('completed','cancelled','on_hold')
-         ORDER BY sort_order ASC, created_at DESC"
-    );
-
-    ob_start();
-    ?>
-    <div class="pm-board-container">
-        <div class="pm-board-header">
-            <h2>Project Board</h2>
-            <div class="pm-board-controls bntm-form-group" style="width: unset;">
-                <div class="pm-board-filter-toggle">
-                    <button class="pm-board-filter-btn active" data-filter="all" onclick="pmBoardFilterTasks('all')">All Tasks</button>
-                    <button class="pm-board-filter-btn" data-filter="my" onclick="pmBoardFilterTasks('my')">My Tasks</button>
-                </div>
-                <select id="pm-board-filter" class="bntm-input" style="width: 150px;">
-                    <option value="all">All Due Dates</option>
-                    <option value="week">This Week</option>
-                    <option value="month">This Month</option>
-                    <option value="overdue">Overdue</option>
-                </select>
-                <input type="text" id="pm-board-search" placeholder="Search tasks..." class="bntm-input" style="width: 250px;">
-            </div>
-        </div>
-
-        <?php if ( empty( $projects ) ) : ?>
-            <div class="pm-empty-board">
-                <svg width="80" height="80" fill="none" stroke="#d1d5db" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                </svg>
-                <h3>No Active Projects</h3>
-                <p>Create a project to start managing tasks</p>
-                <a href="?tab=projects" class="bntm-btn-primary">Go to Projects</a>
-            </div>
-        <?php else : ?>
-            <div class="pm-board-projects sortable-projects">
-                <?php foreach ( $projects as $project ) :
-
-                    // Build task query for this project — apply visibility filter
-                    if ( $vis['where'] === '' ) {
-                        $tasks = $wpdb->get_results( $wpdb->prepare(
-                            "SELECT * FROM {$tasks_table}
-                             WHERE project_id = %d AND status NOT IN ('completed','closed')
-                             ORDER BY sort_order ASC, created_at DESC",
-                            $project->id
-                        ) );
-                    } else {
-                        $tasks = $wpdb->get_results( $wpdb->prepare(
-                            "SELECT t.* FROM {$tasks_table} t
-                             WHERE t.project_id = %d
-                               AND t.status NOT IN ('completed','closed')
-                               {$vis['where']}
-                             ORDER BY t.sort_order ASC, t.created_at DESC",
-                            array_merge( [ $project->id ], $vis['params'] )
-                        ) );
-                    }
-                ?>
-                    <div class="pm-board-project" data-project-id="<?php echo $project->id; ?>" draggable="true"
-                         style="border: 2px solid <?php echo esc_attr( $project->color ); ?>33;
-                                background: <?php echo esc_attr( $project->color ); ?>0a;
-                                box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-
-                        <div class="pm-board-project-header">
-                            <div class="project-drag-handle">
-                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
-                                </svg>
-                            </div>
-                            <div>
-                                <h3><?php echo esc_html( $project->name ); ?></h3>
-                                <p class="project-task-count"><?php echo count( $tasks ); ?> tasks</p>
-                            </div>
-                            <a href="?project_id=<?php echo $project->id; ?>" class="bntm-btn-small bntm-btn-secondary"
-                               style="background-color: <?php echo esc_attr( $project->color ); ?>">
-                                View Project →
-                            </a>
-                        </div>
-
-                        <div class="pm-board-tasks" data-project-id="<?php echo $project->id; ?>">
-                            <?php if ( empty( $tasks ) ) : ?>
-                                <div class="pm-board-empty-tasks">
-                                    <p>No tasks visible in this project</p>
-                                </div>
-                            <?php else : ?>
-                                <?php foreach ( $tasks as $task ) :
-                                    $assigned_user = $task->assigned_to ? get_userdata( $task->assigned_to ) : null;
-                                    $is_overdue    = $task->due_date && strtotime( $task->due_date ) < time() && $task->status !== 'completed';
-                                    $due_timestamp = $task->due_date ? strtotime( $task->due_date ) : 0;
-                                ?>
-                                    <div class="pm-board-task-card"
-                                         data-task-id="<?php echo $task->id; ?>"
-                                         data-due="<?php echo $due_timestamp; ?>"
-                                         data-overdue="<?php echo $is_overdue ? '1' : '0'; ?>"
-                                         data-assigned-to="<?php echo $task->assigned_to ? $task->assigned_to : '0'; ?>">
-                                        <div class="task-card-header">
-                                            <span class="task-card-priority priority-<?php echo $task->priority; ?>"></span>
-                                            <h4><?php echo esc_html( $task->title ); ?></h4>
-                                        </div>
-                                        <?php if ( $task->description ) : ?>
-                                            <p class="task-card-desc"><?php echo esc_html( wp_trim_words( $task->description, 15 ) ); ?></p>
-                                        <?php endif; ?>
-                                        <div class="task-card-meta">
-                                            <span class="task-card-status" style="background: <?php echo pm_get_status_color( $task->status ); ?>">
-                                                <?php echo ucfirst( $task->status ); ?>
-                                            </span>
-                                            <?php if ( $assigned_user ) : ?>
-                                                <span class="task-card-assignee" title="<?php echo esc_attr( $assigned_user->display_name ); ?>">
-                                                    <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
-                                                    </svg>
-                                                    <?php echo esc_html( $assigned_user->display_name ); ?>
-                                                </span>
-                                            <?php endif; ?>
-                                            <?php if ( $task->due_date ) : ?>
-                                                <span class="task-card-due <?php echo $is_overdue ? 'overdue' : ''; ?>">
-                                                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                                                    </svg>
-                                                    <?php echo date( 'M d', strtotime( $task->due_date ) ); ?>
-                                                </span>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </div>
-
-    <style>
-    .pm-board-container { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .pm-board-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-    .pm-board-header h2 { margin: 0; font-size: 20px; font-weight: 600; color: #111827; }
-    .pm-board-controls { display: flex; gap: 12px; }
-    .pm-empty-board { text-align: center; padding: 60px 20px; }
-    .pm-empty-board svg { margin: 0 auto 20px; }
-    .pm-empty-board h3 { margin: 0 0 8px 0; font-size: 18px; color: #374151; }
-    .pm-empty-board p { margin: 0 0 24px 0; color: #6b7280; }
-    .pm-board-projects { display: grid; gap: 24px; }
-    .pm-board-project { background: #f9fafb; border-radius: 12px; padding: 20px; cursor: move; transition: all 0.2s; }
-    .pm-board-project:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .pm-board-project.dragging { opacity: 0.5; }
-    .pm-board-project-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-left: 12px; border-radius: 6px; gap: 12px; }
-    .project-drag-handle { color: #9ca3af; cursor: move; padding: 4px; }
-    .pm-board-project-header h3 { margin: 0 0 4px 0; font-size: 16px; font-weight: 600; color: #111827; }
-    .pm-board-project-header p { margin: 0; font-size: 13px; color: #6b7280; }
-    .pm-board-tasks { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-    .pm-board-empty-tasks { grid-column: 1 / -1; text-align: center; padding: 40px 20px; color: #9ca3af; font-size: 14px; }
-    .pm-board-task-card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: all 0.2s; }
-    .pm-board-task-card:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.1); transform: translateY(-2px); }
-    .pm-board-task-card.hidden { display: none; }
-    .pm-board-filter-toggle { display: flex; background: #f3f4f6; border-radius: 8px; padding: 4px; gap: 4px; }
-    .pm-board-filter-btn { padding: 8px 16px; border: none; background: transparent; color: #6b7280; font-size: 14px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
-    .pm-board-filter-btn:hover { color: #374151; }
-    .pm-board-filter-btn.active { background: white; color: #3b82f6; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .task-card-header { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
-    .task-card-priority { width: 4px; height: 20px; border-radius: 2px; flex-shrink: 0; }
-    .task-card-priority.priority-low { background: #3b82f6; }
-    .task-card-priority.priority-medium { background: #f59e0b; }
-    .task-card-priority.priority-high { background: #ef4444; }
-    .task-card-header h4 { margin: 0; font-size: 14px; font-weight: 600; color: #111827; flex: 1; line-height: 1.4; }
-    .task-card-desc { margin: 0 0 12px 12px; font-size: 13px; color: #6b7280; line-height: 1.5; }
-    .task-card-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; margin-left: 12px; }
-    .task-card-status { padding: 3px 8px; border-radius: 4px; font-weight: 600; color: white; }
-    .task-card-assignee, .task-card-due { display: flex; align-items: center; gap: 4px; color: #6b7280; }
-    .task-card-due.overdue { color: #ef4444; font-weight: 600; }
-    .pm-board-task-card.assignment-hidden { display: none !important; }
-    </style>
-
-    <script>
-    var ajaxurl = '<?php echo admin_url( 'admin-ajax.php' ); ?>';
-
-    (function () {
-        let draggedProject = null;
-
-        document.getElementById('pm-board-filter').addEventListener('change', function () {
-            const filter = this.value;
-            const now = Math.floor(Date.now() / 1000);
-            const weekFromNow = now + (7 * 24 * 60 * 60);
-            const monthFromNow = now + (30 * 24 * 60 * 60);
-
-            document.querySelectorAll('.pm-board-task-card').forEach(card => {
-                if (card.classList.contains('assignment-hidden')) return;
-                const dueTimestamp = parseInt(card.dataset.due);
-                const isOverdue = card.dataset.overdue === '1';
-                let show = true;
-                if (filter === 'week')    show = dueTimestamp > 0 && dueTimestamp <= weekFromNow;
-                else if (filter === 'month')   show = dueTimestamp > 0 && dueTimestamp <= monthFromNow;
-                else if (filter === 'overdue') show = isOverdue;
-                card.classList.toggle('hidden', !show);
-            });
-
-            updateProjectTaskCounts();
-            updateEmptyStates();
-        });
-
-        document.getElementById('pm-board-search').addEventListener('input', function () {
-            const searchTerm = this.value.toLowerCase();
-            document.querySelectorAll('.pm-board-task-card').forEach(card => {
-                if (card.classList.contains('hidden') || card.classList.contains('assignment-hidden')) return;
-                const title   = card.querySelector('h4').textContent.toLowerCase();
-                const descEl  = card.querySelector('.task-card-desc');
-                const descTxt = descEl ? descEl.textContent.toLowerCase() : '';
-                card.style.display = (title.includes(searchTerm) || descTxt.includes(searchTerm)) ? 'block' : 'none';
-            });
-            updateEmptyStates();
-        });
-
-        function updateProjectTaskCounts() {
-            document.querySelectorAll('.pm-board-project').forEach(project => {
-                const visible = project.querySelectorAll('.pm-board-task-card:not(.hidden):not(.assignment-hidden)').length;
-                const el = project.querySelector('.project-task-count');
-                if (el) el.textContent = visible + ' task' + (visible !== 1 ? 's' : '');
-            });
-        }
-
-        document.querySelectorAll('.pm-board-project').forEach(project => {
-            project.addEventListener('dragstart', function () { draggedProject = this; this.classList.add('dragging'); });
-            project.addEventListener('dragend',   function () { this.classList.remove('dragging'); draggedProject = null; });
-        });
-
-        const projectsContainer = document.querySelector('.sortable-projects');
-        if (projectsContainer) {
-            projectsContainer.addEventListener('dragover', function (e) {
-                e.preventDefault();
-                const after = getDragAfterElement(this, e.clientY);
-                after ? this.insertBefore(draggedProject, after) : this.appendChild(draggedProject);
-            });
-
-            projectsContainer.addEventListener('drop', function () {
-                const order = Array.from(this.querySelectorAll('.pm-board-project')).map(p => p.dataset.projectId);
-                const fd = new FormData();
-                fd.append('action', 'pm_reorder_projects');
-                fd.append('project_order', JSON.stringify(order));
-                fd.append('nonce', '<?php echo wp_create_nonce( 'pm_reorder_projects_nonce' ); ?>');
-                fetch(ajaxurl, { method: 'POST', body: fd });
-            });
-        }
-
-        function getDragAfterElement(container, y) {
-            const els = [...container.querySelectorAll('.pm-board-project:not(.dragging)')];
-            return els.reduce((closest, child) => {
-                const box = child.getBoundingClientRect();
-                const offset = y - box.top - box.height / 2;
-                return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest;
-            }, { offset: Number.NEGATIVE_INFINITY }).element;
-        }
-
-        let currentAssignmentFilter = 'all';
-
-        window.pmBoardFilterTasks = function (filter) {
-            currentAssignmentFilter = filter;
-            document.querySelectorAll('.pm-board-filter-btn').forEach(b => b.classList.remove('active'));
-            document.querySelector(`.pm-board-filter-btn[data-filter="${filter}"]`).classList.add('active');
-
-            const currentUserId = '<?php echo get_current_user_id(); ?>';
-
-            document.querySelectorAll('.pm-board-task-card').forEach(card => {
-                const assignedTo = card.getAttribute('data-assigned-to');
-                const show = filter !== 'my' || assignedTo === currentUserId;
-                card.classList.toggle('assignment-hidden', !show);
-            });
-
-            updateProjectTaskCounts();
-            updateEmptyStates();
-        };
-
-        function updateEmptyStates() {
-            document.querySelectorAll('.pm-board-project').forEach(project => {
-                const tasksContainer = project.querySelector('.pm-board-tasks');
-                const visible  = tasksContainer.querySelectorAll('.pm-board-task-card:not(.hidden):not(.assignment-hidden)');
-                const allCards = tasksContainer.querySelectorAll('.pm-board-task-card');
-                let emptyState = tasksContainer.querySelector('.pm-board-empty-tasks');
-
-                if (visible.length === 0 && allCards.length > 0) {
-                    if (!emptyState) {
-                        emptyState = document.createElement('div');
-                        emptyState.className = 'pm-board-empty-tasks dynamic-empty';
-                        tasksContainer.appendChild(emptyState);
-                    }
-                    emptyState.textContent = currentAssignmentFilter === 'my'
-                        ? 'No tasks assigned to you in this project'
-                        : 'No tasks match the current filters';
-                    emptyState.style.display = 'block';
-                } else if (emptyState && emptyState.classList.contains('dynamic-empty')) {
-                    emptyState.style.display = 'none';
-                }
-            });
-        }
-    })();
-    </script>
-    <?php
-    return ob_get_clean();
-}
-/* ============================================================
-   RESOURCE LOAD TAB
-   ============================================================ */
-
-function pm_resource_load_tab( $business_id ) {
-    global $wpdb;
-
-    $tasks_table     = $wpdb->prefix . 'pm_tasks';
-    $time_logs_table = $wpdb->prefix . 'pm_time_logs';
-    $team_table      = $wpdb->prefix . 'pm_team_members';
-    $projects_table  = $wpdb->prefix . 'pm_projects';
-
-    $current_user = wp_get_current_user();
-    $is_wp_admin  = current_user_can( 'manage_options' );
-    $current_role = bntm_get_user_role( $current_user->ID );
-    $can_view_all = $is_wp_admin || in_array( $current_role, [ 'owner', 'manager' ] );
-
-    $view          = isset( $_GET['view'] )          ? sanitize_text_field( $_GET['view'] )          : 'weekly';
-    $selected_date = isset( $_GET['selected_date'] ) ? sanitize_text_field( $_GET['selected_date'] ) : date( 'Y-m-d' );
-
-    // Date ranges
-    switch ( $view ) {
-        case 'weekly':
-            $week_start = strtotime( 'last sunday', strtotime( $selected_date ) );
-            if ( date( 'w', strtotime( $selected_date ) ) == 0 ) $week_start = strtotime( $selected_date );
-            $date_from = date( 'Y-m-d', $week_start );
-            $date_to   = date( 'Y-m-d', strtotime( $date_from . ' +6 days' ) );
-            break;
-        case 'monthly':
-            $date_from = date( 'Y-m-01', strtotime( $selected_date ) );
-            $date_to   = date( 'Y-m-t',  strtotime( $selected_date ) );
-            break;
-        default:
-            $week_start = strtotime( 'last sunday' );
-            if ( date( 'w' ) == 0 ) $week_start = strtotime( 'today' );
-            $date_from = date( 'Y-m-d', $week_start );
-            $date_to   = date( 'Y-m-d', strtotime( $date_from . ' +6 days' ) );
-    }
-
-    if ( $view === 'weekly' ) {
-        $prev_date      = date( 'Y-m-d', strtotime( $date_from . ' -7 days' ) );
-        $next_date      = date( 'Y-m-d', strtotime( $date_from . ' +7 days' ) );
-        $period_display = date( 'M d', strtotime( $date_from ) ) . ' - ' . date( 'M d, Y', strtotime( $date_to ) );
-    } else {
-        $prev_date      = date( 'Y-m-d', strtotime( $date_from . ' -1 month' ) );
-        $next_date      = date( 'Y-m-d', strtotime( $date_from . ' +1 month' ) );
-        $period_display = date( 'F Y', strtotime( $date_from ) );
-    }
-
-    // ── Task visibility filter ────────────────────────────────────────────────
-    // For the resource tab the alias used in sub-queries is "t"
-    $vis = pm_get_task_visibility( 't' );
-
-    // Build project-id list used to scope the team member list
-    if ( $can_view_all ) {
-        $user_project_ids  = [];
-        $project_filter    = '';          // used in raw SQL below
-        $team_members_where = '';
-    } else {
-        $user_project_ids = $wpdb->get_col( $wpdb->prepare(
-            "SELECT project_id FROM {$team_table} WHERE user_id = %d AND role = 'project_manager'",
-            $current_user->ID
-        ) );
-        $user_project_ids   = ! empty( $user_project_ids ) ? $user_project_ids : [ 0 ];
-        $project_filter     = " AND t.project_id IN (" . implode( ',', array_map( 'intval', $user_project_ids ) ) . ")";
-        $team_members_where = " WHERE project_id IN (" . implode( ',', array_map( 'intval', $user_project_ids ) ) . ")";
-    }
-
-    // ── Also apply task-visibility to the team workload query ─────────────────
-    // When the user is staff (not PM, not admin/owner/manager) they only see
-    // their own tasks, so scope workload to just themselves.
-    $vis_extra = $vis['where'];     // already starts with " AND …"
-
-    $team_workload = $wpdb->get_results( $wpdb->prepare(
-        "SELECT u.ID, u.display_name, u.user_email,
-         COUNT(DISTINCT CASE WHEN t.due_date BETWEEN %s AND %s THEN t.id END) as active_tasks,
-         COUNT(DISTINCT CASE WHEN t.status NOT IN ('completed','closed') AND t.due_date BETWEEN %s AND %s THEN t.id END) as pending_tasks,
-         COUNT(DISTINCT CASE WHEN t.priority = 'high' AND t.due_date BETWEEN %s AND %s THEN t.id END) as high_priority_tasks,
-         COALESCE(SUM(CASE WHEN t.status NOT IN ('completed','closed') AND t.due_date BETWEEN %s AND %s THEN t.estimated_hours ELSE 0 END), 0) as estimated_hours,
-         COALESCE(SUM(tl.hours), 0) as logged_hours,
-         COUNT(DISTINCT CASE WHEN t.due_date BETWEEN %s AND %s THEN t.project_id END) as project_count
-         FROM {$wpdb->users} u
-         LEFT JOIN {$tasks_table} t ON u.ID = t.assigned_to {$project_filter} {$vis_extra}
-         LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.log_date BETWEEN %s AND %s
-         WHERE u.ID IN (
-             SELECT DISTINCT user_id FROM {$team_table}{$team_members_where}
-         )
-         GROUP BY u.ID
-         ORDER BY pending_tasks DESC, estimated_hours DESC",
-        array_merge(
-            $vis['params'],   // params for vis_extra inside JOIN
-            [
-                $date_from, $date_to,
-                $date_from, $date_to,
-                $date_from, $date_to,
-                $date_from, $date_to,
-                $date_from, $date_to,
-                $date_from, $date_to,
-            ]
-        )
-    ) );
-
-    // ── Project distribution ──────────────────────────────────────────────────
-    $project_dist_where = $can_view_all ? '' : "WHERE p.id IN (" . implode( ',', array_map( 'intval', $user_project_ids ) ) . ")";
-
-    $project_distribution = $wpdb->get_results( $wpdb->prepare(
-        "SELECT p.id, p.name, p.color,
-         COUNT(DISTINCT t.assigned_to) as team_members,
-         COUNT(DISTINCT t.id) as total_tasks,
-         COUNT(DISTINCT CASE WHEN t.status NOT IN ('completed','closed') AND t.due_date BETWEEN %s AND %s THEN t.id END) as active_tasks,
-         COALESCE(SUM(CASE WHEN t.status NOT IN ('completed','closed') AND t.due_date BETWEEN %s AND %s THEN t.estimated_hours ELSE 0 END), 0) as total_estimated_hours
-         FROM {$projects_table} p
-         LEFT JOIN {$tasks_table} t ON p.id = t.project_id {$vis_extra}
-         {$project_dist_where}
-         GROUP BY p.id
-         HAVING active_tasks > 0
-         ORDER BY active_tasks DESC",
-        array_merge(
-            $vis['params'],   // for vis_extra
-            [ $date_from, $date_to, $date_from, $date_to ]
-        )
-    ) );
-
-    // Capacity thresholds
-    $overloaded_threshold = 40;
-    $optimal_threshold    = 30;
-    $overloaded = $optimal = $underutilized = 0;
-    foreach ( $team_workload as $m ) {
-        if ( $m->estimated_hours > $overloaded_threshold )       $overloaded++;
-        elseif ( $m->estimated_hours >= $optimal_threshold )     $optimal++;
-        else                                                       $underutilized++;
-    }
-
-    // User colour palette
-    $user_colors = [
-        '#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6',
-        '#ec4899','#14b8a6','#f97316','#6366f1','#84cc16',
-        '#06b6d4','#f43f5e','#22c55e','#eab308','#a855f7',
-        '#64748b','#d946ef','#0ea5e9','#fb923c','#4ade80',
-    ];
-
-    $all_users_q = "SELECT DISTINCT u.ID, u.display_name
-                    FROM {$wpdb->users} u
-                    WHERE u.ID IN (
-                        SELECT DISTINCT user_id FROM {$team_table}{$team_members_where}
-                    )
-                    ORDER BY u.display_name";
-    $all_users = $wpdb->get_results( $all_users_q );
-
-    $user_color_map = [];
-    foreach ( $all_users as $idx => $user ) {
-        $user_color_map[ $user->ID ] = [
-            'name'  => $user->display_name,
-            'color' => $user_colors[ $idx % count( $user_colors ) ],
-        ];
-    }
-
-    // ── Daily distribution ────────────────────────────────────────────────────
-    $user_daily_distribution = [];
-    $num_days       = (int) ( ( strtotime( $date_to ) - strtotime( $date_from ) ) / 86400 ) + 1;
-    $max_hours      = 8;
-    $max_height_px  = 150;
-
-    for ( $i = 0; $i < $num_days; $i++ ) {
-        $current_day = date( 'Y-m-d', strtotime( $date_from . " +{$i} days" ) );
-        $day_name    = $view === 'weekly' ? date( 'D', strtotime( $current_day ) ) : date( 'j', strtotime( $current_day ) );
-        $day_date    = date( 'M d', strtotime( $current_day ) );
-
-        $user_daily_distribution[ $current_day ] = [
-            'day'      => $day_name,
-            'date'     => $current_day,
-            'day_date' => $day_date,
-            'users'    => [],
-        ];
-
-        foreach ( $all_users as $user ) {
-            // Estimated hours — apply visibility filter
-            if ( $vis['where'] === '' ) {
-                $estimated_hours = $wpdb->get_var( $wpdb->prepare(
-                    "SELECT COALESCE(SUM(t.estimated_hours),0) FROM {$tasks_table} t
-                     WHERE t.due_date = %s AND t.assigned_to = %d {$project_filter}",
-                    $current_day, $user->ID
-                ) );
-                $actual_hours = $wpdb->get_var( $wpdb->prepare(
-                    "SELECT COALESCE(SUM(tl.hours),0) FROM {$time_logs_table} tl
-                     INNER JOIN {$tasks_table} t ON tl.task_id = t.id
-                     WHERE tl.log_date = %s AND t.assigned_to = %d {$project_filter}",
-                    $current_day, $user->ID
-                ) );
-            } else {
-                $estimated_hours = $wpdb->get_var( $wpdb->prepare(
-                    "SELECT COALESCE(SUM(t.estimated_hours),0) FROM {$tasks_table} t
-                     WHERE t.due_date = %s AND t.assigned_to = %d {$project_filter} {$vis['where']}",
-                    array_merge( [ $current_day, $user->ID ], $vis['params'] )
-                ) );
-                $actual_hours = $wpdb->get_var( $wpdb->prepare(
-                    "SELECT COALESCE(SUM(tl.hours),0) FROM {$time_logs_table} tl
-                     INNER JOIN {$tasks_table} t ON tl.task_id = t.id
-                     WHERE tl.log_date = %s AND t.assigned_to = %d {$project_filter} {$vis['where']}",
-                    array_merge( [ $current_day, $user->ID ], $vis['params'] )
-                ) );
-            }
-
-            if ( $estimated_hours > 0 || $actual_hours > 0 ) {
-                $user_daily_distribution[ $current_day ]['users'][] = [
-                    'user_id'          => $user->ID,
-                    'user_name'        => $user->display_name,
-                    'estimated_hours'  => floatval( $estimated_hours ),
-                    'actual_hours'     => floatval( $actual_hours ),
-                    'estimated_height' => ( $estimated_hours / $max_hours ) * $max_height_px,
-                    'actual_height'    => ( $actual_hours   / $max_hours ) * $max_height_px,
-                    'color'            => $user_color_map[ $user->ID ]['color'],
-                ];
-            }
-        }
-    }
-
-document.getElementById('pm-project-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const projectId = document.getElementById('pm-project-id').value;
-    formData.append('action', projectId ? 'pm_update_project' : 'pm_create_project');
-    formData.append('nonce', '<?php echo $nonce; ?>');
-    
-    const submitBtn = this.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.querySelector('span').textContent = projectId ? 'Updating...' : 'Creating...';
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success) {
-            location.reload();
-        } else {
-            alert(json.data.message || 'Operation failed');
-            submitBtn.disabled = false;
-            submitBtn.querySelector('span').textContent = projectId ? 'Update Project' : 'Create Project';
-        }
-    });
-});
-</script>
-<?php return ob_get_clean();
-}
-/**
- * Project Board Tab
- */
 function pm_board_tab($business_id)
 {
     global $wpdb;
@@ -2046,33 +1744,826 @@ function pm_board_tab($business_id)
         ORDER BY sort_order ASC, created_at DESC");
     
     ob_start();
-    // ── HTML (identical to original; only data changes) ───────────────────────
+    ?>
+<div class="pm-board-container">
+    <div class="pm-board-header">
+        <h2>Project Board</h2>
+        <div class="pm-board-controls bntm-form-group" style="width: unset;">
+            <div class="pm-board-filter-toggle">
+                <button class="pm-board-filter-btn active" data-filter="all" onclick="pmBoardFilterTasks('all')">
+                    All Tasks
+                </button>
+                <button class="pm-board-filter-btn" data-filter="my" onclick="pmBoardFilterTasks('my')">
+                    My Tasks
+                </button>
+            </div>
+            <select id="pm-board-filter" class="bntm-input" style="width: 150px;">
+                <option value="all">All Due Dates</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="overdue">Overdue</option>
+            </select>
+            <input type="text" id="pm-board-search" placeholder="Search tasks..." class="bntm-input" style="width: 250px;">
+        </div>
+    </div>
+    <?php if (empty($projects)): ?>
+        <div class="pm-empty-board">
+            <svg width="80" height="80" fill="none" stroke="#d1d5db" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            <h3>No Active Projects</h3>
+            <p>Create a project to start managing tasks</p>
+            <a href="?tab=projects" class="bntm-btn-primary">Go to Projects</a>
+        </div>
+    <?php else: ?>
+        <div class="pm-board-projects sortable-projects">
+            <?php foreach ($projects as $project):
+                $tasks = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT * FROM {$tasks_table} 
+                     WHERE project_id = %d AND status NOT IN ('completed', 'closed')
+                     ORDER BY sort_order ASC, created_at DESC",
+                        $project->id
+                    )
+                ); ?>
+                <div class="pm-board-project" data-project-id="<?php echo $project->id; ?>" draggable="true"style="border: 2px solid <?php echo esc_attr( $project->color); ?>33;
+                    background:<?php echo esc_attr( $project->color); ?>0a;
+                    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+                    
+                    <div class="pm-board-project-header" >
+                        <div class="project-drag-handle">
+                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3><?php echo esc_html($project->name); ?></h3>
+                            <p class="project-task-count"><?php echo count(
+                                $tasks
+                            ); ?> tasks</p>
+                        </div>
+                        <a href="?project_id=<?php echo $project->id; ?>" class="bntm-btn-small bntm-btn-secondary" style="background-color:<?php echo esc_attr( $project->color ); ?>">
+                            View Project →
+                        </a>
+                    </div>
+                    
+                    <div class="pm-board-tasks" data-project-id="<?php echo $project->id; ?>">
+                        <?php if (empty($tasks)): ?>
+                            <div class="pm-board-empty-tasks">
+                                <p>No tasks in this project</p>
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($tasks as $task):
+                                $assigned_user = $task->assigned_to
+                                    ? get_userdata($task->assigned_to)
+                                    : null;
+                                $is_overdue =
+                                    $task->due_date &&
+                                    strtotime($task->due_date) < time() &&
+                                    $task->status !== "completed";
+                                $due_timestamp = $task->due_date
+                                    ? strtotime($task->due_date)
+                                    : 0;
+                                ?>
+                                <div class="pm-board-task-card" 
+                                     data-task-id="<?php echo $task->id; ?>" 
+                                     data-due="<?php echo $due_timestamp; ?>"
+                                     data-overdue="<?php echo $is_overdue ? "1" : "0"; ?>"
+                                     data-assigned-to="<?php echo $task->assigned_to ? $task->assigned_to : '0'; ?>">
+                                    <div class="task-card-header">
+                                        <span class="task-card-priority priority-<?php echo $task->priority; ?>"></span>
+                                        <h4><?php echo esc_html(
+                                            $task->title
+                                        ); ?></h4>
+                                    </div>
+                                    <?php if ($task->description): ?>
+                                        <p class="task-card-desc"><?php echo esc_html(
+                                            wp_trim_words(
+                                                $task->description,
+                                                15
+                                            )
+                                        ); ?></p>
+                                    <?php endif; ?>
+                                    <div class="task-card-meta">
+                                        <span class="task-card-status" style="background: <?php echo pm_get_status_color(
+                                            $task->status
+                                        ); ?>">
+                                            <?php echo ucfirst($task->status); ?>
+                                        </span>
+                                        <?php if ($assigned_user): ?>
+                                            <span class="task-card-assignee" title="<?php echo esc_attr(
+                                                $assigned_user->display_name
+                                            ); ?>">
+                                                <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                                </svg>
+                                                <?php echo esc_html(
+                                                    $assigned_user->display_name
+                                                ); ?>
+                                            </span>
+                                        <?php endif; ?>
+                                        <?php if ($task->due_date): ?>
+                                            <span class="task-card-due <?php echo $is_overdue
+                                                ? "overdue"
+                                                : ""; ?>">
+                                                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                                </svg>
+                                                <?php echo date(
+                                                    "M d",
+                                                    strtotime($task->due_date)
+                                                ); ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php
+                            endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php
+            endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+
+<style>
+.pm-board-container {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.pm-board-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.pm-board-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-board-controls {
+    display: flex;
+    gap: 12px;
+}
+
+.pm-empty-board {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.pm-empty-board svg {
+    margin: 0 auto 20px;
+}
+
+.pm-empty-board h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    color: #374151;
+}
+
+.pm-empty-board p {
+    margin: 0 0 24px 0;
+    color: #6b7280;
+}
+
+.pm-board-projects {
+    display: grid;
+    gap: 24px;
+}
+
+.pm-board-project {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    cursor: move;
+    transition: all 0.2s;
+}
+
+.pm-board-project:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.pm-board-project.dragging {
+    opacity: 0.5;
+}
+
+.pm-board-project-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-left: 12px;
+    border-radius: 6px;
+    gap: 12px;
+}
+
+.project-drag-handle {
+    color: #9ca3af;
+    cursor: move;
+    padding: 4px;
+}
+
+.pm-board-project-header h3 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-board-project-header p {
+    margin: 0;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.pm-board-tasks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.pm-board-empty-tasks {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+.pm-board-task-card {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: all 0.2s;
+}
+
+.pm-board-task-card:hover {
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.pm-board-task-card.hidden {
+    display: none;
+}
+
+.pm-board-filter-toggle {
+    display: flex;
+    background: #f3f4f6;
+    border-radius: 8px;
+    padding: 4px;
+    gap: 4px;
+}
+
+.pm-board-filter-btn {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.pm-board-filter-btn:hover {
+    color: #374151;
+}
+
+.pm-board-filter-btn.active {
+    background: white;
+    color: #3b82f6;
+    font-weight: 600;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.task-card-header {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.task-card-priority {
+    width: 4px;
+    height: 20px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.task-card-priority.priority-low {
+    background: #3b82f6;
+}
+
+.task-card-priority.priority-medium {
+    background: #f59e0b;
+}
+
+.task-card-priority.priority-high {
+    background: #ef4444;
+}
+
+.task-card-header h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    flex: 1;
+    line-height: 1.4;
+}
+
+.task-card-desc {
+    margin: 0 0 12px 12px;
+    font-size: 13px;
+    color: #6b7280;
+    line-height: 1.5;
+}
+
+.task-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    font-size: 12px;
+    margin-left: 12px;
+}
+
+.task-card-status {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    color: white;
+}
+
+.task-card-assignee, .task-card-due {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #6b7280;
+}
+
+.task-card-due.overdue {
+    color: #ef4444;
+    font-weight: 600;
+}
+.pm-board-task-card.assignment-hidden {
+    display: none !important;
+}
+</style>
+
+<script>
+var ajaxurl = '<?php echo admin_url("admin-ajax.php"); ?>';
+
+(function() {
+    let draggedProject = null;
+    
+   // Filter functionality
+    document.getElementById('pm-board-filter').addEventListener('change', function() {
+        const filter = this.value;
+        const now = Math.floor(Date.now() / 1000);
+        const weekFromNow = now + (7 * 24 * 60 * 60);
+        const monthFromNow = now + (30 * 24 * 60 * 60);
+        
+        document.querySelectorAll('.pm-board-task-card').forEach(card => {
+            // Skip if already hidden by assignment filter
+            if (card.classList.contains('assignment-hidden')) return;
+            
+            const dueTimestamp = parseInt(card.dataset.due);
+            const isOverdue = card.dataset.overdue === '1';
+            let show = true;
+            
+            if (filter === 'week') {
+                show = dueTimestamp > 0 && dueTimestamp <= weekFromNow;
+            } else if (filter === 'month') {
+                show = dueTimestamp > 0 && dueTimestamp <= monthFromNow;
+            } else if (filter === 'overdue') {
+                show = isOverdue;
+            }
+            
+            card.classList.toggle('hidden', !show);
+        });
+        
+        // Update task counts
+        updateProjectTaskCounts();
+        updateEmptyStates();
+    });
+    
+    // Search functionality
+    document.getElementById('pm-board-search').addEventListener('input', function() {
+        const searchTerm = this.value.toLowerCase();
+        
+        document.querySelectorAll('.pm-board-task-card').forEach(card => {
+            // Skip if already hidden by other filters
+            if (card.classList.contains('hidden') || card.classList.contains('assignment-hidden')) return;
+            
+            const title = card.querySelector('h4').textContent.toLowerCase();
+            const desc = card.querySelector('.task-card-desc');
+            const descText = desc ? desc.textContent.toLowerCase() : '';
+            
+            if (title.includes(searchTerm) || descText.includes(searchTerm)) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+        
+        updateEmptyStates();
+    });
+    
+    // Update project task counts
+    function updateProjectTaskCounts() {
+        document.querySelectorAll('.pm-board-project').forEach(project => {
+            const visibleTasks = project.querySelectorAll('.pm-board-task-card:not(.hidden):not(.assignment-hidden)').length;
+            const countElement = project.querySelector('.project-task-count');
+            if (countElement) {
+                countElement.textContent = visibleTasks + ' task' + (visibleTasks !== 1 ? 's' : '');
+            }
+        });
+    }
+    
+    // Drag and drop for projects
+    document.querySelectorAll('.pm-board-project').forEach(project => {
+        project.addEventListener('dragstart', function(e) {
+            draggedProject = this;
+            this.classList.add('dragging');
+        });
+        
+        project.addEventListener('dragend', function() {
+            this.classList.remove('dragging');
+            draggedProject = null;
+        });
+    });
+    
+    const projectsContainer = document.querySelector('.sortable-projects');
+    if (projectsContainer) {
+        projectsContainer.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(this, e.clientY);
+            if (afterElement == null) {
+                this.appendChild(draggedProject);
+            } else {
+                this.insertBefore(draggedProject, afterElement);
+            }
+        });
+        
+        projectsContainer.addEventListener('drop', function() {
+            const projectOrder = Array.from(this.querySelectorAll('.pm-board-project'))
+                .map(project => project.dataset.projectId);
+            
+            const formData = new FormData();
+            formData.append('action', 'pm_reorder_projects');
+            formData.append('project_order', JSON.stringify(projectOrder));
+            formData.append('nonce', '<?php echo wp_create_nonce(
+                "pm_reorder_projects_nonce"
+            ); ?>');
+            
+            fetch(ajaxurl, {method: 'POST', body: formData})
+            .then(r => r.json())
+            .then(json => {
+                if (!json.success) {
+                    console.error('Failed to reorder projects');
+                }
+            });
+        });
+    }
+    
+    function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('.pm-board-project:not(.dragging)')];
+        
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+    
+    // Task assignment filter
+    let currentAssignmentFilter = 'all';
+    
+    window.pmBoardFilterTasks = function(filter) {
+        currentAssignmentFilter = filter;
+        
+        // Update active button
+        document.querySelectorAll('.pm-board-filter-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`.pm-board-filter-btn[data-filter="${filter}"]`).classList.add('active');
+        
+        // Get current user ID from PHP
+        const currentUserId = '<?php echo get_current_user_id(); ?>';
+        
+        // Filter tasks
+        document.querySelectorAll('.pm-board-task-card').forEach(card => {
+            const assignedTo = card.getAttribute('data-assigned-to');
+            let show = true;
+            
+            if (filter === 'my') {
+                // Show only tasks assigned to current user
+                show = assignedTo === currentUserId;
+            }
+            
+            // Apply the assignment filter
+            if (show) {
+                card.classList.remove('assignment-hidden');
+            } else {
+                card.classList.add('assignment-hidden');
+            }
+        });
+        
+        // Update task counts and empty states
+        updateProjectTaskCounts();
+        updateEmptyStates();
+    }
+    
+    // Update empty states
+    function updateEmptyStates() {
+        document.querySelectorAll('.pm-board-project').forEach(project => {
+            const tasksContainer = project.querySelector('.pm-board-tasks');
+            const visibleTasks = tasksContainer.querySelectorAll('.pm-board-task-card:not(.hidden):not(.assignment-hidden)');
+            const allTasks = tasksContainer.querySelectorAll('.pm-board-task-card');
+            
+            let emptyState = tasksContainer.querySelector('.pm-board-empty-tasks');
+            
+            if (visibleTasks.length === 0 && allTasks.length > 0) {
+                // Has tasks but none visible
+                if (!emptyState) {
+                    emptyState = document.createElement('div');
+                    emptyState.className = 'pm-board-empty-tasks dynamic-empty';
+                    tasksContainer.appendChild(emptyState);
+                }
+                emptyState.textContent = currentAssignmentFilter === 'my' 
+                    ? 'No tasks assigned to you in this project' 
+                    : 'No tasks match the current filters';
+                emptyState.style.display = 'block';
+            } else if (emptyState && emptyState.classList.contains('dynamic-empty')) {
+                emptyState.style.display = 'none';
+            }
+        });
+    }
+})();
+</script>
+<?php
+    return ob_get_clean();
+}
+/*
+Resource Load Management Tab
+*/
+function pm_resource_load_tab($business_id) {
+    global $wpdb;
+    
+    $tasks_table = $wpdb->prefix . "pm_tasks";
+    $time_logs_table = $wpdb->prefix . "pm_time_logs";
+    $team_table = $wpdb->prefix . "pm_team_members";
+    $projects_table = $wpdb->prefix . "pm_projects";
+    
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    $can_view_all = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
+    
+    // View filter: weekly, monthly
+    $view = isset($_GET['view']) ? sanitize_text_field($_GET['view']) : 'weekly';
+    $selected_date = isset($_GET['selected_date']) ? sanitize_text_field($_GET['selected_date']) : date('Y-m-d');
+    
+    // Calculate date ranges based on view
+    switch ($view) {
+        case 'weekly':
+            // Start week on Sunday
+            $week_start = strtotime('last sunday', strtotime($selected_date));
+            // If selected date IS Sunday, use it
+            if (date('w', strtotime($selected_date)) == 0) {
+                $week_start = strtotime($selected_date);
+            }
+            $date_from = date('Y-m-d', $week_start);
+            $date_to = date('Y-m-d', strtotime($date_from . ' +6 days'));
+            break;
+        case 'monthly':
+            $date_from = date('Y-m-01', strtotime($selected_date));
+            $date_to = date('Y-m-t', strtotime($selected_date));
+            break;
+        default:
+            $week_start = strtotime('last sunday');
+            if (date('w') == 0) {
+                $week_start = strtotime('today');
+            }
+            $date_from = date('Y-m-d', $week_start);
+            $date_to = date('Y-m-d', strtotime($date_from . ' +6 days'));
+    }
+    
+    // Calculate prev and next dates
+    if ($view === 'weekly') {
+        $prev_date = date('Y-m-d', strtotime($date_from . ' -7 days'));
+        $next_date = date('Y-m-d', strtotime($date_from . ' +7 days'));
+        $period_display = date('M d', strtotime($date_from)) . ' - ' . date('M d, Y', strtotime($date_to));
+    } else {
+        $prev_date = date('Y-m-d', strtotime($date_from . ' -1 month'));
+        $next_date = date('Y-m-d', strtotime($date_from . ' +1 month'));
+        $period_display = date('F Y', strtotime($date_from));
+    }
+    
+    // Get user's project IDs if they're a project manager
+    $user_project_ids = [];
+    if (!$can_view_all) {
+        $user_projects = $wpdb->get_col($wpdb->prepare(
+            "SELECT project_id FROM {$team_table} WHERE user_id = %d AND role = 'project_manager'",
+            $current_user->ID
+        ));
+        $user_project_ids = !empty($user_projects) ? $user_projects : [0];
+    }
+    
+    $project_filter = !$can_view_all ? " AND t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "";
+    
+    // Get all team members with their workload (filtered by date range)
+    $team_workload = $wpdb->get_results($wpdb->prepare(
+        "SELECT u.ID, u.display_name, u.user_email,
+         COUNT(DISTINCT CASE WHEN t.due_date BETWEEN %s AND %s THEN t.id END) as active_tasks,
+         COUNT(DISTINCT CASE WHEN t.status NOT IN ('completed', 'closed') AND t.due_date BETWEEN %s AND %s THEN t.id END) as pending_tasks,
+         COUNT(DISTINCT CASE WHEN t.priority = 'high' AND t.due_date BETWEEN %s AND %s THEN t.id END) as high_priority_tasks,
+         COALESCE(SUM(CASE WHEN t.status NOT IN ('completed', 'closed') AND t.due_date BETWEEN %s AND %s THEN t.estimated_hours ELSE 0 END), 0) as estimated_hours,
+         COALESCE(SUM(tl.hours), 0) as logged_hours,
+         COUNT(DISTINCT CASE WHEN t.due_date BETWEEN %s AND %s THEN t.project_id END) as project_count
+         FROM {$wpdb->users} u
+         LEFT JOIN {$tasks_table} t ON u.ID = t.assigned_to {$project_filter}
+         LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.log_date BETWEEN %s AND %s
+         WHERE u.ID IN (
+             SELECT DISTINCT user_id FROM {$team_table}" . (!$can_view_all ? " WHERE project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+         )
+         GROUP BY u.ID
+         ORDER BY pending_tasks DESC, estimated_hours DESC",
+        $date_from, $date_to,
+        $date_from, $date_to,
+        $date_from, $date_to,
+        $date_from, $date_to,
+        $date_from, $date_to,
+        $date_from, $date_to
+    ));
+    
+    // Get project distribution
+    $project_distribution = $wpdb->get_results($wpdb->prepare(
+        "SELECT p.id, p.name, p.color,
+         COUNT(DISTINCT t.assigned_to) as team_members,
+         COUNT(DISTINCT t.id) as total_tasks,
+         COUNT(DISTINCT CASE WHEN t.status NOT IN ('completed', 'closed') AND t.due_date BETWEEN %s AND %s THEN t.id END) as active_tasks,
+         COALESCE(SUM(CASE WHEN t.status NOT IN ('completed', 'closed') AND t.due_date BETWEEN %s AND %s THEN t.estimated_hours ELSE 0 END), 0) as total_estimated_hours
+         FROM {$projects_table} p
+         LEFT JOIN {$tasks_table} t ON p.id = t.project_id
+         " . (!$can_view_all ? "WHERE p.id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+         GROUP BY p.id
+         HAVING active_tasks > 0
+         ORDER BY active_tasks DESC",
+        $date_from, $date_to,
+        $date_from, $date_to
+    ));
+    
+    // Workload capacity analysis
+    $overloaded_threshold = 40; // hours per week
+    $optimal_threshold = 30;
+    
+    $overloaded = 0;
+    $optimal = 0;
+    $underutilized = 0;
+    
+    foreach ($team_workload as $member) {
+        if ($member->estimated_hours > $overloaded_threshold) {
+            $overloaded++;
+        } elseif ($member->estimated_hours >= $optimal_threshold) {
+            $optimal++;
+        } else {
+            $underutilized++;
+        }
+    }
+    
+    // Generate color palette for users
+    $user_colors = [
+        '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+        '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16',
+        '#06b6d4', '#f43f5e', '#22c55e', '#eab308', '#a855f7',
+        '#64748b', '#d946ef', '#0ea5e9', '#fb923c', '#4ade80'
+    ];
+    
+    // Get all users with color assignment
+    $all_users = $wpdb->get_results(
+        "SELECT DISTINCT u.ID, u.display_name
+         FROM {$wpdb->users} u
+         WHERE u.ID IN (
+             SELECT DISTINCT user_id FROM {$team_table}" . (!$can_view_all ? " WHERE project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+         )
+         ORDER BY u.display_name"
+    );
+    
+    $user_color_map = [];
+    foreach ($all_users as $index => $user) {
+        $user_color_map[$user->ID] = [
+            'name' => $user->display_name,
+            'color' => $user_colors[$index % count($user_colors)]
+        ];
+    }
+    
+    // Task distribution by user per day
+    $user_daily_distribution = [];
+    $num_days = (strtotime($date_to) - strtotime($date_from)) / (60 * 60 * 24) + 1;
+    $max_hours = 8; // Base 8 hours for 100% height
+    $max_height_px = 150; // Maximum height in pixels
+    
+    // Build distribution data
+    for ($i = 0; $i < $num_days; $i++) {
+        $current_day = date('Y-m-d', strtotime($date_from . " +{$i} days"));
+        $day_name = $view === 'weekly' ? date('D', strtotime($current_day)) : date('j', strtotime($current_day));
+        $day_date = date('M d', strtotime($current_day));
+        
+        $user_daily_distribution[$current_day] = [
+            'day' => $day_name,
+            'date' => $current_day,
+            'day_date' => $day_date,
+            'users' => []
+        ];
+        
+        // Get tasks for each user on this day
+        foreach ($all_users as $user) {
+            // Get estimated hours
+            $estimated_hours = $wpdb->get_var($wpdb->prepare(
+                "SELECT COALESCE(SUM(t.estimated_hours), 0) FROM {$tasks_table} t
+                 WHERE t.due_date = %s 
+                 AND t.assigned_to = %d
+                 {$project_filter}",
+                $current_day,
+                $user->ID
+            ));
+            
+            // Get actual/logged hours
+            $actual_hours = $wpdb->get_var($wpdb->prepare(
+                "SELECT COALESCE(SUM(tl.hours), 0) FROM {$time_logs_table} tl
+                 INNER JOIN {$tasks_table} t ON tl.task_id = t.id
+                 WHERE tl.log_date = %s 
+                 AND t.assigned_to = %d
+                 {$project_filter}",
+                $current_day,
+                $user->ID
+            ));
+            
+            // Only add user if they have estimated or actual hours on this day
+            if ($estimated_hours > 0 || $actual_hours > 0) {
+                // Calculate height in pixels (8 hours = max_height_px)
+                $estimated_height = ($estimated_hours / $max_hours) * $max_height_px;
+                $actual_height = ($actual_hours / $max_hours) * $max_height_px;
+                
+                $user_daily_distribution[$current_day]['users'][] = [
+                    'user_id' => $user->ID,
+                    'user_name' => $user->display_name,
+                    'estimated_hours' => floatval($estimated_hours),
+                    'actual_hours' => floatval($actual_hours),
+                    'estimated_height' => $estimated_height,
+                    'actual_height' => $actual_height,
+                    'color' => $user_color_map[$user->ID]['color']
+                ];
+            }
+        }
+    }
+    
+    ob_start();
     ?>
     <div class="pm-resource-load-container">
         <div class="pm-resource-header">
             <h2>Resource Load Management</h2>
             <div class="pm-resource-controls">
                 <select id="pm-view-filter" class="bntm-input" onchange="pmChangeView()">
-                    <option value="weekly"  <?php selected( $view, 'weekly' ); ?>>Weekly View</option>
-                    <option value="monthly" <?php selected( $view, 'monthly' ); ?>>Monthly View</option>
+                    <option value="weekly" <?php echo $view === 'weekly' ? 'selected' : ''; ?>>Weekly View</option>
+                    <option value="monthly" <?php echo $view === 'monthly' ? 'selected' : ''; ?>>Monthly View</option>
                 </select>
             </div>
         </div>
-
+        
         <div class="pm-date-navigation">
             <button class="pm-nav-btn" onclick="pmNavigateDate('prev')">
                 <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
                 </svg>
             </button>
-            <div class="pm-period-display"><strong><?php echo $period_display; ?></strong></div>
+            <div class="pm-period-display">
+                <strong><?php echo $period_display; ?></strong>
+            </div>
             <button class="pm-nav-btn" onclick="pmNavigateDate('next')">
                 <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
                 </svg>
             </button>
         </div>
-
+        
         <!-- Capacity Overview -->
         <div class="pm-capacity-overview">
             <h3>Team Capacity Overview</h3>
@@ -2085,14 +2576,16 @@ function pm_board_tab($business_id)
                         <p class="capacity-label">Team members (&gt;<?php echo $overloaded_threshold; ?>h)</p>
                     </div>
                 </div>
+                
                 <div class="pm-capacity-card optimal">
                     <div class="capacity-icon">✅</div>
                     <div>
                         <h4>Optimal Load</h4>
                         <p class="capacity-value"><?php echo $optimal; ?></p>
-                        <p class="capacity-label">Team members (<?php echo $optimal_threshold; ?>–<?php echo $overloaded_threshold; ?>h)</p>
+                        <p class="capacity-label">Team members (<?php echo $optimal_threshold; ?>-<?php echo $overloaded_threshold; ?>h)</p>
                     </div>
                 </div>
+                
                 <div class="pm-capacity-card underutilized">
                     <div class="capacity-icon">📊</div>
                     <div>
@@ -2103,68 +2596,84 @@ function pm_board_tab($business_id)
                 </div>
             </div>
         </div>
-
-        <!-- Task Distribution Chart -->
-        <?php if ( ! empty( $user_daily_distribution ) ) : ?>
+        
+        <!-- Task Distribution Chart with User Breakdown -->
+        <?php if (!empty($user_daily_distribution)): ?>
         <div class="pm-resource-section">
-            <h3>Task Distribution — <?php echo $view === 'weekly' ? 'This Week' : 'This Month'; ?></h3>
+            <h3>Task Distribution - <?php echo $view === 'weekly' ? 'This Week' : 'This Month'; ?></h3>
+            
+            <!-- User Legend -->
             <div class="pm-user-legend">
-                <div style="width:100%;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
-                    <span style="font-size:12px;font-weight:600;color:#6b7280;">Legend:</span>
-                    <span style="margin-left:16px;font-size:11px;">
-                        <span style="display:inline-block;width:20px;height:12px;background:#3b82f6;border:2px solid rgba(0,0,0,0.1);border-radius:2px;vertical-align:middle;"></span> Estimated
+                <div style="width: 100%; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb;">
+                    <span style="font-size: 12px; font-weight: 600; color: #6b7280;">Legend:</span>
+                    <span style="margin-left: 16px; font-size: 11px;">
+                        <span style="display: inline-block; width: 20px; height: 12px; background: #3b82f6; border: 2px solid rgba(0,0,0,0.1); border-radius: 2px; vertical-align: middle;"></span> Estimated Hours
                     </span>
-                    <span style="margin-left:12px;font-size:11px;">
-                        <span style="display:inline-block;width:20px;height:12px;background:#3b82f6;opacity:0.6;border:2px dashed rgba(255,255,255,0.5);border-radius:2px;vertical-align:middle;"></span> Actual
+                    <span style="margin-left: 12px; font-size: 11px;">
+                        <span style="display: inline-block; width: 20px; height: 12px; background: #3b82f6; opacity: 0.6; border: 2px dashed rgba(255,255,255,0.5); border-radius: 2px; vertical-align: middle;"></span> Actual Hours
                     </span>
                 </div>
-                <?php foreach ( $user_color_map as $uid => $ud ) : ?>
+                <?php foreach ($user_color_map as $user_id => $user_data): ?>
                     <div class="legend-item">
-                        <span class="legend-color" style="background:<?php echo $ud['color']; ?>;"></span>
-                        <span class="legend-name"><?php echo esc_html( $ud['name'] ); ?></span>
+                        <span class="legend-color" style="background: <?php echo $user_data['color']; ?>;"></span>
+                        <span class="legend-name"><?php echo esc_html($user_data['name']); ?></span>
                     </div>
                 <?php endforeach; ?>
             </div>
+            
             <div class="pm-chart-container">
+                <!-- Y-axis Labels -->
                 <div class="pm-y-axis">
-                    <div class="y-axis-label" style="bottom:100%;">12h</div>
-                    <div class="y-axis-label" style="bottom:83.33%;">10h</div>
-                    <div class="y-axis-label" style="bottom:66.66%;">8h</div>
-                    <div class="y-axis-label" style="bottom:50%;">6h</div>
-                    <div class="y-axis-label" style="bottom:33.33%;">4h</div>
-                    <div class="y-axis-label" style="bottom:16.66%;">2h</div>
-                    <div class="y-axis-label" style="bottom:0;">0h</div>
+                    <div class="y-axis-label" style="bottom: 100%;">12h</div>
+                    <div class="y-axis-label" style="bottom: 83.33%;">10h</div>
+                    <div class="y-axis-label" style="bottom: 66.66%;">8h</div>
+                    <div class="y-axis-label" style="bottom: 50%;">6h</div>
+                    <div class="y-axis-label" style="bottom: 33.33%;">4h</div>
+                    <div class="y-axis-label" style="bottom: 16.66%;">2h</div>
+                    <div class="y-axis-label" style="bottom: 0;">0h</div>
                 </div>
+                
+                <!-- Chart Area -->
                 <div class="pm-daily-distribution <?php echo $view === 'monthly' ? 'monthly-view' : ''; ?>">
+                    <!-- Grid Lines -->
                     <div class="pm-grid-lines">
-                        <?php foreach ( [ '100%','83.33%','66.66%','50%','33.33%','16.66%','0' ] as $pct ) : ?>
-                            <div class="grid-line" style="bottom:<?php echo $pct; ?>;"></div>
-                        <?php endforeach; ?>
+                        <div class="grid-line" style="bottom: 100%;"></div>
+                        <div class="grid-line" style="bottom: 83.33%;"></div>
+                        <div class="grid-line" style="bottom: 66.66%;"></div>
+                        <div class="grid-line" style="bottom: 50%;"></div>
+                        <div class="grid-line" style="bottom: 33.33%;"></div>
+                        <div class="grid-line" style="bottom: 16.66%;"></div>
+                        <div class="grid-line" style="bottom: 0;"></div>
                     </div>
-                    <?php foreach ( $user_daily_distribution as $day_data ) :
-                        $is_today  = $day_data['date'] === date( 'Y-m-d' );
-                        $has_tasks = ! empty( $day_data['users'] );
+                    
+                    <?php foreach ($user_daily_distribution as $day_data): 
+                        $is_today = $day_data['date'] === date('Y-m-d');
+                        $has_tasks = !empty($day_data['users']);
                     ?>
                         <div class="daily-bar-container">
                             <div class="daily-content">
-                                <?php if ( $has_tasks ) :
-                                    foreach ( $day_data['users'] as $ut ) : ?>
+                                <?php if ($has_tasks): ?>
+                                    <?php foreach ($day_data['users'] as $user_task): ?>
                                         <div class="user-task-group">
-                                            <div class="user-task-bar estimated"
-                                                 style="background:<?php echo $ut['color']; ?>;height:<?php echo max($ut['estimated_height'],5); ?>px;"
-                                                 data-tooltip="<?php echo esc_attr($ut['user_name'].' - Estimated: '.number_format($ut['estimated_hours'],1).'h'); ?>"></div>
-                                            <div class="user-task-bar actual"
-                                                 style="background:<?php echo $ut['color']; ?>;opacity:0.6;height:<?php echo max($ut['actual_height'],5); ?>px;"
-                                                 data-tooltip="<?php echo esc_attr($ut['user_name'].' - Actual: '.number_format($ut['actual_hours'],1).'h'); ?>"></div>
+                                            <!-- Estimated Hours Bar -->
+                                            <div class="user-task-bar estimated" 
+                                                 style="background: <?php echo $user_task['color']; ?>; height: <?php echo max($user_task['estimated_height'], 5); ?>px;"
+                                                 data-tooltip="<?php echo esc_attr($user_task['user_name'] . ' - Estimated: ' . number_format($user_task['estimated_hours'], 1) . 'h'); ?>">
+                                            </div>
+                                            <!-- Actual Hours Bar -->
+                                            <div class="user-task-bar actual" 
+                                                 style="background: <?php echo $user_task['color']; ?>; opacity: 0.6; height: <?php echo max($user_task['actual_height'], 5); ?>px;"
+                                                 data-tooltip="<?php echo esc_attr($user_task['user_name'] . ' - Actual: ' . number_format($user_task['actual_hours'], 1) . 'h'); ?>">
+                                            </div>
                                         </div>
-                                    <?php endforeach;
-                                else : ?>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
                                     <div class="no-tasks-indicator"></div>
                                 <?php endif; ?>
                             </div>
                             <span class="daily-label <?php echo $is_today ? 'today' : ''; ?>">
                                 <?php echo $day_data['day']; ?><br>
-                                <small style="font-size:10px;color:#9ca3af;"><?php echo $day_data['day_date']; ?></small>
+                                <small style="font-size: 10px; color: #9ca3af;"><?php echo $day_data['day_date']; ?></small>
                             </span>
                         </div>
                     <?php endforeach; ?>
@@ -2172,11 +2681,11 @@ function pm_board_tab($business_id)
             </div>
         </div>
         <?php endif; ?>
-
+        
         <!-- Team Workload Table -->
         <div class="pm-resource-section">
             <h3>Team Member Workload</h3>
-            <div class="pm-workload-table-container bntm-table-wrapper">
+            <div class="pm-workload-table-container">
                 <table class="bntm-table pm-workload-table">
                     <thead>
                         <tr>
@@ -2190,76 +2699,100 @@ function pm_board_tab($business_id)
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ( ! empty( $team_workload ) ) :
-                            foreach ( $team_workload as $member ) :
-                                $cap_pct   = $overloaded_threshold > 0 ? min( ( $member->estimated_hours / $overloaded_threshold ) * 100, 100 ) : 0;
-                                $cap_class = $member->estimated_hours > $overloaded_threshold ? 'overloaded' : ( $member->estimated_hours >= $optimal_threshold ? 'optimal' : 'available' );
-                                $ucolor    = $user_color_map[ $member->ID ]['color'] ?? '#6b7280';
-                        ?>
+                        <?php if (!empty($team_workload)): ?>
+                            <?php foreach ($team_workload as $member): 
+                                $capacity_percent = ($overloaded_threshold > 0) ? min(($member->estimated_hours / $overloaded_threshold) * 100, 100) : 0;
+                                $capacity_class = '';
+                                if ($member->estimated_hours > $overloaded_threshold) {
+                                    $capacity_class = 'overloaded';
+                                } elseif ($member->estimated_hours >= $optimal_threshold) {
+                                    $capacity_class = 'optimal';
+                                } else {
+                                    $capacity_class = 'available';
+                                }
+                                $user_color = $user_color_map[$member->ID]['color'] ?? '#6b7280';
+                            ?>
+                                <tr>
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div class="resource-avatar" style="background: <?php echo $user_color; ?>;">
+                                                <?php echo esc_html(strtoupper(substr($member->display_name, 0, 2))); ?>
+                                            </div>
+                                            <div>
+                                                <strong><?php echo esc_html($member->display_name); ?></strong>
+                                                <div style="font-size: 12px; color: #6b7280;"><?php echo esc_html($member->user_email); ?></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="resource-badge"><?php echo $member->pending_tasks; ?></span>
+                                    </td>
+                                    <td>
+                                        <?php if ($member->high_priority_tasks > 0): ?>
+                                            <span class="resource-badge high-priority"><?php echo $member->high_priority_tasks; ?></span>
+                                        <?php else: ?>
+                                            <span style="color: #9ca3af;">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?php echo $member->project_count; ?></td>
+                                    <td>
+                                        <strong><?php echo number_format($member->estimated_hours, 1); ?>h</strong>
+                                    </td>
+                                    <td>
+                                        <span style="color: #059669;"><?php echo number_format($member->logged_hours, 1); ?>h</span>
+                                    </td>
+                                    <td>
+                                        <div class="capacity-indicator">
+                                            <div class="capacity-bar <?php echo $capacity_class; ?>">
+                                                <div class="capacity-fill" style="width: <?php echo $capacity_percent; ?>%;"></div>
+                                            </div>
+                                            <span class="capacity-text <?php echo $capacity_class; ?>">
+                                                <?php echo round($capacity_percent); ?>%
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
                             <tr>
-                                <td>
-                                    <div style="display:flex;align-items:center;gap:8px;">
-                                        <div class="resource-avatar" style="background:<?php echo $ucolor; ?>;">
-                                            <?php echo esc_html( strtoupper( substr( $member->display_name, 0, 2 ) ) ); ?>
-                                        </div>
-                                        <div>
-                                            <strong><?php echo esc_html( $member->display_name ); ?></strong>
-                                            <div style="font-size:12px;color:#6b7280;"><?php echo esc_html( $member->user_email ); ?></div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td><span class="resource-badge"><?php echo $member->pending_tasks; ?></span></td>
-                                <td>
-                                    <?php if ( $member->high_priority_tasks > 0 ) : ?>
-                                        <span class="resource-badge high-priority"><?php echo $member->high_priority_tasks; ?></span>
-                                    <?php else : ?>
-                                        <span style="color:#9ca3af;">—</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?php echo $member->project_count; ?></td>
-                                <td><strong><?php echo number_format( $member->estimated_hours, 1 ); ?>h</strong></td>
-                                <td><span style="color:#059669;"><?php echo number_format( $member->logged_hours, 1 ); ?>h</span></td>
-                                <td>
-                                    <div class="capacity-indicator">
-                                        <div class="capacity-bar <?php echo $cap_class; ?>">
-                                            <div class="capacity-fill" style="width:<?php echo $cap_pct; ?>%;"></div>
-                                        </div>
-                                        <span class="capacity-text <?php echo $cap_class; ?>"><?php echo round( $cap_pct ); ?>%</span>
-                                    </div>
-                                </td>
+                                <td colspan="7" style="text-align: center; padding: 40px; color: #9ca3af;">No team member data</td>
                             </tr>
-                        <?php endforeach;
-                        else : ?>
-                            <tr><td colspan="7" style="text-align:center;padding:40px;color:#9ca3af;">No team member data</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
-
+        
         <!-- Project Resource Distribution -->
-        <?php if ( ! empty( $project_distribution ) ) : ?>
+        <?php if (!empty($project_distribution)): ?>
         <div class="pm-resource-section">
             <h3>Project Resource Distribution</h3>
             <div class="pm-project-distribution-grid">
-                <?php foreach ( $project_distribution as $project ) : ?>
+                <?php foreach ($project_distribution as $project): ?>
                     <div class="pm-project-resource-card">
-                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                            <div style="width:4px;height:32px;background:<?php echo esc_attr($project->color); ?>;border-radius:2px;"></div>
-                            <h4 style="margin:0;font-size:15px;"><?php echo esc_html( $project->name ); ?></h4>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                            <div style="width: 4px; height: 32px; background: <?php echo esc_attr($project->color); ?>; border-radius: 2px;"></div>
+                            <h4 style="margin: 0; font-size: 15px;"><?php echo esc_html($project->name); ?></h4>
                         </div>
                         <div class="project-resource-stats">
                             <div class="project-resource-stat">
-                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/>
+                                </svg>
                                 <span><?php echo $project->team_members; ?> members</span>
                             </div>
                             <div class="project-resource-stat">
-                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/><path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/></svg>
+                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
+                                    <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/>
+                                </svg>
                                 <span><?php echo $project->active_tasks; ?> active tasks</span>
                             </div>
                             <div class="project-resource-stat">
-                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
-                                <span><?php echo number_format( $project->total_estimated_hours, 1 ); ?>h estimated</span>
+                                <svg width="16" height="16" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                                </svg>
+                                <span><?php echo number_format($project->total_estimated_hours, 1); ?>h estimated</span>
                             </div>
                         </div>
                     </div>
@@ -2267,7 +2800,7 @@ function pm_board_tab($business_id)
             </div>
         </div>
         <?php endif; ?>
-
+        
         <!-- Additional Analytics -->
         <div class="pm-additional-analytics">
             <h3>Additional Insights</h3>
@@ -2275,359 +2808,803 @@ function pm_board_tab($business_id)
                 <div class="pm-insight-card">
                     <h4>Average Tasks per Member</h4>
                     <p class="insight-value">
-                        <?php
-                        $avg_tasks = count( $team_workload ) > 0
-                            ? round( array_sum( array_column( $team_workload, 'pending_tasks' ) ) / count( $team_workload ), 1 )
-                            : 0;
+                        <?php 
+                        $avg_tasks = count($team_workload) > 0 ? 
+                            round(array_sum(array_column($team_workload, 'pending_tasks')) / count($team_workload), 1) : 0;
                         echo $avg_tasks;
                         ?>
                     </p>
                 </div>
+                
                 <div class="pm-insight-card">
                     <h4>Total Estimated Hours</h4>
-                    <p class="insight-value"><?php echo number_format( array_sum( array_column( $team_workload, 'estimated_hours' ) ), 1 ); ?>h</p>
+                    <p class="insight-value">
+                        <?php echo number_format(array_sum(array_column($team_workload, 'estimated_hours')), 1); ?>h
+                    </p>
                 </div>
+                
                 <div class="pm-insight-card">
                     <h4>Total Logged Hours</h4>
-                    <p class="insight-value"><?php echo number_format( array_sum( array_column( $team_workload, 'logged_hours' ) ), 1 ); ?>h</p>
+                    <p class="insight-value">
+                        <?php echo number_format(array_sum(array_column($team_workload, 'logged_hours')), 1); ?>h
+                    </p>
                 </div>
-                <div class="pm-insight-card">
+              <div class="pm-insight-card">
                     <h4>Tracking Accuracy</h4>
                     <p class="insight-value">
-                        <?php
-                        $te = array_sum( array_column( $team_workload, 'estimated_hours' ) );
-                        $tl = array_sum( array_column( $team_workload, 'logged_hours' ) );
-                        echo $te > 0 ? round( ( $tl / $te ) * 100 ) : 0;
+                        <?php 
+                        $total_estimated = array_sum(array_column($team_workload, 'estimated_hours'));
+                        $total_logged = array_sum(array_column($team_workload, 'logged_hours'));
+                        $accuracy = $total_estimated > 0 ? round(($total_logged / $total_estimated) * 100) : 0;
+                        echo $accuracy;
                         ?>%
                     </p>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <style>
-    .pm-resource-load-container{background:white;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
-    .pm-resource-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:16px;}
-    .pm-resource-header h2{margin:0;font-size:20px;font-weight:600;color:#111827;}
-    .pm-resource-controls{display:flex;gap:12px;align-items:center;}
-    .pm-date-navigation{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:24px;padding:16px;background:#f9fafb;border-radius:8px;}
-    .pm-nav-btn{background:white;border:1px solid #e5e7eb;border-radius:6px;padding:8px 12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;color:#6b7280;}
-    .pm-nav-btn:hover{background:#f3f4f6;border-color:#d1d5db;color:#111827;}
-    .pm-period-display{min-width:250px;text-align:center;font-size:16px;color:#111827;}
-    .pm-capacity-overview{margin-bottom:24px;}
-    .pm-capacity-overview h3{margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;}
-    .pm-capacity-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;}
-    .pm-capacity-card{background:#f9fafb;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:center;}
-    .pm-capacity-card.overloaded{background:#fef2f2;}
-    .pm-capacity-card.optimal{background:#f0fdf4;}
-    .pm-capacity-card.underutilized{background:#eff6ff;}
-    .capacity-icon{font-size:32px;}
-    .pm-capacity-card h4{margin:0 0 6px 0;font-size:14px;color:#6b7280;font-weight:500;}
-    .capacity-value{margin:0 0 4px 0;font-size:28px;font-weight:700;color:#111827;}
-    .capacity-label{margin:0;font-size:12px;color:#9ca3af;}
-    .pm-user-legend{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px;padding:12px;background:white;border-radius:8px;border:1px solid #e5e7eb;}
-    .legend-item{display:flex;align-items:center;gap:6px;}
-    .legend-color{width:16px;height:16px;border-radius:3px;}
-    .legend-name{font-size:13px;color:#374151;font-weight:500;}
-    .pm-chart-container{display:flex;gap:12px;position:relative;}
-    .pm-y-axis{width:40px;position:relative;height:250px;flex-shrink:0;}
-    .y-axis-label{position:absolute;right:8px;font-size:11px;color:#6b7280;font-weight:500;transform:translateY(50%);}
-    .pm-daily-distribution{flex:1;display:flex;gap:16px;align-items:flex-end;height:250px;padding:20px;background:#f9fafb;border-radius:12px;overflow-x:auto;position:relative;}
-    .pm-daily-distribution.monthly-view{gap:8px;height:200px;}
-    .pm-grid-lines{position:absolute;top:20px;left:20px;right:20px;bottom:50px;pointer-events:none;}
-    .grid-line{position:absolute;left:0;right:0;height:1px;background:#e5e7eb;}
-    .daily-bar-container{flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;min-width:60px;z-index:1;}
-    .pm-daily-distribution.monthly-view .daily-bar-container{min-width:30px;}
-    .daily-content{display:flex;gap:6px;width:100%;align-items:flex-end;justify-content:center;height:180px;padding-bottom:10px;}
-    .pm-daily-distribution.monthly-view .daily-content{height:130px;gap:4px;}
-    .user-task-group{display:flex;gap:2px;align-items:flex-end;}
-    .user-task-bar{border-radius:3px 3px 0 0;min-width:2px;max-width:5px;transition:all 0.3s;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.1);position:relative;}
-    .user-task-bar.estimated{border:2px solid rgba(0,0,0,0.1);}
-    .user-task-bar.actual{border:2px dashed rgba(255,255,255,0.5);}
-    .user-task-bar:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(0,0,0,0.2);z-index:10;}
-    .user-task-bar:hover::after{content:attr(data-tooltip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#111827;color:white;padding:6px 10px;border-radius:6px;font-size:11px;white-space:nowrap;z-index:1000;margin-bottom:5px;}
-    .user-task-bar:hover::before{content:'';position:absolute;bottom:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#111827;z-index:1000;}
-    .no-tasks-indicator{width:100%;height:6px;background:#e5e7eb;border-radius:3px;opacity:0.3;}
-    .daily-label{margin-top:8px;font-size:12px;color:#6b7280;font-weight:500;text-align:center;line-height:1.3;}
-    .daily-label.today{color:#3b82f6;font-weight:700;}
-    .pm-resource-section{margin-top:24px;background:white;border-radius:12px;}
-    .pm-resource-section h3{margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;}
-    .pm-workload-table-container{overflow-x:auto;}
-    .pm-workload-table{width:100%;}
-    .resource-avatar{width:36px;height:36px;border-radius:50%;color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;}
-    .resource-badge{display:inline-block;padding:4px 10px;background:#e5e7eb;color:#374151;border-radius:6px;font-size:13px;font-weight:600;}
-    .resource-badge.high-priority{background:#fee2e2;color:#ef4444;}
-    .capacity-indicator{display:flex;align-items:center;gap:8px;}
-    .capacity-bar{flex:1;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;min-width:80px;}
-    .capacity-fill{height:100%;border-radius:4px;transition:width 0.3s;}
-    .capacity-bar.overloaded .capacity-fill{background:#ef4444;}
-    .capacity-bar.optimal .capacity-fill{background:#10b981;}
-    .capacity-bar.available .capacity-fill{background:#3b82f6;}
-    .capacity-text{font-size:13px;font-weight:600;min-width:40px;}
-    .capacity-text.overloaded{color:#ef4444;}
-    .capacity-text.optimal{color:#10b981;}
-    .capacity-text.available{color:#3b82f6;}
-    .pm-project-distribution-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;}
-    .pm-project-resource-card{background:#f9fafb;border-radius:12px;padding:16px;}
-    .project-resource-stats{display:flex;flex-direction:column;gap:8px;}
-    .project-resource-stat{display:flex;align-items:center;gap:8px;font-size:13px;color:#6b7280;}
-    .pm-additional-analytics{margin-top:24px;}
-    .pm-additional-analytics h3{margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;}
-    .pm-insights-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;}
-    .pm-insight-card{background:#f9fafb;border-radius:12px;padding:20px;text-align:center;}
-    .pm-insight-card h4{margin:0 0 12px 0;font-size:14px;color:#6b7280;font-weight:500;}
-    .insight-value{margin:0;font-size:32px;font-weight:700;color:#111827;}
-    </style>
-
-    <script>
-    function pmChangeView() {
-        const view = document.getElementById('pm-view-filter').value;
-        window.location.href = '?tab=resources&view=' + view + '&selected_date=<?php echo $selected_date; ?>';
-    }
-    function pmNavigateDate(direction) {
-        const targetDate = direction === 'prev' ? '<?php echo $prev_date; ?>' : '<?php echo $next_date; ?>';
-        window.location.href = '?tab=resources&view=<?php echo $view; ?>&selected_date=' + targetDate;
-    }
-    </script>
-    <?php
-    return ob_get_clean();
+</div>
+</div>
+</div>
+<style>
+.pm-resource-load-container {
+    background: white;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
+.pm-resource-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
 
-/* ============================================================
-   REPORTS TAB
-   ============================================================ */
+.pm-resource-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #111827;
+}
 
-function pm_reports_tab( $business_id ) {
-    global $wpdb;
+.pm-resource-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
 
-    $projects_table  = $wpdb->prefix . 'pm_projects';
-    $tasks_table     = $wpdb->prefix . 'pm_tasks';
-    $time_logs_table = $wpdb->prefix . 'pm_time_logs';
-    $team_table      = $wpdb->prefix . 'pm_team_members';
+.pm-date-navigation {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 24px;
+    padding: 16px;
+    background: #f9fafb;
+    border-radius: 8px;
+}
 
-    $current_user = wp_get_current_user();
-    $is_wp_admin  = current_user_can( 'manage_options' );
-    $current_role = bntm_get_user_role( $current_user->ID );
-    $can_view_all = $is_wp_admin || in_array( $current_role, [ 'owner', 'manager' ] );
+.pm-nav-btn {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    color: #6b7280;
+}
 
-    $date_from = isset( $_GET['date_from'] ) ? sanitize_text_field( $_GET['date_from'] ) : date( 'Y-m-01' );
-    $date_to   = isset( $_GET['date_to'] )   ? sanitize_text_field( $_GET['date_to'] )   : date( 'Y-m-d' );
+.pm-nav-btn:hover {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+    color: #111827;
+}
 
-    // Task visibility
-    $vis = pm_get_task_visibility( 't' );
+.pm-period-display {
+    min-width: 250px;
+    text-align: center;
+    font-size: 16px;
+    color: #111827;
+}
 
-    // Build project-scope lists for queries that need them
-    if ( $can_view_all ) {
-        $proj_where_p = '';           // projects table, alias p
-        $proj_where_and_p = '';
-        $tasks_scope  = '';           // tasks table, no alias needed
+.pm-capacity-overview {
+    margin-bottom: 24px;
+}
+
+.pm-capacity-overview h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-capacity-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+}
+
+.pm-capacity-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+}
+
+.pm-capacity-card.overloaded {
+    background: #fef2f2;
+}
+
+.pm-capacity-card.optimal {
+    background: #f0fdf4;
+}
+
+.pm-capacity-card.underutilized {
+    background: #eff6ff;
+}
+
+.capacity-icon {
+    font-size: 32px;
+}
+
+.pm-capacity-card h4 {
+    margin: 0 0 6px 0;
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.capacity-value {
+    margin: 0 0 4px 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: #111827;
+}
+
+.capacity-label {
+    margin: 0;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.pm-user-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+}
+
+.legend-name {
+    font-size: 13px;
+    color: #374151;
+    font-weight: 500;
+}
+
+.pm-chart-container {
+    display: flex;
+    gap: 12px;
+    position: relative;
+}
+
+.pm-y-axis {
+    width: 40px;
+    position: relative;
+    height: 250px;
+    flex-shrink: 0;
+}
+
+.y-axis-label {
+    position: absolute;
+    right: 8px;
+    font-size: 11px;
+    color: #6b7280;
+    font-weight: 500;
+    transform: translateY(50%);
+}
+
+.pm-daily-distribution {
+    flex: 1;
+    display: flex;
+    gap: 16px;
+    align-items: flex-end;
+    height: 250px;
+    padding: 20px;
+    background: #f9fafb;
+    border-radius: 12px;
+    overflow-x: auto;
+    position: relative;
+}
+
+.pm-daily-distribution.monthly-view {
+    gap: 8px;
+    height: 200px;
+}
+
+.pm-grid-lines {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    bottom: 50px;
+    pointer-events: none;
+}
+
+.grid-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e5e7eb;
+}
+
+.daily-bar-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    justify-content: flex-end;
+    min-width: 60px;
+    z-index: 1;
+}
+
+.pm-daily-distribution.monthly-view .daily-bar-container {
+    min-width: 30px;
+}
+
+.daily-content {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+    align-items: flex-end;
+    justify-content: center;
+    height: 180px;
+    padding-bottom: 10px;
+}
+
+.pm-daily-distribution.monthly-view .daily-content {
+    height: 130px;
+    gap: 4px;
+}
+
+.user-task-group {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+}
+
+.user-task-bar {
+    border-radius: 3px 3px 0 0;
+    min-width: 2px;
+    max-width: 5px;
+    transition: all 0.3s;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    position: relative;
+}
+
+.user-task-bar.estimated {
+    border: 2px solid rgba(0,0,0,0.1);
+}
+
+.user-task-bar.actual {
+    border: 2px dashed rgba(255,255,255,0.5);
+}
+
+.pm-daily-distribution.monthly-view .user-task-bar {
+    min-width: 2px;
+    max-width: 5px;
+}
+
+.user-task-bar:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    z-index: 10;
+}
+
+.user-task-bar:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #111827;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 5px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.user-task-bar:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #111827;
+    z-index: 1000;
+}
+
+.no-tasks-indicator {
+    width: 100%;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    opacity: 0.3;
+}
+
+.daily-label {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 500;
+    text-align: center;
+    line-height: 1.3;
+}
+
+.daily-label.today {
+    color: #3b82f6;
+    font-weight: 700;
+}
+
+.pm-resource-section {
+    margin-top: 24px;
+    background: white;
+    border-radius: 12px;
+}
+
+.pm-resource-section h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-workload-table-container {
+    overflow-x: auto;
+}
+
+.pm-workload-table {
+    width: 100%;
+}
+
+.resource-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.resource-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    background: #e5e7eb;
+    color: #374151;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.resource-badge.high-priority {
+    background: #fee2e2;
+    color: #ef4444;
+}
+
+.capacity-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.capacity-bar {
+    flex: 1;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 80px;
+}
+
+.capacity-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+
+.capacity-bar.overloaded .capacity-fill {
+    background: #ef4444;
+}
+
+.capacity-bar.optimal .capacity-fill {
+    background: #10b981;
+}
+
+.capacity-bar.available .capacity-fill {
+    background: #3b82f6;
+}
+
+.capacity-text {
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 40px;
+}
+
+.capacity-text.overloaded {
+    color: #ef4444;
+}
+
+.capacity-text.optimal {
+    color: #10b981;
+}
+
+.capacity-text.available {
+    color: #3b82f6;
+}
+
+.pm-project-distribution-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.pm-project-resource-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.project-resource-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.project-resource-stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.pm-additional-analytics {
+    margin-top: 24px;
+}
+
+.pm-additional-analytics h3 {
+    margin: 0 0 16px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.pm-insight-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.pm-insight-card h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.insight-value {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 700;
+    color: #111827;
+}
+</style>
+
+<script>
+function pmChangeView() {
+    const view = document.getElementById('pm-view-filter').value;
+    window.location.href = '?tab=resources&view=' + view + '&selected_date=<?php echo $selected_date; ?>';
+}
+
+function pmNavigateDate(direction) {
+    const view = '<?php echo $view; ?>';
+    let targetDate;
+    
+    if (direction === 'prev') {
+        targetDate = '<?php echo $prev_date; ?>';
     } else {
-        $managed_ids = $wpdb->get_col( $wpdb->prepare(
+        targetDate = '<?php echo $next_date; ?>';
+    }
+    
+    window.location.href = '?tab=resources&view=' + view + '&selected_date=' + targetDate;
+}
+</script>
+<?php
+return ob_get_clean();
+}
+    
+/*
+Reports Tab
+*/
+function pm_reports_tab($business_id) {
+    global $wpdb;
+    
+    $projects_table = $wpdb->prefix . "pm_projects";
+    $tasks_table = $wpdb->prefix . "pm_tasks";
+    $time_logs_table = $wpdb->prefix . "pm_time_logs";
+    $team_table = $wpdb->prefix . "pm_team_members";
+    
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    $can_view_all = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
+    
+    // Date range filter
+    $date_from = isset($_GET["date_from"]) ? sanitize_text_field($_GET["date_from"]) : date("Y-m-01");
+    $date_to = isset($_GET["date_to"]) ? sanitize_text_field($_GET["date_to"]) : date("Y-m-d");
+    
+    // Get user's project IDs if they're a project manager
+    $user_project_ids = [];
+    if (!$can_view_all) {
+        $user_projects = $wpdb->get_col($wpdb->prepare(
             "SELECT project_id FROM {$team_table} WHERE user_id = %d AND role = 'project_manager'",
             $current_user->ID
-        ) );
-        $managed_ids   = ! empty( $managed_ids ) ? $managed_ids : [ 0 ];
-        $ids_str       = implode( ',', array_map( 'intval', $managed_ids ) );
-        $proj_where_p  = " WHERE p.id IN ({$ids_str})";
-        $proj_where_and_p = " AND p.id IN ({$ids_str})";
-        $tasks_scope   = " AND t.project_id IN ({$ids_str})";
+        ));
+        $user_project_ids = !empty($user_projects) ? $user_projects : [0];
     }
-
-    // ── Overall statistics ────────────────────────────────────────────────────
-    $total_projects     = $wpdb->get_var( "SELECT COUNT(*) FROM {$projects_table} p {$proj_where_p}" );
-    $completed_projects = $wpdb->get_var( "SELECT COUNT(*) FROM {$projects_table} p {$proj_where_p}" . ( $proj_where_p ? ' AND' : ' WHERE' ) . " p.status IN ('completed','closed')" );
-
-    if ( $vis['where'] === '' ) {
-        $total_tasks     = $wpdb->get_var( "SELECT COUNT(*) FROM {$tasks_table} t {$tasks_scope}" === ' AND t.project_id IN (0)' ? "SELECT 0" : "SELECT COUNT(*) FROM {$tasks_table} t WHERE 1=1 {$tasks_scope}" );
-        $completed_tasks = $wpdb->get_var( "SELECT COUNT(*) FROM {$tasks_table} t WHERE t.status IN ('completed','closed') {$tasks_scope}" );
-        $total_hours     = $wpdb->get_var( $wpdb->prepare(
-            "SELECT SUM(tl.hours) FROM {$time_logs_table} tl
-             INNER JOIN {$tasks_table} t ON tl.task_id = t.id
-             WHERE tl.log_date BETWEEN %s AND %s {$tasks_scope}",
-            $date_from, $date_to
-        ) );
-    } else {
-        $total_tasks     = $wpdb->get_var( $wpdb->prepare(
-            "SELECT COUNT(*) FROM {$tasks_table} t WHERE 1=1 {$vis['where']} {$tasks_scope}",
-            $vis['params']
-        ) );
-        $completed_tasks = $wpdb->get_var( $wpdb->prepare(
-            "SELECT COUNT(*) FROM {$tasks_table} t WHERE t.status IN ('completed','closed') {$vis['where']} {$tasks_scope}",
-            $vis['params']
-        ) );
-        $total_hours     = $wpdb->get_var( $wpdb->prepare(
-            "SELECT SUM(tl.hours) FROM {$time_logs_table} tl
-             INNER JOIN {$tasks_table} t ON tl.task_id = t.id
-             WHERE tl.log_date BETWEEN %s AND %s {$vis['where']} {$tasks_scope}",
-            array_merge( [ $date_from, $date_to ], $vis['params'] )
-        ) );
+    
+    // Build project filter condition
+    $project_filter = '';
+    if (!$can_view_all) {
+        $project_ids_str = implode(',', array_map('intval', $user_project_ids));
+        $project_filter = " WHERE p.id IN ({$project_ids_str})";
     }
-    $total_hours = $total_hours ? floatval( $total_hours ) : 0;
-
-    // ── Team performance ──────────────────────────────────────────────────────
-    if ( $vis['where'] === '' ) {
-        $team_performance = $wpdb->get_results( $wpdb->prepare(
-            "SELECT u.ID, u.display_name,
-             COUNT(DISTINCT t.id) as total_tasks,
-             COUNT(DISTINCT CASE WHEN t.status IN ('completed','closed') THEN t.id END) as completed_tasks,
-             COALESCE(SUM(tl.hours),0) as total_hours
-             FROM {$wpdb->users} u
-             INNER JOIN {$tasks_table} t ON u.ID = t.assigned_to
-             LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.log_date BETWEEN %s AND %s
-             WHERE 1=1 {$tasks_scope}
-             GROUP BY u.ID
-             ORDER BY completed_tasks DESC",
-            $date_from, $date_to
-        ) );
-    } else {
-        $team_performance = $wpdb->get_results( $wpdb->prepare(
-            "SELECT u.ID, u.display_name,
-             COUNT(DISTINCT t.id) as total_tasks,
-             COUNT(DISTINCT CASE WHEN t.status IN ('completed','closed') THEN t.id END) as completed_tasks,
-             COALESCE(SUM(tl.hours),0) as total_hours
-             FROM {$wpdb->users} u
-             INNER JOIN {$tasks_table} t ON u.ID = t.assigned_to
-             LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.log_date BETWEEN %s AND %s
-             WHERE 1=1 {$vis['where']} {$tasks_scope}
-             GROUP BY u.ID
-             ORDER BY completed_tasks DESC",
-            array_merge( [ $date_from, $date_to ], $vis['params'] )
-        ) );
-    }
-
-    // ── Project stats ─────────────────────────────────────────────────────────
+    
+    // Overall statistics
+    $total_projects = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$projects_table} p {$project_filter}"
+    );
+    
+    $completed_projects = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$projects_table} p {$project_filter} " . 
+        ($project_filter ? "AND" : "WHERE") . " p.status IN ('completed', 'closed')"
+    );
+    
+    $total_tasks = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$tasks_table} t " .
+        (!$can_view_all ? "WHERE t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "")
+    );
+    
+    $completed_tasks = $wpdb->get_var(
+        "SELECT COUNT(*) FROM {$tasks_table} t 
+         WHERE t.status IN ('completed', 'closed')" .
+        (!$can_view_all ? " AND t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "")
+    );
+    
+    // Time tracking
+    $total_hours = $wpdb->get_var($wpdb->prepare(
+        "SELECT SUM(tl.hours) FROM {$time_logs_table} tl
+         INNER JOIN {$tasks_table} t ON tl.task_id = t.id
+         WHERE tl.log_date BETWEEN %s AND %s" .
+        (!$can_view_all ? " AND t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : ""),
+        $date_from,
+        $date_to
+    ));
+    $total_hours = $total_hours ? floatval($total_hours) : 0;
+    
+    // Team performance (filtered by projects if project manager)
+    $team_performance = $wpdb->get_results($wpdb->prepare(
+        "SELECT u.ID, u.display_name,
+         COUNT(DISTINCT t.id) as total_tasks,
+         COUNT(DISTINCT CASE WHEN t.status IN ('completed', 'closed') THEN t.id END) as completed_tasks,
+         COALESCE(SUM(tl.hours), 0) as total_hours
+         FROM {$wpdb->users} u
+         INNER JOIN {$tasks_table} t ON u.ID = t.assigned_to
+         LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.log_date BETWEEN %s AND %s" .
+        (!$can_view_all ? " WHERE t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+         GROUP BY u.ID
+         ORDER BY completed_tasks DESC",
+        $date_from,
+        $date_to
+    ));
+    
+    // Project completion rate
     $project_stats = $wpdb->get_results(
         "SELECT p.id, p.name, p.status, p.color,
-         COUNT(t.id) as total_tasks,
-         COUNT(CASE WHEN t.status IN ('completed','closed') THEN 1 END) as completed_tasks,
-         COALESCE(SUM(tl.hours),0) as total_hours
-         FROM {$projects_table} p
-         LEFT JOIN {$tasks_table} t ON p.id = t.project_id
-         LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id
-         {$proj_where_p}
-         GROUP BY p.id
-         ORDER BY p.created_at DESC"
+        COUNT(t.id) as total_tasks,
+        COUNT(CASE WHEN t.status IN ('completed', 'closed') THEN 1 END) as completed_tasks,
+        COALESCE(SUM(tl.hours), 0) as total_hours
+        FROM {$projects_table} p
+        LEFT JOIN {$tasks_table} t ON p.id = t.project_id
+        LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id
+        {$project_filter}
+        GROUP BY p.id
+        ORDER BY p.created_at DESC"
     );
-
-    // ── Tasks by status / priority ────────────────────────────────────────────
-    if ( $vis['where'] === '' ) {
-        $tasks_by_status = $wpdb->get_results(
-            "SELECT status, COUNT(*) as count FROM {$tasks_table} t WHERE 1=1 {$tasks_scope} GROUP BY status"
-        );
-        $tasks_by_priority = $wpdb->get_results(
-            "SELECT priority, COUNT(*) as count FROM {$tasks_table} t
-             WHERE t.status NOT IN ('completed','closed') {$tasks_scope}
-             GROUP BY priority"
-        );
-    } else {
-        $tasks_by_status = $wpdb->get_results( $wpdb->prepare(
-            "SELECT t.status, COUNT(*) as count FROM {$tasks_table} t
-             WHERE 1=1 {$vis['where']} {$tasks_scope}
-             GROUP BY t.status",
-            $vis['params']
-        ) );
-        $tasks_by_priority = $wpdb->get_results( $wpdb->prepare(
-            "SELECT t.priority, COUNT(*) as count FROM {$tasks_table} t
-             WHERE t.status NOT IN ('completed','closed') {$vis['where']} {$tasks_scope}
-             GROUP BY t.priority",
-            $vis['params']
-        ) );
-    }
-
-    // ── Personal performance (always scoped to current user, no filter needed) ─
-    $personal_tasks     = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$tasks_table} WHERE assigned_to = %d", $current_user->ID ) );
-    $personal_completed = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$tasks_table} WHERE assigned_to = %d AND status IN ('completed','closed')", $current_user->ID ) );
-    $personal_hours     = $wpdb->get_var( $wpdb->prepare(
+    
+    // Tasks by status
+    $tasks_by_status = $wpdb->get_results(
+        "SELECT status, COUNT(*) as count
+        FROM {$tasks_table} t" .
+        (!$can_view_all ? " WHERE t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+        GROUP BY status"
+    );
+    
+    // Tasks by priority
+    $tasks_by_priority = $wpdb->get_results(
+        "SELECT priority, COUNT(*) as count
+        FROM {$tasks_table} t
+        WHERE t.status NOT IN ('completed', 'closed')" .
+        (!$can_view_all ? " AND t.project_id IN (" . implode(',', array_map('intval', $user_project_ids)) . ")" : "") . "
+        GROUP BY priority"
+    );
+    
+    // Personal performance data
+    $personal_tasks = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE assigned_to = %d",
+        $current_user->ID
+    ));
+    
+    $personal_completed = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tasks_table} WHERE assigned_to = %d AND status IN ('completed', 'closed')",
+        $current_user->ID
+    ));
+    
+    $personal_hours = $wpdb->get_var($wpdb->prepare(
         "SELECT SUM(hours) FROM {$time_logs_table} WHERE user_id = %d AND log_date BETWEEN %s AND %s",
-        $current_user->ID, $date_from, $date_to
-    ) );
-    $personal_hours = $personal_hours ? floatval( $personal_hours ) : 0;
-
-    $personal_projects = $wpdb->get_results( $wpdb->prepare(
+        $current_user->ID,
+        $date_from,
+        $date_to
+    ));
+    $personal_hours = $personal_hours ? floatval($personal_hours) : 0;
+    
+    $personal_projects = $wpdb->get_results($wpdb->prepare(
         "SELECT DISTINCT p.id, p.name, p.color,
          COUNT(t.id) as total_tasks,
-         COUNT(CASE WHEN t.status IN ('completed','closed') THEN 1 END) as completed_tasks,
-         COALESCE(SUM(tl.hours),0) as logged_hours
+         COUNT(CASE WHEN t.status IN ('completed', 'closed') THEN 1 END) as completed_tasks,
+         COALESCE(SUM(tl.hours), 0) as logged_hours
          FROM {$tasks_table} t
          INNER JOIN {$projects_table} p ON t.project_id = p.id
          LEFT JOIN {$time_logs_table} tl ON t.id = tl.task_id AND tl.user_id = %d
          WHERE t.assigned_to = %d
          GROUP BY p.id
          ORDER BY total_tasks DESC",
-        $current_user->ID, $current_user->ID
-    ) );
-
+        $current_user->ID,
+        $current_user->ID
+    ));
+    
     ob_start();
     ?>
     <div class="pm-reports-container">
         <div class="pm-reports-header">
             <h2><?php echo $can_view_all ? 'Project Reports & Analytics' : 'My Reports & Analytics'; ?></h2>
             <div class="pm-reports-filters">
-                <input type="date" id="pm-date-from" value="<?php echo esc_attr( $date_from ); ?>" class="bntm-input">
+                <input type="date" id="pm-date-from" value="<?php echo esc_attr($date_from); ?>" class="bntm-input">
                 <span>to</span>
-                <input type="date" id="pm-date-to" value="<?php echo esc_attr( $date_to ); ?>" class="bntm-input">
+                <input type="date" id="pm-date-to" value="<?php echo esc_attr($date_to); ?>" class="bntm-input">
                 <button class="bntm-btn-primary" onclick="pmApplyDateFilter()">Apply</button>
             </div>
         </div>
-
-        <!-- Personal Performance -->
+        
+        <!-- Personal Performance Section -->
         <div class="pm-personal-performance-section">
-            <h3 style="margin:0 0 16px 0;font-size:18px;font-weight:600;color:#111827;">
-                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20" style="vertical-align:middle;margin-right:8px;">
+            <h3 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 600; color: #111827;">
+                <svg width="20" height="20" fill="currentColor" viewBox="0 0 20 20" style="vertical-align: middle; margin-right: 8px;">
                     <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
                 </svg>
                 My Performance
             </h3>
+            
             <div class="pm-personal-stats">
                 <div class="pm-personal-stat-card">
-                    <div class="personal-stat-icon" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);">
-                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                    <div class="personal-stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
                     </div>
-                    <div><h4>My Tasks</h4><p class="personal-stat-value"><?php echo $personal_tasks; ?></p><p class="personal-stat-label">Total assigned</p></div>
+                    <div>
+                        <h4>My Tasks</h4>
+                        <p class="personal-stat-value"><?php echo $personal_tasks; ?></p>
+                        <p class="personal-stat-label">Total assigned</p>
+                    </div>
                 </div>
+                
                 <div class="pm-personal-stat-card">
-                    <div class="personal-stat-icon" style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);">
-                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div class="personal-stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
                     </div>
                     <div>
                         <h4>Completed</h4>
                         <p class="personal-stat-value"><?php echo $personal_completed; ?></p>
-                        <p class="personal-stat-label"><?php echo $personal_tasks > 0 ? round( ( $personal_completed / $personal_tasks ) * 100 ) : 0; ?>% rate</p>
+                        <p class="personal-stat-label"><?php echo $personal_tasks > 0 ? round(($personal_completed / $personal_tasks) * 100) : 0; ?>% completion rate</p>
                     </div>
                 </div>
+                
                 <div class="pm-personal-stat-card">
-                    <div class="personal-stat-icon" style="background:linear-gradient(135deg,#4facfe 0%,#00f2fe 100%);">
-                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <div class="personal-stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
                     </div>
-                    <div><h4>Hours Logged</h4><p class="personal-stat-value"><?php echo number_format( $personal_hours, 1 ); ?>h</p><p class="personal-stat-label">In selected period</p></div>
+                    <div>
+                        <h4>Hours Logged</h4>
+                        <p class="personal-stat-value"><?php echo number_format($personal_hours, 1); ?>h</p>
+                        <p class="personal-stat-label">In selected period</p>
+                    </div>
                 </div>
+                
                 <div class="pm-personal-stat-card">
-                    <div class="personal-stat-icon" style="background:linear-gradient(135deg,#fa709a 0%,#fee140 100%);">
-                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                    <div class="personal-stat-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                        <svg width="20" height="20" fill="none" stroke="white" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+                        </svg>
                     </div>
-                    <div><h4>Active Projects</h4><p class="personal-stat-value"><?php echo count( $personal_projects ); ?></p><p class="personal-stat-label">Contributing to</p></div>
+                    <div>
+                        <h4>Active Projects</h4>
+                        <p class="personal-stat-value"><?php echo count($personal_projects); ?></p>
+                        <p class="personal-stat-label">Contributing to</p>
+                    </div>
                 </div>
             </div>
-
-            <?php if ( ! empty( $personal_projects ) ) : ?>
-            <div class="pm-personal-projects" style="margin-top:20px;">
-                <h4 style="margin:0 0 12px 0;font-size:15px;font-weight:600;color:#111827;">My Project Contributions</h4>
+            
+            <?php if (!empty($personal_projects)): ?>
+            <div class="pm-personal-projects" style="margin-top: 20px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 600; color: #111827;">My Project Contributions</h4>
                 <div class="pm-personal-projects-grid">
-                    <?php foreach ( $personal_projects as $proj ) :
-                        $completion = $proj->total_tasks > 0 ? round( ( $proj->completed_tasks / $proj->total_tasks ) * 100 ) : 0;
+                    <?php foreach ($personal_projects as $proj):
+                        $completion = $proj->total_tasks > 0 ? round(($proj->completed_tasks / $proj->total_tasks) * 100) : 0;
                     ?>
                         <div class="pm-personal-project-card">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                                <div style="width:3px;height:24px;background:<?php echo esc_attr( $proj->color ); ?>;border-radius:2px;"></div>
-                                <strong style="font-size:14px;"><?php echo esc_html( $proj->name ); ?></strong>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <div style="width: 3px; height: 24px; background: <?php echo esc_attr($proj->color); ?>; border-radius: 2px;"></div>
+                                <strong style="font-size: 14px;"><?php echo esc_html($proj->name); ?></strong>
                             </div>
                             <div class="personal-project-stats">
                                 <span><?php echo $proj->completed_tasks; ?>/<?php echo $proj->total_tasks; ?> tasks</span>
-                                <span><?php echo number_format( $proj->logged_hours, 1 ); ?>h logged</span>
+                                <span><?php echo number_format($proj->logged_hours, 1); ?>h logged</span>
                             </div>
-                            <div class="pm-mini-progress" style="margin-top:8px;">
-                                <div class="pm-mini-progress-fill" style="width:<?php echo $completion; ?>%;background:<?php echo esc_attr( $proj->color ); ?>"></div>
+                            <div class="pm-mini-progress" style="margin-top: 8px;">
+                                <div class="pm-mini-progress-fill" style="width: <?php echo $completion; ?>%; background: <?php echo esc_attr($proj->color); ?>"></div>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -2635,242 +3612,491 @@ function pm_reports_tab( $business_id ) {
             </div>
             <?php endif; ?>
         </div>
-
-        <hr style="margin:32px 0;border:none;border-top:2px solid #e5e7eb;">
-
-        <!-- Team / Overall Statistics -->
-        <?php if ( $can_view_all || ! empty( $vis['where'] ) ) : // show for PMs & admins ?>
-        <h3 style="margin:0 0 20px 0;font-size:18px;font-weight:600;color:#111827;">
+        
+        <hr style="margin: 32px 0; border: none; border-top: 2px solid #e5e7eb;">
+        
+        <!-- Team/Overall Statistics -->
+        <?php if ($can_view_all || !empty($user_project_ids)): ?>
+        <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600; color: #111827;">
             <?php echo $can_view_all ? 'Overall Statistics' : 'My Projects Overview'; ?>
         </h3>
-
+        
+        <!-- Summary Stats -->
         <div class="pm-reports-stats">
             <div class="pm-report-stat-card">
-                <div class="stat-icon" style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);">
-                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>
+                <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+                    </svg>
                 </div>
                 <div>
                     <h3>Project Completion</h3>
-                    <p class="stat-value"><?php echo $total_projects > 0 ? round( ( $completed_projects / $total_projects ) * 100 ) : 0; ?>%</p>
+                    <p class="stat-value">
+                        <?php echo $total_projects > 0 ? round(($completed_projects / $total_projects) * 100) : 0; ?>%
+                    </p>
                     <p class="stat-label"><?php echo $completed_projects; ?> of <?php echo $total_projects; ?> projects</p>
                 </div>
             </div>
+            
             <div class="pm-report-stat-card">
-                <div class="stat-icon" style="background:linear-gradient(135deg,#f093fb 0%,#f5576c 100%);">
-                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+                <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                    </svg>
                 </div>
                 <div>
                     <h3>Task Completion</h3>
-                    <p class="stat-value"><?php echo $total_tasks > 0 ? round( ( $completed_tasks / $total_tasks ) * 100 ) : 0; ?>%</p>
+                    <p class="stat-value">
+                        <?php echo $total_tasks > 0 ? round(($completed_tasks / $total_tasks) * 100) : 0; ?>%
+                    </p>
                     <p class="stat-label"><?php echo $completed_tasks; ?> of <?php echo $total_tasks; ?> tasks</p>
                 </div>
             </div>
+            
             <div class="pm-report-stat-card">
-                <div class="stat-icon" style="background:linear-gradient(135deg,#4facfe 0%,#00f2fe 100%);">
-                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
                 </div>
                 <div>
                     <h3>Hours Logged</h3>
-                    <p class="stat-value"><?php echo number_format( $total_hours, 1 ); ?></p>
+                    <p class="stat-value"><?php echo number_format($total_hours, 1); ?></p>
                     <p class="stat-label">In selected period</p>
                 </div>
             </div>
+            
             <div class="pm-report-stat-card">
-                <div class="stat-icon" style="background:linear-gradient(135deg,#fa709a 0%,#fee140 100%);">
-                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                <div class="stat-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
                 </div>
                 <div>
                     <h3>Team Members</h3>
-                    <p class="stat-value"><?php echo count( $team_performance ); ?></p>
+                    <p class="stat-value"><?php echo count($team_performance); ?></p>
                     <p class="stat-label">Active contributors</p>
                 </div>
             </div>
         </div>
-
-        <!-- Charts -->
+        
+        <!-- Charts Section -->
         <div class="pm-reports-charts">
             <div class="pm-report-chart-card">
                 <h3>Tasks by Status</h3>
                 <div class="pm-status-chart">
-                    <?php if ( ! empty( $tasks_by_status ) ) :
-                        $max_status = max( array_column( $tasks_by_status, 'count' ) );
-                        foreach ( $tasks_by_status as $stat ) :
-                            $pct = $max_status > 0 ? ( $stat->count / $max_status ) * 100 : 0;
-                    ?>
-                        <div class="status-chart-item">
-                            <span class="status-chart-label"><?php echo esc_html( ucfirst( str_replace( '_', ' ', $stat->status ) ) ); ?></span>
-                            <div class="status-chart-bar">
-                                <div class="status-chart-fill" style="width:<?php echo $pct; ?>%;background:<?php echo pm_get_status_color( $stat->status ); ?>"></div>
+                    <?php if (!empty($tasks_by_status)): ?>
+                        <?php
+                        $max_status = max(array_column($tasks_by_status, "count"));
+                        foreach ($tasks_by_status as $stat):
+                            $percentage = $max_status > 0 ? ($stat->count / $max_status) * 100 : 0;
+                        ?>
+                            <div class="status-chart-item">
+                                <span class="status-chart-label">
+                                    <?php echo esc_html(ucfirst(str_replace("_", " ", $stat->status))); ?>
+                                </span>
+                                <div class="status-chart-bar">
+                                    <div class="status-chart-fill" style="width: <?php echo $percentage; ?>%; background: <?php echo pm_get_status_color($stat->status); ?>"></div>
+                                </div>
+                                <span class="status-chart-value"><?php echo $stat->count; ?></span>
                             </div>
-                            <span class="status-chart-value"><?php echo $stat->count; ?></span>
-                        </div>
-                    <?php endforeach;
-                    else : ?>
+                        <?php endforeach; ?>
+                    <?php else: ?>
                         <p class="pm-empty-chart">No task data</p>
                     <?php endif; ?>
                 </div>
             </div>
-
+            
             <div class="pm-report-chart-card">
                 <h3>Tasks by Priority</h3>
                 <div class="pm-priority-chart">
-                    <?php if ( ! empty( $tasks_by_priority ) ) :
-                        foreach ( $tasks_by_priority as $stat ) : ?>
-                        <div class="priority-chart-item">
-                            <div class="priority-chart-header">
-                                <span class="priority-chart-badge" style="background:<?php echo pm_get_priority_color( $stat->priority ); ?>">
-                                    <?php echo esc_html( ucfirst( $stat->priority ) ); ?>
-                                </span>
-                                <span class="priority-chart-count"><?php echo $stat->count; ?> tasks</span>
+                    <?php if (!empty($tasks_by_priority)): ?>
+                        <?php foreach ($tasks_by_priority as $stat): ?>
+                            <div class="priority-chart-item">
+                                <div class="priority-chart-header">
+                                    <span class="priority-chart-badge" style="background: <?php echo pm_get_priority_color($stat->priority); ?>">
+                                        <?php echo esc_html(ucfirst($stat->priority)); ?>
+                                    </span>
+                                    <span class="priority-chart-count"><?php echo $stat->count; ?> tasks</span>
+                                </div>
                             </div>
-                        </div>
-                    <?php endforeach;
-                    else : ?>
+                        <?php endforeach; ?>
+                    <?php else: ?>
                         <p class="pm-empty-chart">No priority data</p>
                     <?php endif; ?>
                 </div>
             </div>
         </div>
-
+        
         <!-- Project Performance -->
         <div class="pm-report-section">
             <h3>Project Performance</h3>
             <div class="pm-project-performance-table bntm-table-wrapper">
                 <table class="bntm-table">
                     <thead>
-                        <tr><th>Project</th><th>Status</th><th>Tasks</th><th>Completion</th><th>Hours Logged</th></tr>
+                        <tr>
+                            <th>Project</th>
+                            <th>Status</th>
+                            <th>Tasks</th>
+                            <th>Completion</th>
+                            <th>Hours Logged</th>
+                        </tr>
                     </thead>
                     <tbody>
-                        <?php if ( ! empty( $project_stats ) ) :
-                            foreach ( $project_stats as $proj ) :
-                                $comp = $proj->total_tasks > 0 ? round( ( $proj->completed_tasks / $proj->total_tasks ) * 100 ) : 0;
-                        ?>
-                            <tr>
-                                <td>
-                                    <div style="display:flex;align-items:center;gap:8px;">
-                                        <div style="width:4px;height:30px;background:<?php echo esc_attr($proj->color); ?>;border-radius:2px;"></div>
-                                        <strong><?php echo esc_html( $proj->name ); ?></strong>
-                                    </div>
-                                </td>
-                                <td><span class="pm-status-badge" style="background:<?php echo pm_get_status_color($proj->status); ?>"><?php echo esc_html(ucfirst($proj->status)); ?></span></td>
-                                <td><?php echo $proj->completed_tasks; ?> / <?php echo $proj->total_tasks; ?></td>
-                                <td>
-                                    <div style="display:flex;align-items:center;gap:8px;">
-                                        <div class="pm-mini-progress" style="flex:1;max-width:150px;">
-                                            <div class="pm-mini-progress-fill" style="width:<?php echo $comp; ?>%;background:<?php echo esc_attr($proj->color); ?>"></div>
+                        <?php if (!empty($project_stats)): ?>
+                            <?php foreach ($project_stats as $proj):
+                                $completion = $proj->total_tasks > 0 ? round(($proj->completed_tasks / $proj->total_tasks) * 100) : 0;
+                            ?>
+                                <tr>
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div style="width: 4px; height: 30px; background: <?php echo esc_attr($proj->color); ?>; border-radius: 2px;"></div>
+                                            <strong><?php echo esc_html($proj->name); ?></strong>
                                         </div>
-                                        <span style="font-weight:600;min-width:40px;"><?php echo $comp; ?>%</span>
-                                    </div>
-                                </td>
-                                <td><?php echo number_format( $proj->total_hours, 1 ); ?>h</td>
+                                    </td>
+                                    <td>
+                                        <span class="pm-status-badge" style="background: <?php echo pm_get_status_color($proj->status); ?>">
+                                            <?php echo esc_html(ucfirst($proj->status)); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo $proj->completed_tasks; ?> / <?php echo $proj->total_tasks; ?></td>
+                                    <td>
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <div class="pm-mini-progress" style="flex: 1; max-width: 150px;">
+                                                <div class="pm-mini-progress-fill" style="width: <?php echo $completion; ?>%; background: <?php echo esc_attr($proj->color); ?>"></div>
+                                            </div>
+                                            <span style="font-weight: 600; min-width: 40px;"><?php echo $completion; ?>%</span>
+                                        </div>
+                                    </td>
+                                    <td><?php echo number_format($proj->total_hours, 1); ?>h</td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="5" style="text-align: center; padding: 40px; color: #9ca3af;">No projects found</td>
                             </tr>
-                        <?php endforeach;
-                        else : ?>
-                            <tr><td colspan="5" style="text-align:center;padding:40px;color:#9ca3af;">No projects found</td></tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
         </div>
-
+        
         <!-- Team Performance -->
-        <?php if ( ! empty( $team_performance ) ) : ?>
-        <div class="pm-report-section">
-            <h3>Team Performance</h3>
-            <div class="pm-team-performance-grid">
-                <?php foreach ( $team_performance as $member ) :
-                    $mc = $member->total_tasks > 0 ? round( ( $member->completed_tasks / $member->total_tasks ) * 100 ) : 0;
-                ?>
-                    <div class="pm-team-member-card">
-                        <div class="team-member-header">
-                            <div class="team-member-avatar"><?php echo esc_html( strtoupper( substr( $member->display_name, 0, 2 ) ) ); ?></div>
-                            <div>
-                                <h4><?php echo esc_html( $member->display_name ); ?></h4>
-                                <p><?php echo $member->total_tasks; ?> tasks assigned</p>
+        <?php if (!empty($team_performance)): ?>
+            <div class="pm-report-section">
+                <h3>Team Performance</h3>
+                <div class="pm-team-performance-grid">
+                    <?php foreach ($team_performance as $member):
+                        $member_completion = $member->total_tasks > 0 ? round(($member->completed_tasks / $member->total_tasks) * 100) : 0;
+                    ?>
+                        <div class="pm-team-member-card">
+                            <div class="team-member-header">
+                                <div class="team-member-avatar">
+                                    <?php echo esc_html(strtoupper(substr($member->display_name, 0, 2))); ?>
+                                </div>
+                                <div>
+                                    <h4><?php echo esc_html($member->display_name); ?></h4>
+                                    <p><?php echo $member->total_tasks; ?> tasks assigned</p>
+                                </div>
+                            </div>
+                            <div class="team-member-stats">
+                                <div class="team-stat">
+                                    <span class="team-stat-label">Completed</span>
+                                    <span class="team-stat-value"><?php echo $member->completed_tasks; ?></span>
+                                </div>
+                                <div class="team-stat">
+                                    <span class="team-stat-label">Hours</span>
+                                    <span class="team-stat-value"><?php echo number_format($member->total_hours, 1); ?></span>
+                                </div>
+                                <div class="team-stat">
+                                    <span class="team-stat-label">Rate</span>
+                                    <span class="team-stat-value"><?php echo $member_completion; ?>%</span>
+                                </div>
+                            </div>
+                            <div class="team-member-progress">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: <?php echo $member_completion; ?>%; background: #3b82f6;"></div>
+                                </div>
                             </div>
                         </div>
-                        <div class="team-member-stats">
-                            <div class="team-stat"><span class="team-stat-label">Completed</span><span class="team-stat-value"><?php echo $member->completed_tasks; ?></span></div>
-                            <div class="team-stat"><span class="team-stat-label">Hours</span><span class="team-stat-value"><?php echo number_format($member->total_hours,1); ?></span></div>
-                            <div class="team-stat"><span class="team-stat-label">Rate</span><span class="team-stat-value"><?php echo $mc; ?>%</span></div>
-                        </div>
-                        <div class="team-member-progress">
-                            <div class="progress-bar"><div class="progress-fill" style="width:<?php echo $mc; ?>%;background:#3b82f6;"></div></div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
+                    <?php endforeach; ?>
+                </div>
             </div>
-        </div>
         <?php endif; ?>
-        <?php endif; // end overall stats block ?>
+        <?php endif; ?>
     </div>
 
     <style>
-    .pm-reports-container{background:white;border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);}
-    .pm-reports-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px;}
-    .pm-reports-header h2{margin:0;font-size:20px;font-weight:600;color:#111827;}
-    .pm-reports-filters{display:flex;align-items:center;gap:12px;}
-    .pm-personal-performance-section{background:#f9fafb;border-radius:12px;padding:20px;margin-bottom:24px;}
-    .pm-personal-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;}
-    .pm-personal-stat-card{background:white;border-radius:8px;padding:16px;display:flex;gap:12px;align-items:flex-start;}
-    .personal-stat-icon{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-    .pm-personal-stat-card h4{margin:0 0 6px 0;font-size:13px;color:#6b7280;font-weight:500;}
-    .pm-personal-stat-card .personal-stat-value{margin:0 0 4px 0;font-size:22px;font-weight:700;color:#111827;}
-    .pm-personal-stat-card .personal-stat-label{font-size:12px;color:#9ca3af;margin:0;}
-    .pm-personal-projects-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;}
-    .pm-personal-project-card{background:white;border-radius:8px;padding:12px;}
-    .personal-project-stats{display:flex;justify-content:space-between;font-size:12px;color:#6b7280;margin-top:4px;}
-    .pm-reports-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px;margin-bottom:24px;}
-    .pm-report-stat-card{background:#f9fafb;border-radius:12px;padding:20px;display:flex;gap:16px;align-items:flex-start;}
-    .stat-icon{width:48px;height:48px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-    .pm-report-stat-card h3{margin:0 0 8px 0;font-size:14px;color:#6b7280;font-weight:500;}
-    .pm-report-stat-card .stat-value{margin:0 0 4px 0;font-size:28px;font-weight:700;color:#111827;}
-    .pm-report-stat-card .stat-label{font-size:13px;color:#9ca3af;}
-    .pm-reports-charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:24px;margin-bottom:24px;}
-    .pm-report-chart-card{background:#f9fafb;border-radius:12px;padding:20px;}
-    .pm-report-chart-card h3{margin:0 0 20px 0;font-size:16px;font-weight:600;color:#111827;}
-    .pm-status-chart{display:flex;flex-direction:column;gap:12px;}
-    .status-chart-item{display:flex;align-items:center;gap:12px;}
-    .status-chart-label{min-width:100px;font-size:13px;color:#4b5563;font-weight:500;}
-    .status-chart-bar{flex:1;height:24px;background:white;border-radius:4px;overflow:hidden;}
-    .status-chart-fill{height:100%;transition:width 0.3s ease;}
-    .status-chart-value{min-width:40px;text-align:right;font-weight:600;color:#374151;font-size:13px;}
-    .pm-priority-chart{display:flex;flex-direction:column;gap:12px;}
-    .priority-chart-item{background:white;padding:12px;border-radius:6px;}
-    .priority-chart-header{display:flex;justify-content:space-between;align-items:center;}
-    .priority-chart-badge{padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;color:white;}
-    .priority-chart-count{font-size:13px;color:#6b7280;font-weight:600;}
-    .pm-empty-chart{text-align:center;padding:40px 20px;color:#9ca3af;font-size:14px;}
-    .pm-report-section{margin-top:24px;background:#f9fafb;border-radius:12px;padding:20px;}
-    .pm-report-section h3{margin:0 0 16px 0;font-size:16px;font-weight:600;color:#111827;}
-    .pm-team-performance-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;}
-    .pm-team-member-card{background:white;border-radius:8px;padding:16px;}
-    .team-member-header{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
-    .team-member-avatar{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;}
-    .team-member-header h4{margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;}
-    .team-member-header p{margin:0;font-size:13px;color:#6b7280;}
-    .team-member-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;}
-    .team-stat{text-align:center;}
-    .team-stat-label{display:block;font-size:12px;color:#6b7280;margin-bottom:4px;}
-    .team-stat-value{display:block;font-size:18px;font-weight:700;color:#111827;}
-    .team-member-progress{margin-top:12px;}
-    .progress-bar{height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;}
-    .progress-fill{height:100%;border-radius:3px;transition:width 0.3s ease;}
-    .pm-mini-progress{flex:1;height:6px;background:#e5e7eb;border-radius:3px;overflow:hidden;min-width:60px;}
-    .pm-mini-progress-fill{height:100%;border-radius:3px;transition:width 0.3s ease;}
-    .pm-status-badge{display:inline-block;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:600;color:white;}
-    </style>
-
-    <script>
-    function pmApplyDateFilter() {
-        const from = document.getElementById('pm-date-from').value;
-        const to   = document.getElementById('pm-date-to').value;
-        window.location.href = '?tab=reports&date_from=' + from + '&date_to=' + to;
+    .pm-reports-container {
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    </script>
-    <?php
-    return ob_get_clean();
+    
+    .pm-reports-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    
+    .pm-reports-header h2 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+        color: #111827;
+    }
+    
+    .pm-reports-filters {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .pm-personal-performance-section {
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 24px;
+    }
+    
+    .pm-personal-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+    }
+    
+    .pm-personal-stat-card {
+        background: white;
+        border-radius: 8px;
+        padding: 16px;
+display: flex;
+gap: 12px;
+align-items: flex-start;
+}.personal-stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}.pm-personal-stat-card h4 {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 500;
+}.pm-personal-stat-card .personal-stat-value {
+    margin: 0 0 4px 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: #111827;
+}.pm-personal-stat-card .personal-stat-label {
+    font-size: 12px;
+    color: #9ca3af;
+    margin: 0;
+}.pm-personal-projects-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
+}.pm-personal-project-card {
+    background: white;
+    border-radius: 8px;
+    padding: 12px;
+}.personal-project-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 4px;
+}.pm-reports-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 24px;
+}.pm-report-stat-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+}.stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}.pm-report-stat-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}.pm-report-stat-card .stat-value {
+    margin: 0 0 4px 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: #111827;
+}.pm-report-stat-card .stat-label {
+    font-size: 13px;
+    color: #9ca3af;
+}.pm-reports-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 24px;
+    margin-bottom: 24px;
+}.pm-report-chart-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+}.pm-report-chart-card h3 {
+    margin: 0 0 20px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}.pm-status-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}.status-chart-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}.status-chart-label {
+    min-width: 100px;
+    font-size: 13px;
+    color: #4b5563;
+    font-weight: 500;
+}.status-chart-bar {
+    flex: 1;
+    height: 24px;
+    background: white;
+    border-radius: 4px;
+    overflow: hidden;
+}.status-chart-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+}.status-chart-value {
+    min-width: 40px;
+    text-align: right;
+    font-weight: 600;
+    color: #374151;
+    font-size: 13px;
+}.pm-priority-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}.priority-chart-item {
+    background: white;
+    padding: 12px;
+    border-radius: 6px;
+}.priority-chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}.priority-chart-badge {
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+}.priority-chart-count {
+    font-size: 13px;
+    color: #6b7280;
+    font-weight: 600;
+}.pm-empty-chart {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    font-size: 14px;
+}.pm-report-section {
+    margin-top: 24px;
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+}.pm-report-section h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}.pm-team-performance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}.pm-team-member-card {
+    background: white;
+    border-radius: 8px;
+    padding: 16px;
+}.team-member-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}.team-member-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+}.team-member-header h4 {
+    margin: 0 0 4px 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+}.team-member-header p {
+    margin: 0;
+    font-size: 13px;
+    color: #6b7280;
+}.team-member-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+}.team-stat {
+    text-align: center;
+}.team-stat-label {
+    display: block;
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 4px;
+}.team-stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: #111827;
+}.team-member-progress {
+    margin-top: 12px;
+}.progress-bar {
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    overflow: hidden;
+}.progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
 }
+</style><script>
+function pmApplyDateFilter() {
+    const from = document.getElementById('pm-date-from').value;
+    const to = document.getElementById('pm-date-to').value;
+    window.location.href = '?tab=reports&date_from=' + from + '&date_to=' + to;
+}
+</script>
+<?php
+return ob_get_clean();
+}
+
 /**
  * Logs Tab - Admin/Owner/Manager Only
  */
@@ -3031,7 +4257,7 @@ function pm_logs_tab($business_id) {
         </div>
         
         <!-- Logs Table -->
-        <div class="pm-logs-table-container bntm-table-wrapper">
+        <div class="pm-logs-table-container">
             <table class="bntm-table pm-logs-table">
                 <thead>
                     <tr>
@@ -3842,9 +5068,1334 @@ function pm_logs_tab($business_id) {
     
 /* ========================================
    GLOBAL STYLES
+======================================== */
+
+.pm-status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    text-transform: capitalize;
+    white-space: nowrap;
+}
+
+.stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+/* ========================================
+   MODAL STYLES
+======================================== */
+
+.bntm-form {
+    padding: 24px;
+}
+
+.bntm-form-group {
+    margin-bottom: 20px;
+}
+.bntm-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.bntm-modal-content {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    max-width: 600px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.bntm-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 24px 24px 16px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.bntm-modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.bntm-modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    transition: all 0.2s;
+    line-height: 1;
+}
+
+.bntm-modal-close:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.bntm-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 24px 24px;
+    border-top: 1px solid #e5e7eb;
+    margin-top: 24px;
+}
+</style>
+    <script>
+    function pmToggleSidebar() {
+        const sidebar = document.getElementById('pm-sidebar');
+        const mainContent = document.getElementById('pm-main-content');
+        sidebar.classList.toggle('collapsed');
+        
+        // Optional: Adjust main content to take full width when sidebar is collapsed
+        if (sidebar.classList.contains('collapsed')) {
+            mainContent.style.marginLeft = '0';
+        } else {
+            mainContent.style.marginLeft = '';
+        }
+    }
+    function pmToggleProjectsList(headerElement) {
+        const section = headerElement.closest('.pm-sidebar-section');
+        section.classList.toggle('collapsed');
+    }
+    </script>
+    <?php
+    $content = ob_get_clean();
+    return bntm_universal_container("Project Management", $content);
+}
+
+/**
+ * Project Overview Subtab
+ */ 
+function pm_project_overview_subtab($project, $business_id)
+{
+    global $wpdb;
+    $tasks_table = $wpdb->prefix . "pm_tasks";
+    $time_logs_table = $wpdb->prefix . "pm_time_logs";
+    $milestones_table = $wpdb->prefix . "pm_milestones";
+    $team_table = $wpdb->prefix . "pm_team_members"; // Statistics
+    $total_tasks = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d",
+            $project->id
+        )
+    );
+    $completed_tasks = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d AND status IN ('completed', 'closed')",
+            $project->id
+        )
+    );
+    $overdue_tasks = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} WHERE project_id = %d AND due_date < CURDATE() AND status NOT IN ('completed', 'closed')",
+            $project->id
+        )
+    );
+    $total_hours = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT SUM(tl.hours) FROM {$time_logs_table} tl 
+         INNER JOIN {$tasks_table} t ON tl.task_id = t.id 
+         WHERE t.project_id = %d",
+            $project->id
+        )
+    );
+    $total_hours = $total_hours ? floatval($total_hours) : 0;
+    $estimated_hours = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT SUM(estimated_hours) FROM {$tasks_table} WHERE project_id = %d",
+            $project->id
+        )
+    );
+    $estimated_hours = $estimated_hours ? floatval($estimated_hours) : 0;
+    $team_count = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$team_table} WHERE project_id = %d",
+            $project->id
+        )
+    );
+    $milestones_count = $wpdb->get_var(
+        $wpdb->prepare(
+            "SELECT COUNT(*) FROM {$milestones_table} WHERE project_id = %d",
+            $project->id
+        )
+    );
+    $progress =
+        $total_tasks > 0 ? round(($completed_tasks / $total_tasks) * 100) : 0; // Recent tasks
+    $recent_tasks = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT * FROM {$tasks_table} WHERE project_id = %d ORDER BY created_at DESC LIMIT 5",
+            $project->id
+        )
+    ); 
+    
+    // Upcoming deadlines - filtered by role
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = bntm_get_user_role($current_user->ID);
+    $can_view_all = $is_wp_admin || in_array($current_role, ['owner', 'manager']);
+    
+    if ($can_view_all) {
+        // Show all upcoming deadlines for admins/managers
+        $upcoming_deadlines = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$tasks_table} 
+                 WHERE project_id = %d AND status NOT IN ('completed', 'closed') AND due_date IS NOT NULL
+                 ORDER BY due_date ASC LIMIT 5",
+                $project->id
+            )
+        );
+    } else {
+        // Show only current user's upcoming deadlines
+        $upcoming_deadlines = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT * FROM {$tasks_table} 
+                 WHERE project_id = %d 
+                 AND status NOT IN ('completed', 'closed') 
+                 AND due_date IS NOT NULL
+                 AND assigned_to = %d
+                 ORDER BY due_date ASC LIMIT 5",
+                $project->id,
+                $current_user->ID
+            )
+        );
+    }
+    ob_start();
+    ?>
+    <div class="pm-project-overview">
+        <div class="pm-overview-header">
+            <div>
+                <h2><?php echo esc_html($project->name); ?></h2>
+                <?php if ($project->description): ?>
+                    <p class="project-description"><?php echo esc_html(
+                        $project->description
+                    ); ?></p>
+                <?php endif; ?>
+            </div>
+        </div>
+        
+        <!-- Stats Grid -->
+        <div class="pm-overview-stats">
+            <div class="pm-stat-box">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h4>Progress</h4>
+                    <p class="stat-value"><?php echo $progress; ?>%</p>
+                    <p class="stat-label"><?php echo $completed_tasks; ?>/<?php echo $total_tasks; ?> tasks</p>
+                </div>
+            </div>
+            
+            <div class="pm-stat-box">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h4>Time Logged</h4>
+                    <p class="stat-value"><?php echo number_format(
+                        $total_hours,
+                        1
+                    ); ?>h</p>
+                    <?php if ($estimated_hours > 0): ?>
+                        <p class="stat-label">of <?php echo number_format(
+                            $estimated_hours,
+                            1
+                        ); ?>h estimated</p>
+                    <?php else: ?>
+                        <p class="stat-label">Total tracked</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+            
+            <div class="pm-stat-box">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h4>Team Members</h4>
+                    <p class="stat-value"><?php echo $team_count; ?></p>
+                    <p class="stat-label">Active members</p>
+                </div>
+            </div>
+            
+            <div class="pm-stat-box">
+                <div class="stat-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+                    <svg width="24" height="24" fill="none" stroke="white" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h4>Overdue Tasks</h4>
+                    <p class="stat-value" style="color: #ef4444;"><?php echo $overdue_tasks; ?></p>
+                    <p class="stat-label">Need attention</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Project Info -->
+        <div class="pm-info-grid">
+            <div class="pm-info-card">
+                <h3>Project Details</h3>
+                <div class="pm-info-list">
+                    <?php if ($project->client_name): ?>
+                        <div class="pm-info-item">
+                            <span class="info-label">Client</span>
+                            <span class="info-value"><?php echo esc_html(
+                                $project->client_name
+                            ); ?></span>
+                        </div>
+                    <?php endif; ?>
+                    <div class="pm-info-item">
+                        <span class="info-label">Status</span>
+                        <span class="pm-status-badge" style="background: <?php echo pm_get_status_color(
+                            $project->status
+                        ); ?>">
+                            <?php echo ucfirst($project->status); ?>
+                        </span>
+                    </div>
+                    <?php if ($project->start_date): ?>
+                        <div class="pm-info-item">
+                            <span class="info-label">Start Date</span>
+                            <span class="info-value"><?php echo date(
+                                "M d, Y",
+                                strtotime($project->start_date)
+                            ); ?></span>
+                        </div>
+                    <?php endif; ?>
+                    <?php if ($project->due_date): ?>
+                        <div class="pm-info-item">
+                            <span class="info-label">Due Date</span>
+                            
+                            
+                            <?php if ($project->due_date && $project->due_date !== '0000-00-00'): ?>
+                             <?php $is_overdue =
+                                 strtotime($project->due_date) < time() &&
+                                 $project->status !== "completed"; ?>
+                             <span class="info-value" style="color: <?php echo $is_overdue
+                                 ? "#ef4444"
+                                 : "#6b7280"; ?>; font-size: 13px;">
+                                 <?php echo date(
+                                     "M d, Y",
+                                     strtotime($project->due_date)
+                                 ); ?>
+                             </span>
+                         <?php else: ?>
+                             <span class="info-value" style="color: #9ca3af;">—</span>
+                         <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+                    <?php if ($project->budget > 0): ?>
+                        <div class="pm-info-item">
+                            <span class="info-label">Budget</span>
+                            <span class="info-value" style="color: #059669; font-weight: 600;">
+                                ₱<?php echo number_format(
+                                    $project->budget,
+                                    2
+                                ); ?>
+                            </span>
+                        </div>
+                    <?php endif; ?>
+                    <div class="pm-info-item">
+                        <span class="info-label">Milestones</span>
+                        <span class="info-value"><?php echo $milestones_count; ?></span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="pm-info-card">
+                <h3>Recent Activity</h3>
+                <div class="pm-activity-list">
+                    <?php if (!empty($recent_tasks)): ?>
+                        <?php foreach ($recent_tasks as $task): ?>
+                            <div class="pm-activity-item">
+                                <div class="activity-icon" style="background: <?php echo pm_get_status_color(
+                                    $task->status
+                                ); ?>">
+                                    <svg width="14" height="14" fill="none" stroke="white" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <p class="activity-text"><?php echo esc_html(
+                                        $task->title
+                                    ); ?></p>
+                                    <p class="activity-time"><?php echo human_time_diff(
+                                        strtotime($task->created_at),
+                                        current_time("timestamp")
+                                    ); ?> ago</p>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <p class="pm-empty-state">No recent activity</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Upcoming Deadlines -->
+        <?php if (!empty($upcoming_deadlines)): ?>
+            <div class="pm-section-card">
+                <h3>Upcoming Deadlines</h3>
+                <div class="pm-deadlines-list">
+                    <?php foreach ($upcoming_deadlines as $task):
+
+                        $days_until = floor(
+                            (strtotime($task->due_date) - time()) /
+                                (60 * 60 * 24)
+                        );
+                        $is_overdue = $days_until < 0;
+                        $assigned_user = $task->assigned_to
+                            ? get_userdata($task->assigned_to)
+                            : null;
+                        ?>
+                        <div class="pm-deadline-item <?php echo $is_overdue
+                            ? "overdue"
+                            : ""; ?>">
+                            <div class="deadline-content">
+                                <h4><?php echo esc_html($task->title); ?></h4>
+                                <div class="deadline-meta">
+                                    <span class="deadline-priority priority-<?php echo $task->priority; ?>">
+                                        <?php echo ucfirst($task->priority); ?>
+                                    </span>
+                                    <?php if ($assigned_user): ?>
+                                        <span class="deadline-assignee">
+                                            <svg width="14" height="14" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/>
+                                            </svg>
+                                            <?php echo esc_html(
+                                                $assigned_user->display_name
+                                            ); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="deadline-date">
+                                <?php if ($is_overdue): ?>
+                                    <span class="overdue-badge"><?php echo abs(
+                                        $days_until
+                                    ); ?> days overdue</span>
+                                <?php else: ?>
+                                    <span class="due-badge"><?php echo $days_until; ?> days left</span>
+                                <?php endif; ?>
+                                <span class="date-text"><?php echo date(
+                                    "M d, Y",
+                                    strtotime($task->due_date)
+                                ); ?></span>
+                            </div>
+                        </div>
+                    <?php
+                    endforeach; ?>
                 </div>
             </div>
         <?php endif; ?>
+    </div>
+    
+    <style>
+    .pm-project-overview {
+        max-width: 1200px;
+    }
+    
+    .pm-overview-header {
+        margin-bottom: 24px;
+    }
+    
+    .pm-overview-header h2 {
+        margin: 0 0 8px 0;
+        font-size: 24px;
+        font-weight: 700;
+        color: #111827;
+    }
+    
+    .project-description {
+        margin: 0;
+        color: #6b7280;
+        font-size: 15px;
+        line-height: 1.6;
+    }
+    
+    .pm-overview-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    
+    .pm-stat-box {
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 20px;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+    }
+    
+    .pm-stat-box h4 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        color: #6b7280;
+        font-weight: 500;
+    }
+    
+    .pm-stat-box .stat-value {
+        margin: 0 0 4px 0;
+        font-size: 28px;
+        font-weight: 700;
+        color: #111827;
+    }
+    
+    .pm-stat-box .stat-label {
+        margin: 0;
+        font-size: 13px;
+        color: #9ca3af;
+    }
+    
+    .pm-info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin-bottom: 24px;
+    }
+    
+    .pm-info-card {
+background: #f9fafb;
+border-radius: 12px;
+padding: 20px;
+}
+.pm-info-card h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pm-info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.pm-info-item:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: 500;
+}
+
+.info-value {
+    font-size: 14px;
+    color: #111827;
+    font-weight: 600;
+}
+
+.pm-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pm-activity-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.activity-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.activity-text {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    color: #111827;
+    font-weight: 500;
+}
+
+.activity-time {
+    margin: 0;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.pm-section-card {
+    background: #f9fafb;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.pm-section-card h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.pm-deadlines-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pm-deadline-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    background: white;
+    border-radius: 8px;
+}
+
+
+.deadline-content h4 {
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.deadline-meta {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.deadline-priority {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.deadline-priority.priority-low {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.deadline-priority.priority-medium {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.deadline-priority.priority-high {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.deadline-assignee {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.deadline-date {
+    text-align: right;
+}
+
+.overdue-badge, .due-badge {
+    display: block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.overdue-badge {
+    background: #ef4444;
+    color: white;
+}
+
+.due-badge {
+    background: #3b82f6;
+    color: white;
+}
+
+.date-text {
+    display: block;
+    font-size: 13px;
+    color: #6b7280;
+}
+
+<!-- Add these styles to the existing <style> section at the bottom: -->
+
+.pm-overview-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 24px;
+}
+
+.pm-overview-sidebar {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    height: fit-content;
+    position: sticky;
+    top: 20px;
+}
+
+.pm-sidebar-section {
+    margin-bottom: 20px;
+}
+
+.pm-sidebar-section:last-child {
+    margin-bottom: 0;
+}
+
+.pm-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    padding: 8px 0;
+    margin-bottom: 12px;
+}
+
+.pm-sidebar-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-toggle-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    color: #6b7280;
+    transition: transform 0.2s;
+}
+
+.sidebar-chevron {
+    transition: transform 0.2s;
+}
+
+.pm-sidebar-section.collapsed .sidebar-chevron {
+    transform: rotate(-90deg);
+}
+
+.pm-sidebar-section.collapsed .pm-sidebar-content {
+    display: none;
+}
+
+.pm-sidebar-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pm-sidebar-project-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f9fafb;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.2s;
+    border-left: 3px solid transparent;
+}
+
+.pm-sidebar-project-item:hover {
+    background: #f3f4f6;
+    transform: translateX(4px);
+}
+
+.pm-sidebar-project-item.active {
+    background: #eff6ff;
+}
+
+.pm-sidebar-project-item.active .sidebar-project-info h4 {
+    color: #3b82f6;
+    font-weight: 700;
+}
+
+.sidebar-project-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.sidebar-project-info h4 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-project-count {
+    margin: 0;
+    font-size: 12px;
+    color: #6b7280;
+}
+
+.pm-sidebar-project-item svg {
+    flex-shrink: 0;
+    color: #9ca3af;
+}
+
+.pm-sidebar-empty {
+    text-align: center;
+    padding: 20px 10px;
+}
+
+.pm-sidebar-empty p {
+    margin: 0;
+    font-size: 13px;
+    color: #9ca3af;
+}
+
+.pm-project-overview {
+    min-width: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+    .pm-overview-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .pm-overview-sidebar {
+        position: static;
+    }
+}
+
+</style>
+<?php return ob_get_clean();
+}
+ /**
+ * Project Tasks Subtab
+ */
+function pm_project_tasks_subtab($project, $business_id, $nonce) {
+    global $wpdb;
+    $tasks_table = $wpdb->prefix . 'pm_tasks';
+    $milestones_table = $wpdb->prefix . 'pm_milestones';
+    $team_table = $wpdb->prefix . 'pm_team_members';
+    $statuses_table = $wpdb->prefix . 'pm_project_statuses';
+    
+    // Get milestones
+    $milestones = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$milestones_table} WHERE project_id = %d ORDER BY sort_order ASC, due_date ASC",
+        $project->id
+    ));
+    
+    // Get tasks without milestone
+    $tasks_no_milestone = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tasks_table} 
+         WHERE project_id = %d AND milestone_id IS NULL 
+         ORDER BY 
+             CASE 
+                 WHEN status IN ('completed', 'closed') THEN 1
+                 ELSE 0
+             END ASC,
+             sort_order ASC, 
+             created_at DESC",
+        $project->id
+    ));
+    
+    // Get team members for assignment dropdown
+    $team_members = $wpdb->get_results($wpdb->prepare(
+        "SELECT tm.*, u.display_name FROM {$team_table} tm
+         INNER JOIN {$wpdb->users} u ON tm.user_id = u.ID
+         WHERE tm.project_id = %d",
+        $project->id
+    ));
+    
+    // Get custom statuses for this project
+    $custom_statuses = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$statuses_table} WHERE project_id = %d ORDER BY sort_order ASC",
+        $project->id
+    ));
+    
+    ob_start();
+    ?>
+    <div class="pm-tasks-container">
+       <div class="pm-tasks-header">
+            <h2>Tasks</h2>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                <!-- Assignment Filter Toggle -->
+                <div class="pm-task-filter-toggle">
+                    <button class="pm-filter-btn active" data-filter="all" onclick="pmFilterTasks('all')">
+                        All Tasks
+                    </button>
+                    <button class="pm-filter-btn" data-filter="my" onclick="pmFilterTasks('my')">
+                        My Tasks
+                    </button>
+                </div>
+                
+                <!-- Status Filter -->
+                <div class="pm-status-filter-group bntm-form-group" style="width:unset;margin-bottom:unset;">
+                    <label style="font-size: 13px; color: #6b7280; font-weight: 500;">Status:</label>
+                    <select id="pm-status-filter" class="bntm-input" style="width: 180px;" onchange="pmFilterByStatus()">
+                        <option value="">All Statuses</option>
+                        <?php if (!empty($custom_statuses)): ?>
+                            <?php foreach ($custom_statuses as $status): ?>
+                                <option value="<?php echo esc_attr($status->status_name); ?>">
+                                    <?php echo esc_html($status->status_name); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <option value="todo">To Do</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="review">Review</option>
+                            <option value="completed">Completed</option>
+                        <?php endif; ?>
+                    </select>
+                </div>
+                
+                <div class="pm-tasks-actions">
+                    <button class="bntm-btn-secondary" onclick="pmOpenMilestoneModal()">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Add Milestone
+                    </button>
+                    <button class="bntm-btn-secondary" onclick="pmOpenImportModal()">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        Import Tasks
+                    </button>
+                    <button class="bntm-btn-primary" onclick="pmOpenTaskModal()">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Add Task
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        
+        <!-- Tasks grouped by milestones -->
+        <?php foreach ($milestones as $milestone): 
+            $milestone_tasks = $wpdb->get_results($wpdb->prepare(
+                "SELECT * FROM {$tasks_table} 
+                 WHERE project_id = %d AND milestone_id = %d 
+                 ORDER BY 
+                     CASE 
+                         WHEN status IN ('completed', 'closed') THEN 1
+                         ELSE 0
+                     END ASC,
+                     sort_order ASC, 
+                     created_at DESC",
+                $project->id, $milestone->id
+            ));
+           $milestone_progress = 0;
+            if (count($milestone_tasks) > 0) {
+                $completed_statuses = ['completed', 'closed'];
+                $completed = count(array_filter($milestone_tasks, function($t) use ($completed_statuses) { 
+                    // Check if status exists and is not empty
+                    if (isset($t->status) && !empty($t->status)) {
+                        return in_array(strtolower($t->status), $completed_statuses);
+                    }
+                    return false;
+                }));
+                $milestone_progress = round(($completed / count($milestone_tasks)) * 100);
+            }
+        ?>
+            <div class="pm-milestone-section">
+                <div class="pm-milestone-header" onclick="pmToggleMilestone(this)">
+                    <div class="milestone-info">
+                        <button type="button" class="milestone-toggle-btn">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="milestone-chevron">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                        <h3><?php echo esc_html($milestone->name); ?></h3>
+                        <?php if ($milestone->due_date): ?>
+                            <span class="milestone-due">Due: <?php echo date('M d, Y', strtotime($milestone->due_date)); ?></span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="milestone-actions" onclick="event.stopPropagation();">
+                        <span class="milestone-count"><?php echo count($milestone_tasks); ?> tasks</span>
+                        <div class="milestone-progress-mini">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="height:100%;border-radius:3px;width: <?php echo $milestone_progress; ?>%; background: <?php echo esc_attr($project->color); ?>"></div>
+                            </div>
+                            <span><?php echo $milestone_progress; ?>%</span>
+                        </div>
+                        <button class="bntm-btn-small bntm-btn-secondary" onclick="pmEditMilestone(<?php echo htmlspecialchars(json_encode($milestone)); ?>)">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                        </button>
+                        <button class="bntm-btn-small bntm-btn-danger" onclick="pmDeleteMilestone(<?php echo $milestone->id; ?>, '<?php echo esc_js($milestone->name); ?>')">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="pm-tasks-list sortable-milestone-tasks" data-milestone-id="<?php echo $milestone->id; ?>">
+                    <?php if (empty($milestone_tasks)): ?>
+                        <div class="pm-empty-tasks">No tasks in this milestone</div>
+                    <?php else: ?>
+                        <?php foreach ($milestone_tasks as $task): 
+                            echo pm_render_task_row($task, $team_members, $custom_statuses, $nonce);
+                        endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endforeach; ?>
+        
+        <?php if (empty($milestones) && empty($tasks_no_milestone)): ?>
+            <div class="pm-empty-state-large">
+                <svg width="80" height="80" fill="none" stroke="#d1d5db" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+                <h3>No Tasks Yet</h3>
+                <p>Create your first task to get started</p>
+                <button class="bntm-btn-primary" onclick="pmOpenTaskModal()">Create Task</button>
+            </div>
+        <?php endif; ?>
+    </div>
+    
+        <!-- Tasks without milestone -->
+        <?php if (!empty($tasks_no_milestone)): ?>
+            <div class="pm-milestone-section">
+               <div class="pm-milestone-header" onclick="pmToggleMilestone(this)">
+                   <button type="button" class="milestone-toggle-btn">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="milestone-chevron">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </button>
+                    <h3>No Milestone</h3>
+                    <span class="milestone-count"><?php echo count($tasks_no_milestone); ?> tasks</span>
+                </div>
+                <div class="milestone-actions" onclick="event.stopPropagation();">
+                    </div>
+                <div class="pm-tasks-list sortable-milestone-tasks" data-milestone-id="0" >
+                    <?php foreach ($tasks_no_milestone as $task): 
+                        echo pm_render_task_row($task, $team_members, $custom_statuses, $nonce);
+                    endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+    <!-- Task Modal -->
+    <div id="pm-task-modal" class="bntm-modal" style="display: none;">
+        <div class="bntm-modal-content" style="max-width: 700px;">
+            <div class="bntm-modal-header">
+                <h3 id="pm-task-modal-title">Create New Task</h3>
+                <button class="bntm-modal-close" onclick="pmCloseTaskModal()">&times;</button>
+            </div>
+            <form id="pm-task-form" class="bntm-form">
+                <input type="hidden" name="task_id" id="pm-task-id">
+                <input type="hidden" name="project_id" value="<?php echo $project->id; ?>">
+                
+                <div class="bntm-form-group">
+                    <label>Task Title *</label>
+                    <input type="text" name="title" id="pm-task-title" required>
+                </div>
+                
+                <div class="bntm-form-group">
+                    <label>Description</label>
+                    <textarea name="description" id="pm-task-description" rows="4"></textarea>
+                </div>
+                
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Status</label>
+                        <select name="status" id="pm-task-status">
+                            <?php if (!empty($custom_statuses)): ?>
+                                <?php foreach ($custom_statuses as $status): ?>
+                                    <option value="<?php echo esc_attr($status->status_name); ?>">
+                                        <?php echo esc_html($status->status_name); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <option value="To Do">To Do</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="Review">Review</option>
+                                <option value="completed">Completed</option>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Priority</label>
+                        <select name="priority" id="pm-task-priority">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Assigned To</label>
+                        <select name="assigned_to" id="pm-task-assigned">
+                            <option value="">Unassigned</option>
+                            <?php foreach ($team_members as $member): ?>
+                                <option value="<?php echo $member->user_id; ?>">
+                                    <?php echo esc_html($member->display_name); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Milestone</label>
+                        <select name="milestone_id" id="pm-task-milestone">
+                            <option value="">No Milestone</option>
+                            <?php foreach ($milestones as $milestone): ?>
+                                <option value="<?php echo $milestone->id; ?>">
+                                    <?php echo esc_html($milestone->name); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Due Date</label>
+                        <input type="date" name="due_date" id="pm-task-due">
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Estimated Hours</label>
+                        <input type="number" name="estimated_hours" id="pm-task-estimated" step="0.1" min="0">
+                    </div>
+                </div>
+                
+                <div class="bntm-form-group">
+                    <label>Tags (comma separated)</label>
+                    <input type="text" name="tags" id="pm-task-tags" placeholder="design, frontend, urgent">
+                </div>
+                
+                <!-- Time Logs and Comments (only shown when editing) -->
+                <div id="pm-task-logs-section" style="display: none;">
+                    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;">
+                    
+                    <!-- Time Logs -->
+                    <div class="pm-task-logs">
+                        <div class="logs-header">
+                            <h4>Time Logs</h4>
+                            <button type="button" class="bntm-btn-small bntm-btn-secondary" onclick="pmOpenTimeLogForm()">
+                                <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                                </svg>
+                                Log Time
+                            </button>
+                        </div>
+                        <div id="pm-time-logs-list"></div>
+                        
+                        <!-- Time Log Form -->
+                        <div id="pm-time-log-form" style="display: none; margin-top: 12px; padding: 16px; background: #f9fafb; border-radius: 8px;">
+                            <div class="bntm-form-row">
+                                <div class="bntm-form-group">
+                                    <label>Hours *</label>
+                                    <input type="number" id="pm-log-hours" step="0.5" min="0.5">
+                                </div>
+                                <div class="bntm-form-group">
+                                    <label>Date *</label>
+                                    <input type="date" id="pm-log-date" value="<?php echo date('Y-m-d'); ?>">
+                                </div>
+                            </div>
+                            <div class="bntm-form-group">
+                                <label>Notes</label>
+                                <textarea id="pm-log-notes" rows="2"></textarea>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button type="button" class="bntm-btn-primary" onclick="pmSaveTimeLog()">Save Log</button>
+                                <button type="button" class="bntm-btn-secondary" onclick="pmCloseTimeLogForm()">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <hr style="margin: 24px 0; border: none; border-top: 1px solid #e5e7eb;">
+                    
+                    <!-- Comments -->
+                    <div class="pm-task-comments">
+                        <h4>Comments</h4>
+                        <div id="pm-comments-list"></div>
+                        <div class="pm-add-comment bntm-form-group">
+                            <textarea id="pm-new-comment" rows="3" placeholder="Add a comment..." class="bntm-input"></textarea>
+                            <button type="button" class="bntm-btn-primary" onclick="pmAddComment()" style="margin-top: 8px;">
+                                Add Comment
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bntm-modal-footer">
+                    <button type="button" class="bntm-btn-secondary" onclick="pmCloseTaskModal()">Cancel</button>
+                    <button type="submit" class="bntm-btn-primary">
+                        <span id="pm-task-submit-text">Create Task</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <!-- Import Tasks Modal -->
+    <div id="pm-import-modal" class="bntm-modal" style="display: none;">
+        <div class="bntm-modal-content" style="max-width: 800px;">
+            <div class="bntm-modal-header">
+                <h3>Import Tasks from JSON</h3>
+                <button class="bntm-modal-close" onclick="pmCloseImportModal()">&times;</button>
+            </div>
+            <div class="bntm-form">
+                <div class="bntm-form-group">
+                    <label>Upload JSON File</label>
+                    <input type="file" id="pm-import-file" accept=".json" onchange="pmLoadJsonFile(event)">
+                    <small style="color: #6b7280; display: block; margin-top: 8px;">
+                        Expected format: Array of tasks with fields: title, description, status, priority, milestone, assigned_to, due_date, estimated_hours, tags
+                    </small>
+                </div>
+                
+                <div id="pm-import-pReview" style="display: none; margin-top: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                        <h4 style="margin: 0;">Tasks to Import (<span id="pm-selected-count">0</span> selected)</h4>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="bntm-btn-small bntm-btn-secondary" onclick="pmSelectAllTasks(true)">Select All</button>
+                            <button type="button" class="bntm-btn-small bntm-btn-secondary" onclick="pmSelectAllTasks(false)">Deselect All</button>
+                        </div>
+                    </div>
+                    <div id="pm-tasks-pReview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;">
+                    </div>
+                </div>
+                
+                <div class="bntm-modal-footer">
+                    <button type="button" class="bntm-btn-secondary" onclick="pmCloseImportModal()">Cancel</button>
+                    <button type="button" class="bntm-btn-primary" id="pm-import-btn" onclick="pmImportTasks()" style="display: none;">
+                        Import Selected Tasks
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Milestone Modal -->
+    <div id="pm-milestone-modal" class="bntm-modal" style="display: none;">
+        <div class="bntm-modal-content" style="max-width: 500px;">
+            <div class="bntm-modal-header">
+                <h3 id="pm-milestone-modal-title">Create Milestone</h3>
+                <button class="bntm-modal-close" onclick="pmCloseMilestoneModal()">&times;</button>
+            </div>
+            <form id="pm-milestone-form" class="bntm-form">
+                <input type="hidden" name="milestone_id" id="pm-milestone-id">
+                <input type="hidden" name="project_id" value="<?php echo $project->id; ?>">
+                
+                <div class="bntm-form-group">
+                    <label>Milestone Name *</label>
+                    <input type="text" name="name" id="pm-milestone-name" required>
+                </div>
+                
+                <div class="bntm-form-group">
+                    <label>Description</label>
+                    <textarea name="description" id="pm-milestone-description" rows="3"></textarea>
+                </div>
+                
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Due Date</label>
+                        <input type="date" name="due_date" id="pm-milestone-due">
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Status</label>
+                        <select name="status" id="pm-milestone-status">
+                            <option value="pending">Pending</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="bntm-modal-footer">
+                    <button type="button" class="bntm-btn-secondary" onclick="pmCloseMilestoneModal()">Cancel</button>
+                    <button type="submit" class="bntm-btn-primary">
+                        <span id="pm-milestone-submit-text">Create Milestone</span>
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
     
     <style>
@@ -4181,15 +6732,12 @@ function pm_logs_tab($business_id) {
     
     .task-row-status {
         min-width: 120px;
-        overflow: visible;
     }
     
     .task-status-dropdown {
         position: relative;
         display: inline-block;
         width: 100%;
-        overflow: visible !important;
-        z-index: 10;
     }
     
     .task-status-btn {
@@ -4208,14 +6756,16 @@ function pm_logs_tab($business_id) {
     }
     
     .task-status-menu {
-        position: fixed;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
         background: white;
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 10000;
+        z-index: 1000;
         margin-top: 4px;
         display: none;
-        min-width: 150px;
     }
     
     .task-status-menu.show {
@@ -4396,7 +6946,6 @@ function pmOpenTaskModal() {
     document.getElementById('pm-task-form').reset();
     document.getElementById('pm-task-id').value = '';
     document.getElementById('pm-task-logs-section').style.display = 'none';
-    document.getElementById('pm-export-google-calendar-btn').style.display = 'none';
     document.getElementById('pm-task-modal-title').textContent = 'Create New Task';
     document.getElementById('pm-task-submit-text').textContent = 'Create Task';
 }
@@ -4430,9 +6979,6 @@ function pmEditTask(taskId) {
             document.getElementById('pm-task-tags').value = task.tags || '';
             document.getElementById('pm-task-modal-title').textContent = 'Edit Task';
             document.getElementById('pm-task-submit-text').textContent = 'Update Task';
-            
-            // Show Google Calendar export button
-            document.getElementById('pm-export-google-calendar-btn').style.display = 'inline-flex';
             
             // Show logs section
             document.getElementById('pm-task-logs-section').style.display = 'block';
@@ -4490,51 +7036,42 @@ document.getElementById('pm-task-form').addEventListener('submit', function(e) {
     });
 });
 
-// Performance optimization: Debounce for filter functions
-let filterDebounceTimer;
-function debounceFilter() {
-    clearTimeout(filterDebounceTimer);
-    filterDebounceTimer = setTimeout(applyAllFilters, 50);
-}
-
 // Task Filtering Functions
 function pmFilterTasks(filter) {
     currentAssignmentFilter = filter;
     
-    // Update active button - cache button queries
-    const buttons = document.querySelectorAll('.pm-filter-btn');
-    buttons.forEach(btn => btn.classList.remove('active'));
+    // Update active button
+    document.querySelectorAll('.pm-filter-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`.pm-filter-btn[data-filter="${filter}"]`).classList.add('active');
     
-    const activeBtn = document.querySelector(`.pm-filter-btn[data-filter="${filter}"]`);
-    if (activeBtn) activeBtn.classList.add('active');
-    
-    debounceFilter();
+    applyAllFilters();
 }
-
 function pmFilterByStatus() {
     const statusFilter = document.getElementById('pm-status-filter');
     if (statusFilter) {
         currentStatusFilter = statusFilter.value;
-        debounceFilter();
+        applyAllFilters();
     }
 }
 
-// Optimized filtering with caching
 function applyAllFilters() {
+    // Get current user ID from PHP
     const currentUserId = '<?php echo get_current_user_id(); ?>';
-    const allTaskRows = document.querySelectorAll('.pm-task-row');
     
-    // Batch DOM operations
-    const updates = [];
-    allTaskRows.forEach(taskRow => {
+    // Filter tasks
+    document.querySelectorAll('.pm-task-row').forEach(taskRow => {
         const assignedTo = taskRow.getAttribute('data-assigned-to');
         const taskStatus = taskRow.getAttribute('data-task-status');
         
         let show = true;
         
         // Apply assignment filter
-        if (currentAssignmentFilter === 'my' && assignedTo !== currentUserId) {
-            show = false;
+        if (currentAssignmentFilter === 'my') {
+            if (assignedTo !== currentUserId) {
+                show = false;
+            }
         }
         
         // Apply status filter
@@ -4542,16 +7079,23 @@ function applyAllFilters() {
             show = false;
         }
 
-        updates.push({row: taskRow, show, assignedTo, taskStatus});
-    });
-    
-    // Apply all updates in batch
-    updates.forEach(({row, show, assignedTo, taskStatus}) => {
-        row.style.display = show ? '' : 'none';
         
-        // Batch classList operations
-        row.classList.toggle('assignment-hidden', currentAssignmentFilter === 'my' && assignedTo !== currentUserId);
-        row.classList.toggle('status-hidden', currentStatusFilter && taskStatus !== currentStatusFilter);
+        // Apply visibility
+        taskRow.style.display = show ? '' : 'none';
+        
+        // Add/remove classes for tracking
+        if (currentAssignmentFilter === 'my' && assignedTo !== currentUserId) {
+            taskRow.classList.add('assignment-hidden');
+        } else {
+            taskRow.classList.remove('assignment-hidden');
+        }
+        
+        if (currentStatusFilter && taskStatus !== currentStatusFilter) {
+            taskRow.classList.add('status-hidden');
+        } else {
+            taskRow.classList.remove('status-hidden');
+        }
+
     });
     
     // Update milestone counts and empty states
@@ -4559,42 +7103,25 @@ function applyAllFilters() {
 }
 
 function pmUpdateMilestoneCounts() {
-    // Batch DOM operations to avoid reflows
-    const milestoneSections = document.querySelectorAll('.pm-milestone-section');
-    const updates = [];
-    
-    milestoneSections.forEach(section => {
+    document.querySelectorAll('.pm-milestone-section').forEach(section => {
         const milestoneContainer = section.querySelector('.sortable-milestone-tasks');
-        if (!milestoneContainer) return;
-        
-        const taskRows = milestoneContainer.querySelectorAll('.pm-task-row');
-        const visibleTasks = Array.from(taskRows).filter(row => row.style.display !== 'none');
+        const visibleTasks = Array.from(milestoneContainer.querySelectorAll('.pm-task-row'))
+            .filter(row => row.style.display !== 'none');
         
         const countSpan = section.querySelector('.milestone-count');
-        const allTasks = taskRows;
-        let emptyState = milestoneContainer.querySelector('.pm-empty-tasks.pm-dynamic-empty');
-        
-        updates.push({
-            countSpan,
-            visibleCount: visibleTasks.length,
-            hasAnyTasks: allTasks.length > 0,
-            emptyState,
-            section: milestoneContainer,
-            shouldShowEmpty: visibleTasks.length === 0 && allTasks.length > 0
-        });
-    });
-    
-    // Apply all updates in batch
-    updates.forEach(({countSpan, visibleCount, hasAnyTasks, emptyState, section, shouldShowEmpty}) => {
         if (countSpan) {
-            countSpan.textContent = visibleCount + ' task' + (visibleCount !== 1 ? 's' : '');
+            countSpan.textContent = visibleTasks.length + ' task' + (visibleTasks.length !== 1 ? 's' : '');
         }
         
-        if (shouldShowEmpty) {
+        // Handle empty state
+        let emptyState = milestoneContainer.querySelector('.pm-empty-tasks.pm-dynamic-empty');
+        const allTasks = milestoneContainer.querySelectorAll('.pm-task-row');
+        
+        if (visibleTasks.length === 0 && allTasks.length > 0) {
             if (!emptyState) {
                 emptyState = document.createElement('div');
                 emptyState.className = 'pm-empty-tasks pm-dynamic-empty';
-                section.appendChild(emptyState);
+                milestoneContainer.appendChild(emptyState);
             }
             
             // Determine empty message based on active filters
@@ -4687,42 +7214,6 @@ document.getElementById('pm-milestone-form').addEventListener('submit', function
         }
     });
 });
-
-// Export Tasks Functions
-function pmExportTasksJSON() {
-    const projectId = '<?php echo $project->id; ?>';
-    const projectName = '<?php echo esc_js($project->name); ?>';
-    
-    const formData = new FormData();
-    formData.append('action', 'pm_export_tasks');
-    formData.append('project_id', projectId);
-    formData.append('nonce', '<?php echo $nonce; ?>');
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success) {
-            const tasks = json.data.tasks;
-            const filename = `tasks_${projectName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
-            const dataStr = JSON.stringify(tasks, null, 2);
-            const dataBlob = new Blob([dataStr], {type: 'application/json'});
-            const url = URL.createObjectURL(dataBlob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            alert(`Successfully exported ${tasks.length} task(s)`);
-        } else {
-            alert(json.data.message || 'Failed to export tasks');
-        }
-    })
-    .catch(error => {
-        alert('Error exporting tasks: ' + error.message);
-    });
-}
 
 // Import Tasks Functions
 let importedTasks = [];
@@ -4915,23 +7406,6 @@ function pmSaveTimeLog() {
         }
     });
 }
-// URL regex - cached as regex compiles only once
-const PM_URL_REGEX = /(https?:\/\/[^\s]+)/g;
-
-function pmFormatText(text) {
-    if (!text) return '';
-    // Escape HTML & convert newlines in one pass
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML.replace(/\n/g, '<br>');
-}
-
-function pmMakeLinkClickable(text) {
-    if (!text || !PM_URL_REGEX.test(text)) return text;
-    PM_URL_REGEX.lastIndex = 0; // Reset regex
-    return text.replace(PM_URL_REGEX, '<a href="$1" target="_blank" class="time-log-link" style="color: #3b82f6; text-decoration: underline;">$1</a>');
-}
-
 function pmLoadTimeLogs(taskId, logs) {
     const container = document.getElementById('pm-time-logs-list');
     if (!logs || logs.length === 0) {
@@ -4939,33 +7413,46 @@ function pmLoadTimeLogs(taskId, logs) {
         return;
     }
     
-    // Use DocumentFragment for better performance
-    const fragment = document.createDocumentFragment();
-    const tempDiv = document.createElement('div');
-    
+    let html = '';
     logs.forEach(log => {
         const user = log.user_name || 'Unknown';
         const date = new Date(log.log_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
-        const formattedNotes = log.notes ? pmMakeLinkClickable(pmFormatText(log.notes)) : '';
         
-        tempDiv.innerHTML = `
+        // Function to convert URLs to clickable links
+        const makeLinksClickable = (text) => {
+            if (!text) return '';
+            // Regex to find URLs
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            return text.replace(urlRegex, '<a href="$1" target="_blank" class="time-log-link" style="color: #3b82f6; text-decoration: underline;">$1</a>');
+        };
+        
+        // Function to convert line breaks to <br> tags
+        const formatNotes = (text) => {
+            if (!text) return '';
+            // First convert line breaks
+            let formatted = text.replace(/\n/g, '<br>');
+            // Then make URLs clickable
+            formatted = makeLinksClickable(formatted);
+            return formatted;
+        };
+        
+        const formattedNotes = log.notes ? formatNotes(log.notes) : '';
+        
+        html += `
             <div class="pm-time-log-item">
                 <div class="time-log-info">
                     <p><strong>${user}</strong> logged <span class="time-log-hours">${log.hours}h</span></p>
                     <small>${date}${formattedNotes ? ' - <span class="time-log-notes">' + formattedNotes + '</span>' : ''}</small>
                 </div>
-                <button class="bntm-btn-small bntm-btn-danger bntm-delete-log" data-log-id="${log.id}" data-task-id="${taskId}">
+                <button class="bntm-btn-small bntm-btn-danger" onclick="pmDeleteTimeLog(${log.id}, ${taskId})">
                     <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                     </svg>
                 </button>
             </div>
         `;
-        fragment.appendChild(tempDiv.firstElementChild);
     });
-    
-    container.innerHTML = '';
-    container.appendChild(fragment);
+    container.innerHTML = html;
 }
 function pmDeleteTimeLog(logId, taskId) {
     if (!confirm('Delete this time log?')) return;
@@ -4985,14 +7472,6 @@ function pmDeleteTimeLog(logId, taskId) {
         }
     });
 }
-
-// Event delegation for time log deletions
-document.addEventListener('click', function(e) {
-    if (e.target.closest('.bntm-delete-log')) {
-        const btn = e.target.closest('.bntm-delete-log');
-        pmDeleteTimeLog(btn.dataset.logId, btn.dataset.taskId);
-    }
-}, true);
 // Comment functions
 function pmLoadComments(taskId, comments) {
     const container = document.getElementById('pm-comments-list');
@@ -5001,45 +7480,59 @@ function pmLoadComments(taskId, comments) {
         return;
     }
     
-    // Use DocumentFragment for better performance
-    const fragment = document.createDocumentFragment();
-    const tempDiv = document.createElement('div');
+    // Function to convert URLs to clickable links
+    const makeLinksClickable = (text) => {
+        if (!text) return '';
+        // Enhanced regex to find URLs (including www. without http)
+        const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+)/g;
+        return text.replace(urlRegex, (url) => {
+            // Add http:// if it starts with www
+            const fullUrl = url.startsWith('www.') ? 'http://' + url : url;
+            return `<a href="${fullUrl}" target="_blank" class="comment-link" style="color: #3b82f6; text-decoration: underline;">${url}</a>`;
+        });
+    };
     
+    // Function to format text with line breaks and clickable links
+    const formatCommentText = (text) => {
+        if (!text) return '';
+        // Escape HTML to prevent XSS
+        const div = document.createElement('div');
+        div.textContent = text;
+        let safeText = div.innerHTML;
+        
+        // Convert line breaks to <br> tags
+        safeText = safeText.replace(/\n/g, '<br>');
+        
+        // Make URLs clickable
+        safeText = makeLinksClickable(safeText);
+        
+        return safeText;
+    };
+    
+    let html = '';
     comments.forEach(comment => {
         const user = comment.user_name || 'Unknown';
         const timeAgo = pmTimeAgo(comment.created_at);
+        const formattedComment = formatCommentText(comment.comment);
         
-        // Safe text formatting with minimal operations
-        const div = document.createElement('div');
-        div.textContent = comment.comment;
-        let safeText = div.innerHTML
-            .replace(/\n/g, '<br>')
-            .replace(/(https?:\/\/[^\s]+|www\.[^\s]+)/g, (url) => {
-                const fullUrl = url.startsWith('www.') ? 'http://' + url : url;
-                return `<a href="${fullUrl}" target="_blank" class="comment-link" style="color: #3b82f6; text-decoration: underline;">${url}</a>`;
-            });
-        
-        tempDiv.innerHTML = `
+        html += `
             <div class="pm-comment-item">
                 <div class="comment-header">
                     <span class="comment-author">${user}</span>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <span class="comment-time">${timeAgo}</span>
-                        <button class="bntm-btn-small bntm-btn-danger bntm-delete-comment" data-comment-id="${comment.id}" data-task-id="${taskId}" style="padding: 4px 6px;">
+                        <button class="bntm-btn-small bntm-btn-danger" onclick="pmDeleteComment(${comment.id}, ${taskId})" style="padding: 4px 6px;">
                             <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
                             </svg>
                         </button>
                     </div>
                 </div>
-                <p class="comment-text" style="white-space: pre-line; word-break: break-word;">${safeText}</p>
+                <p class="comment-text" style="white-space: pre-line; word-break: break-word;">${formattedComment}</p>
             </div>
         `;
-        fragment.appendChild(tempDiv.firstElementChild);
     });
-    
-    container.innerHTML = '';
-    container.appendChild(fragment);
+    container.innerHTML = html;
 }
 
 function pmAddComment() {
@@ -5069,126 +7562,6 @@ function pmAddComment() {
     });
 }
 
-// Google Calendar Export
-function pmExportToGoogleCalendar() {
-    const taskId = document.getElementById('pm-task-id').value;
-    
-    if (!taskId) {
-        alert('Please save the task first');
-        return;
-    }
-    
-    const btn = document.getElementById('pm-export-google-calendar-btn');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Exporting...';
-    
-    const formData = new FormData();
-    formData.append('action', 'pm_export_to_google_calendar');
-    formData.append('task_id', taskId);
-    formData.append('nonce', '<?php echo $nonce; ?>');
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        
-        if (json.success) {
-            alert('✓ Task exported to Google Calendar successfully!');
-        } else {
-            if (json.data.auth_required) {
-                if (confirm('Google Calendar not connected. Would you like to connect now?')) {
-                    pmOpenGoogleCalendarSettings();
-                }
-            } else {
-                alert('Error: ' + (json.data.message || 'Failed to export'));
-            }
-        }
-    })
-    .catch(err => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        alert('Error: ' + err.message);
-    });
-}
-
-function pmOpenGoogleCalendarSettings() {
-    document.getElementById('pm-google-calendar-modal').style.display = 'flex';
-}
-
-function pmStartGoogleCalendarAuth() {
-    // Save empty client_id first to initialize settings, then request auth URL
-    const formData = new FormData();
-    formData.append('action', 'pm_get_google_calendar_auth_url');
-    formData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-    
-    const btn = event.target;
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="margin-right: 8px;"><circle cx="12" cy="12" r="10"/></svg> Connecting...';
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success && json.data.auth_url) {
-            // Redirect to Google OAuth
-            window.location.href = json.data.auth_url;
-        } else {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            alert('Error: ' + (json.data.message || 'Failed to get auth URL'));
-        }
-    })
-    .catch(err => {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
-        alert('Error connecting to Google: ' + err.message);
-    });
-}
-
-function pmConnectGoogleCalendar() {
-    const clientId = document.getElementById('pm-google-client-id').value.trim();
-    
-    if (!clientId) {
-        alert('Please enter your Google OAuth Client ID');
-        return;
-    }
-    
-    // Save Client ID first
-    const formData = new FormData();
-    formData.append('action', 'pm_save_google_calendar_settings');
-    formData.append('client_id', clientId);
-    formData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-    
-    fetch(ajaxurl, {method: 'POST', body: formData})
-    .then(r => r.json())
-    .then(json => {
-        if (json.success) {
-            // Now get the auth URL
-            const authFormData = new FormData();
-            authFormData.append('action', 'pm_get_google_calendar_auth_url');
-            authFormData.append('nonce', '<?php echo wp_create_nonce("pm_nonce"); ?>');
-            
-            return fetch(ajaxurl, {method: 'POST', body: authFormData}).then(r => r.json());
-        } else {
-            alert('Failed to save Client ID');
-            throw new Error('Save failed');
-        }
-    })
-    .then(json => {
-        if (json.success) {
-            window.location.href = json.data.auth_url;
-        } else {
-            alert('Error: ' + (json.data.message || 'Failed to get auth URL'));
-        }
-    })
-    .catch(err => {
-        console.error(err);
-        alert('Error connecting Google Calendar');
-    });
-}
-
 function pmDeleteComment(commentId, taskId) {
     if (!confirm('Delete this comment?')) return;
     
@@ -5207,14 +7580,6 @@ function pmDeleteComment(commentId, taskId) {
         }
     });
 }
-
-// Event delegation for comment deletions
-document.addEventListener('click', function(e) {
-    if (e.target.closest('.bntm-delete-comment')) {
-        const btn = e.target.closest('.bntm-delete-comment');
-        pmDeleteComment(btn.dataset.commentId, btn.dataset.taskId);
-    }
-}, true);
 
 function pmTimeAgo(dateString) {
     const date = new Date(dateString);
@@ -5335,56 +7700,6 @@ function updateMilestoneProgress(taskRow) {
 
 // Close status menus when clicking outside
 document.addEventListener('click', function(e) {
-    // Handle status button click with event delegation
-    if (e.target.closest('.pm-task-status-btn')) {
-        const btn = e.target.closest('.pm-task-status-btn');
-        const menu = btn.nextElementSibling;
-        
-        // Close other open menus
-        document.querySelectorAll('.task-status-menu').forEach(m => {
-            if (m !== menu) m.classList.remove('show');
-        });
-        
-        if (menu.classList.contains('show')) {
-            menu.classList.remove('show');
-        } else {
-            // Position the menu below the button
-            const rect = btn.getBoundingClientRect();
-            menu.style.top = (rect.bottom + 4) + 'px';
-            menu.style.left = rect.left + 'px';
-            menu.style.width = rect.width + 'px';
-            menu.classList.add('show');
-        }
-        return;
-    }
-    
-    // Handle status option click with event delegation
-    if (e.target.closest('.pm-task-status-option')) {
-        const option = e.target.closest('.pm-task-status-option');
-        const taskId = option.dataset.taskId;
-        const status = option.dataset.status;
-        const color = option.dataset.color;
-        const statusName = option.textContent.trim();
-        
-        pmSetTaskStatus(taskId, status, color, statusName);
-        return;
-    }
-    
-    // Handle edit task button with event delegation
-    if (e.target.closest('.pm-edit-task-btn')) {
-        const btn = e.target.closest('.pm-edit-task-btn');
-        pmEditTask(btn.dataset.taskId);
-        return;
-    }
-    
-    // Handle delete task button with event delegation
-    if (e.target.closest('.pm-delete-task-btn')) {
-        const btn = e.target.closest('.pm-delete-task-btn');
-        pmDeleteTask(btn.dataset.taskId, btn.dataset.taskTitle);
-        return;
-    }
-    
-    // Close menus if clicking outside status dropdown
     if (!e.target.closest('.task-status-dropdown')) {
         document.querySelectorAll('.task-status-menu').forEach(m => {
             m.classList.remove('show');
@@ -5392,91 +7707,69 @@ document.addEventListener('click', function(e) {
     }
 });
 
-// Close dropdown menus when scrolling
-document.addEventListener('scroll', function() {
-    document.querySelectorAll('.task-status-menu.show').forEach(m => {
-        m.classList.remove('show');
-    });
-}, true);
-
-// Drag and drop for task reordering (optimized with event delegation)
+// Drag and drop for task reordering
 (function() {
     let draggedTask = null;
     
-    // Use event delegation instead of attaching listeners to every element
-    document.addEventListener('dragstart', function(e) {
-        if (e.target.closest('.pm-task-row')) {
-            draggedTask = e.target.closest('.pm-task-row');
-            draggedTask.classList.add('dragging');
-        }
-    }, true);
-    
-    document.addEventListener('dragend', function(e) {
-        if (draggedTask) {
-            draggedTask.classList.remove('dragging');
+    document.querySelectorAll('.pm-task-row').forEach(row => {
+        row.addEventListener('dragstart', function() {
+            draggedTask = this;
+            this.classList.add('dragging');
+        });
+        
+        row.addEventListener('dragend', function() {
+            this.classList.remove('dragging');
             draggedTask = null;
-        }
-    }, true);
+        });
+    });
     
-    document.addEventListener('dragover', function(e) {
-        if (draggedTask) {
-            const container = e.target.closest('.sortable-milestone-tasks');
-            if (container) {
-                e.preventDefault();
-                
-                // Remove empty state message if it exists during drag
-                const emptyState = container.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
-                if (emptyState) {
-                    emptyState.style.display = 'none';
-                }
-                
-                const afterElement = getDragAfterElement(container, e.clientY);
-                if (afterElement == null) {
-                    container.appendChild(draggedTask);
-                } else {
-                    container.insertBefore(draggedTask, afterElement);
-                }
-            }
-        }
-    }, true);
-    
-    document.addEventListener('dragleave', function(e) {
-        const container = e.target.closest('.sortable-milestone-tasks');
-        if (container) {
-            // Show empty state again if drag leaves and container is empty
-            const emptyState = container.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
-            if (emptyState && container.querySelectorAll('.pm-task-row').length === 0) {
-                emptyState.style.display = 'block';
-            }
-        }
-    }, true);
-    
-    document.addEventListener('drop', function(e) {
-        const container = e.target.closest('.sortable-milestone-tasks');
-        if (container && draggedTask) {
+    document.querySelectorAll('.sortable-milestone-tasks').forEach(container => {
+        container.addEventListener('dragover', function(e) {
             e.preventDefault();
             
-            // Remove empty state message if it exists
-            const emptyState = container.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
-            if (emptyState) {
-                emptyState.remove();
+            // Remove empty state message if it exists during drag
+            const emptyState = this.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
+            if (emptyState && draggedTask) {
+                emptyState.style.display = 'none';
             }
             
-            // Update counts for all milestones
-            pmUpdateMilestoneCounts();
-            
-            const milestoneId = container.dataset.milestoneId;
-            const taskOrder = Array.from(container.querySelectorAll('.pm-task-row'))
-                .map(row => row.dataset.taskId);
-            
-            const formData = new FormData();
-            formData.append('action', 'pm_reorder_tasks');
-            formData.append('milestone_id', milestoneId);
-            formData.append('task_order', JSON.stringify(taskOrder));
-            formData.append('nonce', '<?php echo wp_create_nonce("pm_reorder_nonce"); ?>');
-            fetch(ajaxurl, {method: 'POST', body: formData});
+            const afterElement = getDragAfterElement(container, e.clientY);
+            if (afterElement == null) {
+                container.appendChild(draggedTask);
+            } else {
+                container.insertBefore(draggedTask, afterElement);
+            }
+        });
+        
+        container.addEventListener('dragleave', function(e) {
+            // Show empty state again if drag leaves and container is empty
+            const emptyState = this.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
+if (emptyState && this.querySelectorAll('.pm-task-row').length === 0) {
+emptyState.style.display = 'block';
+}
+});
+    container.addEventListener('drop', function() {
+        // Remove empty state message if it exists
+        const emptyState = this.querySelector('.pm-empty-tasks:not(.pm-dynamic-empty)');
+        if (emptyState) {
+            emptyState.remove();
         }
-    }, true);
+        
+        // Update counts for all milestones
+        pmUpdateMilestoneCounts();
+        
+        const milestoneId = this.dataset.milestoneId;
+        const taskOrder = Array.from(this.querySelectorAll('.pm-task-row'))
+            .map(row => row.dataset.taskId);
+        
+        const formData = new FormData();
+        formData.append('action', 'pm_reorder_tasks');
+        formData.append('milestone_id', milestoneId);
+        formData.append('task_order', JSON.stringify(taskOrder));
+        formData.append('nonce', '<?php echo wp_create_nonce("pm_reorder_nonce"); ?>');
+        fetch(ajaxurl, {method: 'POST', body: formData});
+    });
+});
 
 function getDragAfterElement(container, y) {
     const draggableElements = [...container.querySelectorAll('.pm-task-row:not(.dragging)')]
@@ -5746,10 +8039,9 @@ function pm_render_task_row($task, $team_members, $custom_statuses, $nonce) {
         
         <div class="task-row-status">
             <div class="task-status-dropdown">
-                <button type="button" 
-                        class="task-status-btn pm-task-status-btn" 
+                <button type="button" class="task-status-btn" 
                         style="background: <?php echo esc_attr($status_color); ?>"
-                        data-task-id="<?php echo $task->id; ?>">
+                        onclick="pmUpdateTaskStatus(<?php echo $task->id; ?>, this)">
                     <span><?php echo esc_html($status_display); ?></span>
                     <svg width="12" height="12" fill="currentColor" viewBox="0 0 20 20">
                         <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
@@ -5758,37 +8050,27 @@ function pm_render_task_row($task, $team_members, $custom_statuses, $nonce) {
                 <div class="task-status-menu">
                     <?php if (!empty($custom_statuses)): ?>
                         <?php foreach ($custom_statuses as $status): ?>
-                            <div class="task-status-option pm-task-status-option" 
+                            <div class="task-status-option" 
                                  style="background: <?php echo esc_attr($status->status_color); ?>"
-                                 data-task-id="<?php echo $task->id; ?>"
-                                 data-status="<?php echo esc_attr($status->status_name); ?>"
-                                 data-color="<?php echo esc_attr($status->status_color); ?>">
+                                 onclick="pmSetTaskStatus(<?php echo $task->id; ?>, '<?php echo esc_js($status->status_name); ?>', '<?php echo esc_js($status->status_color); ?>', '<?php echo esc_js($status->status_name); ?>')">
                                 <?php echo esc_html($status->status_name); ?>
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <div class="task-status-option pm-task-status-option" style="background: #6b7280"
-                             data-task-id="<?php echo $task->id; ?>"
-                             data-status="To Do"
-                             data-color="#6b7280">
+                        <div class="task-status-option" style="background: #6b7280"
+                             onclick="pmSetTaskStatus(<?php echo $task->id; ?>, 'To Do', '#6b7280', 'To Do')">
                             To Do
                         </div>
-                        <div class="task-status-option pm-task-status-option" style="background: #3b82f6"
-                             data-task-id="<?php echo $task->id; ?>"
-                             data-status="In Progress"
-                             data-color="#3b82f6">
+                        <div class="task-status-option" style="background: #3b82f6"
+                             onclick="pmSetTaskStatus(<?php echo $task->id; ?>, 'In Progress', '#3b82f6', 'In Progress')">
                             In Progress
                         </div>
-                        <div class="task-status-option pm-task-status-option" style="background: #f59e0b"
-                             data-task-id="<?php echo $task->id; ?>"
-                             data-status="Review"
-                             data-color="#f59e0b">
+                        <div class="task-status-option" style="background: #f59e0b"
+                             onclick="pmSetTaskStatus(<?php echo $task->id; ?>, 'Review', '#f59e0b', 'Review')">
                             Review
                         </div>
-                        <div class="task-status-option pm-task-status-option" style="background: #10b981"
-                             data-task-id="<?php echo $task->id; ?>"
-                             data-status="Completed"
-                             data-color="#10b981">
+                        <div class="task-status-option" style="background: #10b981"
+                             onclick="pmSetTaskStatus(<?php echo $task->id; ?>, 'Completed', '#10b981', 'Completed')">
                             Completed
                         </div>
                     <?php endif; ?>
@@ -5797,12 +8079,12 @@ function pm_render_task_row($task, $team_members, $custom_statuses, $nonce) {
         </div>
         
         <div class="task-row-actions">
-            <button class="bntm-btn-small bntm-btn-secondary pm-edit-task-btn" data-task-id="<?php echo $task->id; ?>">
+            <button class="bntm-btn-small bntm-btn-secondary" onclick="pmEditTask(<?php echo $task->id; ?>)">
                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
                 </svg>
             </button>
-            <button class="bntm-btn-small bntm-btn-danger pm-delete-task-btn" data-task-id="<?php echo $task->id; ?>" data-task-title="<?php echo esc_attr($task->title); ?>">
+            <button class="bntm-btn-small bntm-btn-danger" onclick="pmDeleteTask(<?php echo $task->id; ?>, '<?php echo esc_js($task->title); ?>')">
                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                 </svg>
@@ -6009,7 +8291,6 @@ function pm_project_kanban_subtab($project, $business_id, $nonce) {
         align-items: flex-start;
         margin-bottom: 8px;
     }
-    </style>
     
     .kanban-card-priority {
         width: 4px;
@@ -6021,11 +8302,6 @@ function pm_project_kanban_subtab($project, $business_id, $nonce) {
     .kanban-card-priority.priority-low {
         background: #3b82f6;
     }
-}
-
-function applyAllFilters() {
-    // Get current user ID from PHP
-    const currentUserId = '<?php echo get_current_user_id(); ?>';
     
     .kanban-card-priority.priority-medium {
         background: #f59e0b;
@@ -6058,17 +8334,6 @@ function applyAllFilters() {
         margin-left: 12px;
         font-size: 12px;
     }
-    return 'just now';
-}
-
-// Task status update
-function pmUpdateTaskStatus(taskId, statusBtn) {
-    const menu = statusBtn.nextElementSibling;
-    
-    // Close other open menus
-    document.querySelectorAll('.task-status-menu').forEach(m => {
-        if (m !== menu) m.classList.remove('show');
-    });
     
     .kanban-card-avatar {
         width: 28px;
@@ -7084,15 +9349,6 @@ function bntm_ajax_pm_update_project() {
     if (!is_user_logged_in()) {
         wp_send_json_error(['message' => 'Unauthorized']);
     }
-}
-
-/* ---------- TASK AJAX HANDLERS ---------- */
-
-/**
- * Create Task
- */
-function bntm_ajax_pm_create_task() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
     
     global $wpdb;
     $projects_table = $wpdb->prefix . 'pm_projects';
@@ -7618,68 +9874,6 @@ function bntm_ajax_pm_import_tasks() {
         'milestones_created' => count($created_milestones)
     ]);
 }
-
-/**
- * Export Tasks to JSON
- */
-function bntm_ajax_pm_export_tasks() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $tasks_table = $wpdb->prefix . 'pm_tasks';
-    $milestones_table = $wpdb->prefix . 'pm_milestones';
-    $current_user = wp_get_current_user();
-    
-    $project_id = intval($_POST['project_id']);
-    
-    // Get all tasks for this project
-    $tasks = $wpdb->get_results($wpdb->prepare(
-        "SELECT t.*, m.name as milestone_name, u.display_name as assigned_user_name
-         FROM {$tasks_table} t
-         LEFT JOIN {$milestones_table} m ON t.milestone_id = m.id
-         LEFT JOIN {$wpdb->users} u ON t.assigned_to = u.ID
-         WHERE t.project_id = %d
-         ORDER BY t.sort_order ASC, t.created_at DESC",
-        $project_id
-    ));
-    
-    if (!$tasks) {
-        wp_send_json_success([
-            'message' => 'No tasks to export',
-            'tasks' => []
-        ]);
-        return;
-    }
-    
-    // Format tasks for export
-    $export_tasks = [];
-    foreach ($tasks as $task) {
-        $export_tasks[] = [
-            'title' => $task->title,
-            'description' => $task->description,
-            'status' => $task->status,
-            'priority' => $task->priority,
-            'milestone' => $task->milestone_name,
-            'assigned_to' => $task->assigned_user_name,
-            'due_date' => $task->due_date,
-            'estimated_hours' => floatval($task->estimated_hours),
-            'tags' => $task->tags,
-            'created_at' => $task->created_at,
-            'updated_at' => $task->updated_at,
-        ];
-    }
-    
-    wp_send_json_success([
-        'message' => 'Tasks exported successfully',
-        'tasks' => $export_tasks,
-        'count' => count($export_tasks)
-    ]);
-}
-
 /* ---------- MILESTONE AJAX HANDLERS ---------- */
 
 /**
@@ -8035,8 +10229,8 @@ function bntm_ajax_pm_delete_time_log() {
 function bntm_ajax_pm_add_comment() {
     check_ajax_referer('pm_project_detail_nonce', 'nonce');
     
-    if (!$task) {
-        wp_send_json_error(['message' => 'Task not found']);
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized']);
     }
     
     global $wpdb;
@@ -8388,52 +10582,6 @@ function pm_initialize_project_statuses($project_id, $business_id) {
             ]
         );
     }
-}
-
-/**
- * Returns a SQL WHERE fragment + params array that restricts task rows to
- * only those visible to the current user based on their role.
- *
- * @param string $task_alias  The SQL alias used for the tasks table (default "t")
- * @return array { where: string, params: array }
- */
-function pm_get_task_visibility( $task_alias = 't' ) {
-    global $wpdb;
-
-    $current_user = wp_get_current_user();
-
-    // ── Full access: WP admins, global owners/managers ──────────────────────
-    $is_wp_admin    = current_user_can( 'manage_options' );
-    $current_role   = bntm_get_user_role( $current_user->ID );
-    $can_view_all   = $is_wp_admin || in_array( $current_role, [ 'owner', 'manager' ] );
-
-    if ( $can_view_all ) {
-        return [ 'where' => '', 'params' => [] ];
-    }
-
-    // ── Project-manager: can see all tasks in projects they manage ───────────
-    $team_table         = $wpdb->prefix . 'pm_team_members';
-    $managed_project_ids = $wpdb->get_col( $wpdb->prepare(
-        "SELECT project_id FROM {$team_table}
-         WHERE user_id = %d AND role = 'project_manager'",
-        $current_user->ID
-    ) );
-
-    // ── Build the WHERE fragment ─────────────────────────────────────────────
-    $uid = intval( $current_user->ID );
-
-    if ( ! empty( $managed_project_ids ) ) {
-        // Can see: tasks assigned to them  OR  tasks in projects they manage
-        $placeholders = implode( ',', array_fill( 0, count( $managed_project_ids ), '%d' ) );
-        $where  = " AND ( {$task_alias}.assigned_to = %d OR {$task_alias}.project_id IN ({$placeholders}) )";
-        $params = array_merge( [ $uid ], array_map( 'intval', $managed_project_ids ) );
-    } else {
-        // Plain staff: only tasks assigned to them
-        $where  = " AND {$task_alias}.assigned_to = %d";
-        $params = [ $uid ];
-    }
-
-    return [ 'where' => $where, 'params' => $params ];
 }
 
 /**
@@ -9018,7 +11166,7 @@ function pm_notification_bell_button($business_id) {
     </script>
     <?php
     return ob_get_clean();
-}   
+}
 
 // AJAX Handler for marking notifications as seen
 add_action('wp_ajax_pm_mark_notifications_seen', 'pm_mark_notifications_seen_ajax');
@@ -9029,177 +11177,4 @@ function pm_mark_notifications_seen_ajax() {
     update_user_meta($current_user_id, 'pm_notifications_last_seen', current_time('mysql'));
     
     wp_send_json_success(['message' => 'Notifications marked as seen']);
-}
-
-/* ---------- GOOGLE CALENDAR INTEGRATION ---------- */
-
-/**
- * Export Task to Google Calendar
- */
-function bntm_ajax_pm_export_to_google_calendar() {
-    check_ajax_referer('pm_project_detail_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    global $wpdb;
-    $current_user = wp_get_current_user();
-    $task_id = intval($_POST['task_id']);
-    
-    // Get task details
-    $task = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$wpdb->prefix}pm_tasks WHERE id = %d",
-        $task_id
-    ));
-    
-    if (!$task) {
-        wp_send_json_error(['message' => 'Task not found']);
-    }
-    
-    // Get Google Calendar API credentials from user meta
-    $access_token = get_user_meta($current_user->ID, 'pm_google_calendar_access_token', true);
-    
-    if (!$access_token) {
-        wp_send_json_error([
-            'message' => 'Google Calendar not configured. Please connect your Google account.',
-            'auth_required' => true
-        ]);
-        return;
-    }
-    
-    // Prepare event data
-    $event_data = [
-        'summary' => $task->title,
-        'description' => $task->description ?: '',
-        'start' => [
-            'date' => $task->due_date ?: date('Y-m-d')
-        ],
-        'end' => [
-            'date' => $task->due_date ?: date('Y-m-d')
-        ]
-    ];
-    
-    // Add time details if due_date exists
-    if ($task->due_date) {
-        $event_data['start'] = [
-            'dateTime' => $task->due_date . 'T09:00:00',
-            'timeZone' => 'UTC'
-        ];
-        $event_data['end'] = [
-            'dateTime' => $task->due_date . 'T10:00:00',
-            'timeZone' => 'UTC'
-        ];
-    }
-    
-    // Call Google Calendar API
-    $response = pm_create_google_calendar_event($access_token, $event_data);
-    
-    if (is_wp_error($response)) {
-        wp_send_json_error(['message' => 'Failed to export to Google Calendar: ' . $response->get_error_message()]);
-    } else {
-        // Update task with Google Calendar event ID
-        $wpdb->update(
-            $wpdb->prefix . 'pm_tasks',
-            ['google_calendar_event_id' => $response['id']],
-            ['id' => $task_id]
-        );
-        
-        wp_send_json_success([
-            'message' => 'Task exported to Google Calendar successfully!',
-            'event_id' => $response['id']
-        ]);
-    }
-}
-
-/**
- * Create Google Calendar Event
- */
-function pm_create_google_calendar_event($access_token, $event_data) {
-    $url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
-    
-    $response = wp_remote_post($url, [
-        'headers' => [
-            'Authorization' => 'Bearer ' . $access_token,
-            'Content-Type' => 'application/json'
-        ],
-        'body' => wp_json_encode($event_data),
-        'timeout' => 30
-    ]);
-    
-    if (is_wp_error($response)) {
-        return $response;
-    }
-    
-    $body = json_decode(wp_remote_retrieve_body($response), true);
-    
-    if (wp_remote_retrieve_response_code($response) !== 200) {
-        return new WP_Error(
-            'google_calendar_error',
-            isset($body['error']['message']) ? $body['error']['message'] : 'Unknown error'
-        );
-    }
-    
-    return $body;
-}
-
-/**
- * Save Google Calendar Settings
- */
-function bntm_ajax_pm_save_google_calendar_settings() {
-    check_ajax_referer('pm_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    $current_user = wp_get_current_user();
-    $client_id = sanitize_text_field($_POST['client_id']);
-    $access_token = isset($_POST['access_token']) ? sanitize_text_field($_POST['access_token']) : null;
-    
-    if ($client_id) {
-        // Save Client ID as a WordPress option
-        update_option('pm_google_calendar_client_id', $client_id);
-    }
-    
-    if ($access_token) {
-        // Save Access Token in user meta
-        update_user_meta($current_user->ID, 'pm_google_calendar_access_token', $access_token);
-        update_user_meta($current_user->ID, 'pm_google_calendar_connected', true);
-    }
-    
-    wp_send_json_success(['message' => 'Google Calendar settings saved successfully!']);
-}
-
-/**
- * Get Google Calendar Auth URL
- */
-function bntm_ajax_pm_get_google_calendar_auth_url() {
-    check_ajax_referer('pm_nonce', 'nonce');
-    
-    if (!is_user_logged_in()) {
-        wp_send_json_error(['message' => 'Unauthorized']);
-    }
-    
-    // Use WP option for Google Calendar API credentials
-    $client_id = get_option('pm_google_calendar_client_id');
-    $redirect_uri = admin_url('admin-ajax.php?action=pm_google_calendar_callback');
-    
-    if (!$client_id) {
-        wp_send_json_error([
-            'message' => 'Google Calendar API not configured. Please add your credentials in settings.'
-        ]);
-        return;
-    }
-    
-    $auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query([
-        'client_id' => $client_id,
-        'redirect_uri' => $redirect_uri,
-        'response_type' => 'code',
-        'scope' => 'https://www.googleapis.com/auth/calendar',
-        'access_type' => 'offline',
-        'prompt' => 'consent'
-    ]);
-    
-    wp_send_json_success(['auth_url' => $auth_url]);
 }
