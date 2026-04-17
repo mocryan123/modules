@@ -2130,51 +2130,95 @@ function pos_finance_tab() {
 
 /* ---------- SETTINGS TAB ---------- */
 function pos_settings_tab() {
-    // Get all users with 'pos_cashier' role
-    $staff_members = get_users(['role' => 'pos_cashier']);
-    
-    // Get user limit
-    $user_limit = get_option('bntm_user_limit', 0);
+    // Current POS staff (WordPress users with pos_cashier role)
+    $pos_staff = get_users(['role' => 'pos_cashier']);
+ 
+    // User limit guard
+    $user_limit    = get_option('bntm_user_limit', 0);
     $current_users = count(get_users(['exclude' => [1]]));
-    $limit_text = $user_limit > 0 ? " ({$current_users}/{$user_limit})" : " ({$current_users})";
     $limit_reached = $user_limit > 0 && $current_users >= $user_limit;
-    
+ 
     $nonce = wp_create_nonce('pos_nonce');
-    
+ 
     ob_start();
     ?>
-    <script>
-    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
-    </script>
-    
+    <script>var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';</script>
+ 
+    <!-- ═══ SECTION: Import from HR ═══ -->
     <div class="bntm-form-section">
-        <h3>Staff Management</h3>
-        <p>Assign staff members who can use the POS system</p>
-        
-        <div style="margin: 20px 0;">
-            <button id="show-add-staff" class="bntm-btn-primary" <?php echo $limit_reached ? 'disabled' : ''; ?>>
-                + Add Staff<?php echo $limit_text; ?>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div>
+                <h3 style="margin:0 0 4px;">Import Staff from HR</h3>
+                <p style="margin:0;color:#6b7280;font-size:14px;">
+                    Query your HR employees and import them as POS cashiers with a PIN.
+                </p>
+            </div>
+            <button id="load-hr-staff-btn" class="bntm-btn-primary" data-nonce="<?php echo $nonce; ?>">
+                🔄 Load HR Staff
             </button>
         </div>
-        
+ 
+        <!-- HR Staff Table (populated via AJAX) -->
+        <div id="hr-staff-container" style="display:none;">
+            <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <input type="text" id="hr-staff-search"
+                       placeholder="Filter by name, email, or role…"
+                       style="flex:1;min-width:200px;padding:9px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;">
+                <span id="hr-staff-count" style="color:#6b7280;font-size:13px;white-space:nowrap;"></span>
+            </div>
+ 
+            <div class="bntm-table-wrapper">
+                <table class="bntm-table" id="hr-staff-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>HR Role / Dept</th>
+                            <th>Already POS</th>
+                            <th>PIN to Assign</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="hr-staff-tbody">
+                        <tr><td colspan="7" style="text-align:center;color:#9ca3af;">Click "Load HR Staff" to fetch employees.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+ 
+        <!-- Import result message -->
+        <div id="hr-import-message" style="margin-top:12px;"></div>
+    </div>
+ 
+    <!-- ═══ SECTION: Current POS Staff ═══ -->
+    <div class="bntm-form-section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;">Current POS Staff (<?php echo count($pos_staff); ?>)</h3>
+            <button id="show-add-staff" class="bntm-btn-secondary"
+                <?php echo $limit_reached ? 'disabled' : ''; ?>>
+                + Add Manually
+            </button>
+        </div>
+ 
         <?php if ($limit_reached): ?>
-            <div style="background: #fee2e2; border: 1px solid #fca5a5; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
-                <strong>⚠️ User Limit Reached:</strong> Maximum of <?php echo $user_limit; ?> users allowed.
+            <div class="pos-alert-warning">
+                ⚠️ User limit reached (<?php echo $user_limit; ?> max). Remove or upgrade to add more.
             </div>
         <?php endif; ?>
-        
-        <div id="add-staff-form" style="display:none; background:#f9fafb; padding:20px; border-radius:8px; margin-bottom:20px;">
-            <h4 style="margin-top:0;">Add New Staff</h4>
+ 
+        <!-- Manual add form (collapsed by default) -->
+        <div id="add-staff-form" style="display:none;background:#f9fafb;padding:20px;border-radius:8px;margin-bottom:20px;border:1px solid #e5e7eb;">
+            <h4 style="margin-top:0;">Add New Staff Manually</h4>
             <form id="staff-form" class="bntm-form">
                 <div class="bntm-form-row">
                     <div class="bntm-form-group">
-                        <label>Name *</label>
+                        <label>Full Name *</label>
                         <input type="text" name="staff_name" required>
                     </div>
                     <div class="bntm-form-group">
                         <label>Username *</label>
                         <input type="text" name="staff_username" required>
-                        <small>Unique username for login</small>
                     </div>
                 </div>
                 <div class="bntm-form-row">
@@ -2185,7 +2229,6 @@ function pos_settings_tab() {
                     <div class="bntm-form-group">
                         <label>Password *</label>
                         <input type="password" name="staff_password" required minlength="6">
-                        <small>Minimum 6 characters</small>
                     </div>
                 </div>
                 <div class="bntm-form-row">
@@ -2194,80 +2237,97 @@ function pos_settings_tab() {
                         <input type="tel" name="staff_phone">
                     </div>
                     <div class="bntm-form-group">
-                        <label>PIN Code (4-6 digits)</label>
+                        <label>PIN Code (4–6 digits)</label>
                         <input type="text" name="staff_pin" pattern="[0-9]{4,6}" maxlength="6">
-                        <small>Optional PIN for quick POS login</small>
+                        <small>Optional — for quick POS login</small>
                     </div>
                 </div>
-                <button type="submit" class="bntm-btn-primary">Add Staff</button>
-                <button type="button" id="cancel-add-staff" class="bntm-btn-secondary">Cancel</button>
-                <div id="staff-message"></div>
+                <div style="display:flex;gap:10px;">
+                    <button type="submit" class="bntm-btn-primary">Add Staff</button>
+                    <button type="button" id="cancel-add-staff" class="bntm-btn-secondary">Cancel</button>
+                </div>
+                <div id="staff-message" style="margin-top:10px;"></div>
             </form>
         </div>
-        
+ 
+        <!-- POS staff list -->
         <div class="bntm-table-wrapper">
-           <table class="bntm-table">
-               <thead>
-                   <tr>
-                       <th>Name</th>
-                       <th>Username</th>
-                       <th>Email</th>
-                       <th>Phone</th>
-                       <th>PIN</th>
-                       <th>Status</th>
-                       <th>Actions</th>
-                   </tr>
-               </thead>
-               <tbody>
-                   <?php if (empty($staff_members)): ?>
-                   <tr><td colspan="7" style="text-align:center;">No staff members yet</td></tr>
-                   <?php else: foreach ($staff_members as $staff): 
-                       $phone = get_user_meta($staff->ID, 'pos_phone', true);
-                       $pin = get_user_meta($staff->ID, 'pos_pin', true);
-                       $status = get_user_meta($staff->ID, 'pos_status', true) ?: 'active';
-                   ?>
-                   <tr>
-                       <td><?php echo esc_html($staff->display_name); ?></td>
-                       <td><?php echo esc_html($staff->user_login); ?></td>
-                       <td><?php echo esc_html($staff->user_email); ?></td>
-                       <td><?php echo esc_html($phone ?: '-'); ?></td>
-                       <td><?php echo $pin ? $pin : '-'; ?></td>
-                       <td>
-                           <span style="color: <?php echo $status === 'active' ? '#059669' : '#dc2626'; ?>">
-                               <?php echo ucfirst($status); ?>
-                           </span>
-                       </td>
-                       <td>
-                           <?php if ($status === 'active'): ?>
-                           <button class="bntm-btn-small bntm-btn-danger toggle-staff-status" 
-                                   data-id="<?php echo $staff->ID; ?>"
-                                   data-status="inactive"
-                                   data-nonce="<?php echo $nonce; ?>">
-                               Deactivate
-                           </button>
-                           <?php else: ?>
-                           <button class="bntm-btn-small bntm-btn-success toggle-staff-status" 
-                                   data-id="<?php echo $staff->ID; ?>"
-                                   data-status="active"
-                                   data-nonce="<?php echo $nonce; ?>">
-                               Activate
-                           </button>
-                           <?php endif; ?>
-                       </td>
-                   </tr>
-                   <?php endforeach; endif; ?>
-               </tbody>
-           </table>
-       </div>
+            <table class="bntm-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>PIN</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($pos_staff)): ?>
+                        <tr><td colspan="7" style="text-align:center;color:#9ca3af;">No POS staff yet. Import from HR or add manually.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($pos_staff as $staff):
+                            $phone  = get_user_meta($staff->ID, 'pos_phone', true);
+                            $pin    = get_user_meta($staff->ID, 'pos_pin', true);
+                            $status = get_user_meta($staff->ID, 'pos_status', true) ?: 'active';
+                        ?>
+                        <tr>
+                            <td><strong><?php echo esc_html($staff->display_name); ?></strong></td>
+                            <td><?php echo esc_html($staff->user_login); ?></td>
+                            <td><?php echo esc_html($staff->user_email); ?></td>
+                            <td><?php echo esc_html($phone ?: '—'); ?></td>
+                            <td>
+                                <span class="pos-pin-badge <?php echo $pin ? 'has-pin' : 'no-pin'; ?>">
+                                    <?php echo $pin ? '●●●●' : 'No PIN'; ?>
+                                </span>
+                                <button class="bntm-btn-small pos-set-pin-btn"
+                                        data-id="<?php echo $staff->ID; ?>"
+                                        data-name="<?php echo esc_attr($staff->display_name); ?>"
+                                        data-nonce="<?php echo $nonce; ?>"
+                                        style="margin-left:6px;">
+                                    <?php echo $pin ? 'Change' : 'Set PIN'; ?>
+                                </button>
+                            </td>
+                            <td>
+                                <span style="color:<?php echo $status === 'active' ? '#059669' : '#dc2626'; ?>;font-weight:500;">
+                                    <?php echo ucfirst($status); ?>
+                                </span>
+                            </td>
+                            <td style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                <?php if ($status === 'active'): ?>
+                                    <button class="bntm-btn-small bntm-btn-danger toggle-staff-status"
+                                            data-id="<?php echo $staff->ID; ?>"
+                                            data-status="inactive"
+                                            data-nonce="<?php echo $nonce; ?>">
+                                        Deactivate
+                                    </button>
+                                <?php else: ?>
+                                    <button class="bntm-btn-small bntm-btn-success toggle-staff-status"
+                                            data-id="<?php echo $staff->ID; ?>"
+                                            data-status="active"
+                                            data-nonce="<?php echo $nonce; ?>">
+                                        Activate
+                                    </button>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-    
+ 
+    <!-- ═══ SECTION: POS Settings ═══ -->
     <div class="bntm-form-section">
         <h3>POS Settings</h3>
         <form id="pos-settings-form" class="bntm-form">
             <div class="bntm-form-group">
                 <label>Tax Rate (%)</label>
-                <input type="number" name="tax_rate" step="0.01" value="<?php echo esc_attr(bntm_get_setting('pos_tax_rate', '0')); ?>">
-                <small>Applied to all sales</small>
+                <input type="number" name="tax_rate" step="0.01"
+                       value="<?php echo esc_attr(bntm_get_setting('pos_tax_rate', '0')); ?>">
             </div>
             <div class="bntm-form-group">
                 <label>Receipt Header</label>
@@ -2279,100 +2339,746 @@ function pos_settings_tab() {
                 <textarea name="receipt_footer" rows="2"><?php echo esc_textarea(bntm_get_setting('pos_receipt_footer', 'Thank you for your purchase!')); ?></textarea>
             </div>
             <button type="submit" class="bntm-btn-primary">Save Settings</button>
-            <div id="settings-message"></div>
+            <div id="settings-message" style="margin-top:10px;"></div>
         </form>
     </div>
-    
+ 
+    <!-- ═══ Set / Change PIN Modal ═══ -->
+    <div id="pos-pin-modal" style="
+            display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);
+            z-index:9999;align-items:center;justify-content:center;">
+        <div style="background:#fff;border-radius:14px;padding:32px;width:340px;max-width:92vw;box-shadow:0 20px 50px rgba(0,0,0,.2);">
+            <h3 style="margin:0 0 6px;font-size:18px;color:#111827;">Set PIN</h3>
+            <p id="pin-modal-subtitle" style="margin:0 0 20px;font-size:13px;color:#6b7280;"></p>
+            <div class="bntm-form-group">
+                <label>New PIN (4–6 digits)</label>
+                <input type="text" id="modal-pin-input"
+                       pattern="[0-9]{4,6}" maxlength="6"
+                       placeholder="e.g. 123456"
+                       style="font-size:22px;letter-spacing:4px;text-align:center;">
+                <small>Numbers only. Leave blank to remove the PIN.</small>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:20px;">
+                <button id="modal-pin-save" class="bntm-btn-primary" style="flex:1;">Save PIN</button>
+                <button id="modal-pin-cancel" class="bntm-btn-secondary" style="flex:1;">Cancel</button>
+            </div>
+            <div id="modal-pin-message" style="margin-top:10px;"></div>
+        </div>
+    </div>
+ 
+    <style>
+    .pos-alert-warning {
+        background:#fef3c7;border:1px solid #fbbf24;
+        padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;
+    }
+    .pos-pin-badge {
+        display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;
+    }
+    .pos-pin-badge.has-pin { background:#d1fae5;color:#065f46; }
+    .pos-pin-badge.no-pin  { background:#f3f4f6;color:#6b7280; }
+    .pos-hr-badge {
+        display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;
+        background:#ede9fe;color:#5b21b6;
+    }
+    .pos-imported-badge {
+        display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;
+        background:#d1fae5;color:#065f46;
+    }
+    .bntm-btn-success {
+        background:#059669;color:#fff;border:none;
+        padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;
+    }
+    .bntm-btn-success:hover { background:#047857; }
+    </style>
+ 
     <script>
-    (function() {
-        // Show/hide add staff form
-        document.getElementById('show-add-staff').addEventListener('click', function() {
-            document.getElementById('add-staff-form').style.display = 'block';
-        });
-        
-        document.getElementById('cancel-add-staff').addEventListener('click', function() {
-            document.getElementById('add-staff-form').style.display = 'none';
-            document.getElementById('staff-form').reset();
-        });
-        
-        // Add staff
-        document.getElementById('staff-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            formData.append('action', 'pos_add_staff');
-            formData.append('nonce', '<?php echo $nonce; ?>');
-            
-            const btn = this.querySelector('button[type="submit"]');
+    (function () {
+        const nonce = '<?php echo $nonce; ?>';
+        let hrStaffData = [];
+ 
+        /* ── Load HR Staff ── */
+        document.getElementById('load-hr-staff-btn').addEventListener('click', function () {
+            const btn = this;
             btn.disabled = true;
-            btn.textContent = 'Adding...';
-            
-            fetch(ajaxurl, {method:'POST', body: formData})
-            .then(r => r.json())
-            .then(json => {
-                const msg = document.getElementById('staff-message');
-                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                
-                if (json.success) {
-                    setTimeout(() => location.reload(), 1500);
-                } else {
+            btn.textContent = '⏳ Loading…';
+ 
+            const fd = new FormData();
+            fd.append('action', 'pos_load_hr_staff');
+            fd.append('nonce', nonce);
+ 
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(json => {
                     btn.disabled = false;
-                    btn.textContent = 'Add Staff';
-                }
+                    btn.textContent = '🔄 Reload HR Staff';
+                    document.getElementById('hr-staff-container').style.display = 'block';
+ 
+                    if (!json.success) {
+                        document.getElementById('hr-staff-tbody').innerHTML =
+                            '<tr><td colspan="7" style="text-align:center;color:#dc2626;">' +
+                            (json.data?.message || 'Failed to load HR staff.') + '</td></tr>';
+                        return;
+                    }
+ 
+                    hrStaffData = json.data || [];
+                    renderHRTable(hrStaffData);
+                })
+                .catch(() => {
+                    btn.disabled = false;
+                    btn.textContent = '🔄 Reload HR Staff';
+                    alert('Connection error loading HR staff.');
+                });
+        });
+ 
+        /* ── Render HR Table ── */
+        function renderHRTable(staff) {
+            document.getElementById('hr-staff-count').textContent =
+                staff.length + ' employee' + (staff.length !== 1 ? 's' : '') + ' found';
+ 
+            if (staff.length === 0) {
+                document.getElementById('hr-staff-tbody').innerHTML =
+                    '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">No HR employees found.</td></tr>';
+                return;
+            }
+ 
+            document.getElementById('hr-staff-tbody').innerHTML = staff.map((emp, idx) => {
+                const alreadyPos = emp.already_pos ? 1 : 0;
+                return `
+                <tr id="hr-row-${idx}" data-name="${(emp.name||'').toLowerCase()}" data-email="${(emp.email||'').toLowerCase()}" data-role="${(emp.role||'').toLowerCase()}">
+                    <td>
+                        <strong>${esc(emp.name || 'Unnamed')}</strong>
+                        ${emp.already_pos
+                            ? '<br><span class="pos-imported-badge">✓ POS cashier</span>'
+                            : '<br><span class="pos-hr-badge">HR only</span>'}
+                    </td>
+                    <td>${esc(emp.email || '—')}</td>
+                    <td>${esc(emp.phone || '—')}</td>
+                    <td>${esc(emp.role || '—')}${emp.department ? '<br><small style="color:#6b7280;">' + esc(emp.department) + '</small>' : ''}</td>
+                    <td style="text-align:center;">${alreadyPos ? '✅' : '—'}</td>
+                    <td>
+                        <input type="text"
+                               id="hr-pin-${idx}"
+                               placeholder="4–6 digits"
+                               maxlength="6"
+                               pattern="[0-9]{4,6}"
+                               value="${esc(emp.existing_pin || '')}"
+                               style="width:100px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;letter-spacing:3px;text-align:center;"
+                               ${alreadyPos ? '' : ''}>
+                    </td>
+                    <td>
+                        ${alreadyPos
+                            ? `<button class="bntm-btn-small bntm-btn-primary hr-update-pin-btn"
+                                       data-idx="${idx}" data-user-id="${emp.wp_user_id || 0}"
+                                       data-emp-id="${emp.id}">
+                                   Update PIN
+                               </button>`
+                            : `<button class="bntm-btn-small bntm-btn-success hr-import-btn"
+                                       data-idx="${idx}" data-emp-id="${emp.id}">
+                                   Import + Set PIN
+                               </button>`}
+                    </td>
+                </tr>`;
+            }).join('');
+ 
+            /* Import button */
+            document.querySelectorAll('.hr-import-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const idx    = parseInt(this.dataset.idx);
+                    const empId  = this.dataset.empId;
+                    const pinVal = (document.getElementById('hr-pin-' + idx)?.value || '').trim();
+                    importHREmployee(idx, empId, pinVal, this);
+                });
+            });
+ 
+            /* Update-PIN button (already POS) */
+            document.querySelectorAll('.hr-update-pin-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const idx    = parseInt(this.dataset.idx);
+                    const userId = this.dataset.userId;
+                    const pinVal = (document.getElementById('hr-pin-' + idx)?.value || '').trim();
+                    updateStaffPin(userId, pinVal, this);
+                });
+            });
+        }
+ 
+        /* ── Filter HR table ── */
+        document.getElementById('hr-staff-search').addEventListener('input', function () {
+            const q = this.value.toLowerCase();
+            document.querySelectorAll('#hr-staff-tbody tr[id^="hr-row-"]').forEach(row => {
+                const match = !q ||
+                    row.dataset.name.includes(q) ||
+                    row.dataset.email.includes(q) ||
+                    row.dataset.role.includes(q);
+                row.style.display = match ? '' : 'none';
             });
         });
-        
-        // Toggle staff status
-        document.querySelectorAll('.toggle-staff-status').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const action = this.dataset.status === 'active' ? 'activate' : 'deactivate';
-                if (!confirm('Are you sure you want to ' + action + ' this staff member?')) return;
-                
-                const formData = new FormData();
-                formData.append('action', 'pos_toggle_staff_status');
-                formData.append('staff_id', this.dataset.id);
-                formData.append('status', this.dataset.status);
-                formData.append('nonce', this.dataset.nonce);
-                
-                fetch(ajaxurl, {method: 'POST', body: formData})
+ 
+        /* ── Import HR employee as POS cashier ── */
+        function importHREmployee(idx, empId, pin, btn) {
+            if (!empId) { alert('Invalid employee ID.'); return; }
+ 
+            const fd = new FormData();
+            fd.append('action', 'pos_import_hr_staff');
+            fd.append('nonce', nonce);
+            fd.append('emp_id', empId);
+            fd.append('pin', pin);
+ 
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳';
+ 
+            fetch(ajaxurl, { method: 'POST', body: fd })
                 .then(r => r.json())
                 .then(json => {
                     if (json.success) {
-                        location.reload();
+                        showMsg('hr-import-message', '✅ ' + json.data.message, 'success');
+                        // Mark row as imported
+                        const row = document.getElementById('hr-row-' + idx);
+                        if (row) {
+                            row.querySelectorAll('td')[4].innerHTML = '✅';
+                            row.querySelectorAll('td')[1].querySelector('.pos-hr-badge') &&
+                                (row.querySelectorAll('td')[0].querySelector('.pos-hr-badge').outerHTML =
+                                    '<span class="pos-imported-badge">✓ POS cashier</span>');
+                            btn.textContent = 'Update PIN';
+                            btn.className = 'bntm-btn-small bntm-btn-primary hr-update-pin-btn';
+                            btn.dataset.userId = json.data.wp_user_id;
+                            btn.removeEventListener('click', arguments.callee);
+                            btn.addEventListener('click', function () {
+                                const pinVal = (document.getElementById('hr-pin-' + idx)?.value || '').trim();
+                                updateStaffPin(json.data.wp_user_id, pinVal, btn);
+                            });
+                        }
                     } else {
-                        alert(json.data.message);
+                        showMsg('hr-import-message', '❌ ' + (json.data?.message || 'Import failed.'), 'error');
+                        btn.disabled = false;
+                        btn.textContent = orig;
+                    }
+                })
+                .catch(() => {
+                    showMsg('hr-import-message', '❌ Connection error.', 'error');
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                });
+        }
+ 
+        /* ── Update PIN for existing POS staff ── */
+        function updateStaffPin(userId, pin, btn) {
+            if (!userId) { alert('No user ID found.'); return; }
+ 
+            const fd = new FormData();
+            fd.append('action', 'pos_set_staff_pin');
+            fd.append('nonce', nonce);
+            fd.append('staff_id', userId);
+            fd.append('pin', pin);
+ 
+            const orig = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳';
+ 
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(json => {
+                    btn.disabled = false;
+                    btn.textContent = orig;
+                    if (json.success) {
+                        showMsg('hr-import-message', '✅ ' + json.data.message, 'success');
+                    } else {
+                        alert(json.data?.message || 'Failed to update PIN.');
                     }
                 });
+        }
+ 
+        /* ── Set / Change PIN Modal (for existing POS staff table) ── */
+        let activePinUserId = null;
+        const pinModal = document.getElementById('pos-pin-modal');
+ 
+        document.querySelectorAll('.pos-set-pin-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                activePinUserId = this.dataset.id;
+                document.getElementById('pin-modal-subtitle').textContent =
+                    'Set a login PIN for ' + this.dataset.name;
+                document.getElementById('modal-pin-input').value = '';
+                document.getElementById('modal-pin-message').innerHTML = '';
+                pinModal.style.display = 'flex';
+                setTimeout(() => document.getElementById('modal-pin-input').focus(), 100);
             });
         });
-        
-        // Save settings
-        document.getElementById('pos-settings-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(this);
-            formData.append('action', 'pos_save_settings');
-            formData.append('nonce', '<?php echo $nonce; ?>');
-            
-            const btn = this.querySelector('button[type="submit"]');
+ 
+        document.getElementById('modal-pin-cancel').addEventListener('click', () => {
+            pinModal.style.display = 'none';
+        });
+ 
+        document.getElementById('modal-pin-save').addEventListener('click', function () {
+            const pin = document.getElementById('modal-pin-input').value.trim();
+            if (pin && !/^[0-9]{4,6}$/.test(pin)) {
+                document.getElementById('modal-pin-message').innerHTML =
+                    '<span style="color:#dc2626;">PIN must be 4–6 digits.</span>';
+                return;
+            }
+ 
+            const btn = this;
             btn.disabled = true;
-            btn.textContent = 'Saving...';
-            
-            fetch(ajaxurl, {method: 'POST', body: formData})
-            .then(r => r.json())
-            .then(json => {
-                const msg = document.getElementById('settings-message');
-                msg.innerHTML = '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' + json.data.message + '</div>';
-                
-                btn.disabled = false;
-                btn.textContent = 'Save Settings';
+            btn.textContent = 'Saving…';
+ 
+            const fd = new FormData();
+            fd.append('action', 'pos_set_staff_pin');
+            fd.append('nonce', nonce);
+            fd.append('staff_id', activePinUserId);
+            fd.append('pin', pin);
+ 
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(json => {
+                    btn.disabled = false;
+                    btn.textContent = 'Save PIN';
+                    if (json.success) {
+                        pinModal.style.display = 'none';
+                        location.reload();
+                    } else {
+                        document.getElementById('modal-pin-message').innerHTML =
+                            '<span style="color:#dc2626;">' + (json.data?.message || 'Error.') + '</span>';
+                    }
+                });
+        });
+ 
+        /* ── Manual add form ── */
+        document.getElementById('show-add-staff').addEventListener('click', () => {
+            document.getElementById('add-staff-form').style.display = 'block';
+        });
+        document.getElementById('cancel-add-staff').addEventListener('click', () => {
+            document.getElementById('add-staff-form').style.display = 'none';
+            document.getElementById('staff-form').reset();
+        });
+ 
+        document.getElementById('staff-form').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const fd = new FormData(this);
+            fd.append('action', 'pos_add_staff');
+            fd.append('nonce', nonce);
+            const btn = this.querySelector('button[type="submit"]');
+            btn.disabled = true; btn.textContent = 'Adding…';
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(json => {
+                    document.getElementById('staff-message').innerHTML =
+                        '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' +
+                        json.data.message + '</div>';
+                    if (json.success) setTimeout(() => location.reload(), 1500);
+                    else { btn.disabled = false; btn.textContent = 'Add Staff'; }
+                });
+        });
+ 
+        /* ── Toggle staff status ── */
+        document.querySelectorAll('.toggle-staff-status').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const action = this.dataset.status === 'active' ? 'activate' : 'deactivate';
+                if (!confirm('Are you sure you want to ' + action + ' this staff member?')) return;
+                const fd = new FormData();
+                fd.append('action', 'pos_toggle_staff_status');
+                fd.append('staff_id', this.dataset.id);
+                fd.append('status', this.dataset.status);
+                fd.append('nonce', this.dataset.nonce);
+                fetch(ajaxurl, { method: 'POST', body: fd })
+                    .then(r => r.json())
+                    .then(json => { if (json.success) location.reload(); else alert(json.data.message); });
             });
         });
+ 
+        /* ── Save settings ── */
+        document.getElementById('pos-settings-form').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const fd = new FormData(this);
+            fd.append('action', 'pos_save_settings');
+            fd.append('nonce', nonce);
+            const btn = this.querySelector('button[type="submit"]');
+            btn.disabled = true; btn.textContent = 'Saving…';
+            fetch(ajaxurl, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(json => {
+                    document.getElementById('settings-message').innerHTML =
+                        '<div class="bntm-notice bntm-notice-' + (json.success ? 'success' : 'error') + '">' +
+                        json.data.message + '</div>';
+                    btn.disabled = false; btn.textContent = 'Save Settings';
+                });
+        });
+ 
+        /* ── Helpers ── */
+        function esc(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+        function showMsg(id, text, type) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.innerHTML = '<div class="bntm-notice bntm-notice-' + type + '">' + text + '</div>';
+            setTimeout(() => { el.innerHTML = ''; }, 5000);
+        }
     })();
     </script>
     <?php
     return ob_get_clean();
 }
+ 
+ 
+/* ═══════════════════════════════════════════════════════════════════
+   AJAX: Load HR staff list
+   Returns all HR employees with a flag if they're already POS cashiers.
+═══════════════════════════════════════════════════════════════════ */
+function bntm_ajax_pos_load_hr_staff() {
+    check_ajax_referer('pos_nonce', 'nonce');
+ 
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+ 
+    global $wpdb;
+ 
+    /*
+     * HR employee sources (try each in order of preference):
+     *  1. bntm_hr_employees  — dedicated HR module table
+     *  2. bntm_staff          — generic staff table
+     *  3. WordPress users     — fallback: WP users with HR-ish roles
+     */
+    $hr_employees = [];
+ 
+    // ── Source 1: {prefix}hr_employees ──────────────────────────────
+    $hr_table = $wpdb->prefix . 'hr_employees';
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $hr_table))) {
+ 
+        // Build column map from what exists in the table
+        $cols = $wpdb->get_col("DESCRIBE {$hr_table}", 0);
+ 
+        $name_col    = in_array('name', $cols)            ? 'name'            :
+                      (in_array('full_name', $cols)        ? 'full_name'        :
+                      (in_array('employee_name', $cols)    ? 'employee_name'    : null));
+        $email_col   = in_array('email', $cols)            ? 'email'            :
+                      (in_array('work_email', $cols)        ? 'work_email'        : null);
+        $phone_col   = in_array('phone', $cols)            ? 'phone'            :
+                      (in_array('mobile', $cols)            ? 'mobile'            :
+                      (in_array('contact_number', $cols)   ? 'contact_number'   : null));
+        $role_col    = in_array('position', $cols)         ? 'position'         :
+                      (in_array('job_title', $cols)         ? 'job_title'         :
+                      (in_array('role', $cols)              ? 'role'              :
+                      (in_array('designation', $cols)       ? 'designation'       : null)));
+        $dept_col    = in_array('department', $cols)       ? 'department'       :
+                      (in_array('dept', $cols)              ? 'dept'              : null);
+        $status_col  = in_array('status', $cols)           ? 'status'           :
+                      (in_array('employment_status', $cols) ? 'employment_status' : null);
+        $user_id_col = in_array('user_id', $cols)          ? 'user_id'          :
+                      (in_array('wp_user_id', $cols)        ? 'wp_user_id'        : null);
+ 
+        if ($name_col) {
+            $select_parts = ["id", "{$name_col} AS name"];
+            if ($email_col)   $select_parts[] = "{$email_col} AS email";
+            if ($phone_col)   $select_parts[] = "{$phone_col} AS phone";
+            if ($role_col)    $select_parts[] = "{$role_col} AS role";
+            if ($dept_col)    $select_parts[] = "{$dept_col} AS department";
+            if ($user_id_col) $select_parts[] = "{$user_id_col} AS wp_user_id";
+ 
+            $where = $status_col ? "WHERE {$status_col} NOT IN ('terminated','resigned','inactive')" : '';
+ 
+            $rows = $wpdb->get_results(
+                "SELECT " . implode(', ', $select_parts) . " FROM {$hr_table} {$where} ORDER BY {$name_col} ASC",
+                ARRAY_A
+            );
+ 
+            foreach ($rows as $row) {
+                $row['source'] = 'hr_employees';
+                $hr_employees[] = $row;
+            }
+        }
+    }
+ 
+    // ── Source 2: {prefix}pos_staff (legacy) ────────────────────────
+    if (empty($hr_employees)) {
+        $staff_table = $wpdb->prefix . 'pos_staff';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $staff_table))) {
+            $rows = $wpdb->get_results(
+                "SELECT id, name, email, phone, role, status, user_id AS wp_user_id FROM {$staff_table} ORDER BY name ASC",
+                ARRAY_A
+            );
+            foreach ($rows as $row) {
+                $row['source'] = 'pos_staff';
+                $hr_employees[] = $row;
+            }
+        }
+    }
+ 
+    // ── Source 3: WordPress users with HR-ish roles ──────────────────
+    if (empty($hr_employees)) {
+        $hr_roles = ['hr_staff', 'hr_manager', 'employee', 'staff', 'manager', 'editor', 'author'];
+        $wp_users = get_users(['role__in' => $hr_roles, 'number' => 200]);
+        foreach ($wp_users as $u) {
+            $hr_employees[] = [
+                'id'        => 0,
+                'name'      => $u->display_name,
+                'email'     => $u->user_email,
+                'phone'     => get_user_meta($u->ID, 'phone', true) ?: '',
+                'role'      => implode(', ', $u->roles),
+                'wp_user_id'=> $u->ID,
+                'source'    => 'wp_users',
+            ];
+        }
+    }
+ 
+    // ── Enrich each record: check if already a POS cashier ──────────
+    // Build lookup of pos_cashier user emails & IDs
+    $pos_users  = get_users(['role' => 'pos_cashier', 'fields' => ['ID', 'user_email']]);
+    $pos_emails = array_column($pos_users, 'user_email');
+    $pos_ids    = array_column($pos_users, 'ID');
+ 
+    foreach ($hr_employees as &$emp) {
+        $emp['already_pos']   = false;
+        $emp['existing_pin']  = '';
+        $emp['wp_user_id']    = isset($emp['wp_user_id']) ? intval($emp['wp_user_id']) : 0;
+ 
+        // Check by WP user ID
+        if ($emp['wp_user_id'] && in_array($emp['wp_user_id'], $pos_ids, true)) {
+            $emp['already_pos']  = true;
+            $emp['existing_pin'] = get_user_meta($emp['wp_user_id'], 'pos_pin', true) ?: '';
+        }
+        // Check by email
+        elseif (!empty($emp['email']) && in_array($emp['email'], $pos_emails, true)) {
+            $key = array_search($emp['email'], $pos_emails, true);
+            $uid = $pos_users[$key]->ID ?? 0;
+            $emp['already_pos']  = true;
+            $emp['wp_user_id']   = $uid;
+            $emp['existing_pin'] = $uid ? get_user_meta($uid, 'pos_pin', true) : '';
+        }
+ 
+        // Sanitise output
+        $emp['name']       = $emp['name']       ?? '';
+        $emp['email']      = $emp['email']       ?? '';
+        $emp['phone']      = $emp['phone']       ?? '';
+        $emp['role']       = $emp['role']        ?? '';
+        $emp['department'] = $emp['department']  ?? '';
+    }
+    unset($emp);
+ 
+    if (empty($hr_employees)) {
+        wp_send_json_error(['message' => 'No HR employees found. Make sure the HR module is active and has employees.']);
+    }
+ 
+    wp_send_json_success($hr_employees);
+}
+add_action('wp_ajax_pos_load_hr_staff', 'bntm_ajax_pos_load_hr_staff');
+ 
+ 
+/* ═══════════════════════════════════════════════════════════════════
+   AJAX: Import a single HR employee as a POS cashier
+═══════════════════════════════════════════════════════════════════ */
+function bntm_ajax_pos_import_hr_staff() {
+    check_ajax_referer('pos_nonce', 'nonce');
+ 
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+ 
+    // Check user limit
+    $user_limit = get_option('bntm_user_limit', 0);
+    if ($user_limit > 0 && count(get_users(['exclude' => [1]])) >= $user_limit) {
+        wp_send_json_error(['message' => "User limit of {$user_limit} reached."]);
+    }
+ 
+    global $wpdb;
+ 
+    $emp_id = intval($_POST['emp_id'] ?? 0);
+    $pin    = sanitize_text_field($_POST['pin'] ?? '');
+ 
+    if ($pin !== '' && !preg_match('/^[0-9]{4,6}$/', $pin)) {
+        wp_send_json_error(['message' => 'PIN must be 4–6 digits.']);
+    }
+ 
+    // Validate PIN uniqueness
+    if ($pin !== '') {
+        $pin_users = get_users(['meta_key' => 'pos_pin', 'meta_value' => $pin, 'number' => 1]);
+        if (!empty($pin_users)) {
+            wp_send_json_error(['message' => "PIN {$pin} is already assigned to another staff member."]);
+        }
+    }
+ 
+    // Fetch the HR employee record
+    $emp = null;
+ 
+    // Try hr_employees table first
+    $hr_table = $wpdb->prefix . 'hr_employees';
+    if ($emp_id > 0 && $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $hr_table))) {
+        $cols = $wpdb->get_col("DESCRIBE {$hr_table}", 0);
+ 
+        $name_col  = in_array('name', $cols)         ? 'name'         :
+                    (in_array('full_name', $cols)      ? 'full_name'    :
+                    (in_array('employee_name', $cols)  ? 'employee_name': null));
+        $email_col = in_array('email', $cols)         ? 'email'        :
+                    (in_array('work_email', $cols)      ? 'work_email'   : null);
+        $phone_col = in_array('phone', $cols)         ? 'phone'        :
+                    (in_array('mobile', $cols)          ? 'mobile'       :
+                    (in_array('contact_number', $cols) ? 'contact_number': null));
+        $uid_col   = in_array('user_id', $cols)       ? 'user_id'      :
+                    (in_array('wp_user_id', $cols)      ? 'wp_user_id'   : null);
+ 
+        if ($name_col) {
+            $parts = ["id", "{$name_col} AS name"];
+            if ($email_col) $parts[] = "{$email_col} AS email";
+            if ($phone_col) $parts[] = "{$phone_col} AS phone";
+            if ($uid_col)   $parts[] = "{$uid_col} AS wp_user_id";
+ 
+            $emp = $wpdb->get_row($wpdb->prepare(
+                'SELECT ' . implode(', ', $parts) . " FROM {$hr_table} WHERE id = %d LIMIT 1",
+                $emp_id
+            ), ARRAY_A);
+        }
+    }
+ 
+    // Fallback: pos_staff table
+    if (!$emp) {
+        $pos_staff_table = $wpdb->prefix . 'pos_staff';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $pos_staff_table))) {
+            $emp = $wpdb->get_row($wpdb->prepare(
+                "SELECT id, name, email, phone, user_id AS wp_user_id FROM {$pos_staff_table} WHERE id = %d LIMIT 1",
+                $emp_id
+            ), ARRAY_A);
+        }
+    }
+ 
+    if (!$emp) {
+        wp_send_json_error(['message' => 'Employee not found.']);
+    }
+ 
+    $name  = trim($emp['name']  ?? '');
+    $email = sanitize_email($emp['email'] ?? '');
+    $phone = sanitize_text_field($emp['phone'] ?? '');
+ 
+    if (empty($name)) {
+        wp_send_json_error(['message' => 'Employee has no name set.']);
+    }
+ 
+    // Ensure POS cashier role exists
+    if (!get_role('pos_cashier')) {
+        pos_create_cashier_role();
+    }
+ 
+    // ── Case A: employee already has a linked WP user ────────────────
+    $linked_user_id = intval($emp['wp_user_id'] ?? 0);
+    if ($linked_user_id) {
+        $existing = get_userdata($linked_user_id);
+        if ($existing) {
+            $existing->add_role('pos_cashier');
+            update_user_meta($linked_user_id, 'pos_status', 'active');
+            if ($phone) update_user_meta($linked_user_id, 'pos_phone', $phone);
+            if ($pin !== '') update_user_meta($linked_user_id, 'pos_pin', $pin);
+ 
+            wp_send_json_success([
+                'message'    => "{$name} imported as POS cashier (linked WP account used).",
+                'wp_user_id' => $linked_user_id,
+            ]);
+        }
+    }
+ 
+    // ── Case B: find/create WP user by email ─────────────────────────
+    $wp_user_id = $email ? email_exists($email) : false;
+ 
+    if (!$wp_user_id) {
+        // Create a new WP user
+        if (empty($email)) {
+            // Generate a placeholder email if HR record has none
+            $slug  = sanitize_title($name);
+            $email = $slug . '@pos.local';
+        }
+ 
+        $username = $email ? strstr($email, '@', true) : sanitize_title($name);
+ 
+        // Make username unique
+        $base_username = $username;
+        $i = 2;
+        while (username_exists($username)) {
+            $username = $base_username . $i++;
+        }
+ 
+        $random_pass = wp_generate_password(12, false);
+        $wp_user_id  = wp_create_user($username, $random_pass, $email);
+ 
+        if (is_wp_error($wp_user_id)) {
+            wp_send_json_error(['message' => 'Failed to create WP user: ' . $wp_user_id->get_error_message()]);
+        }
+ 
+        wp_update_user(['ID' => $wp_user_id, 'display_name' => $name, 'first_name' => $name]);
+    }
+ 
+    // Assign role and meta
+    $user = new WP_User($wp_user_id);
+    $user->set_role('pos_cashier');
+ 
+    update_user_meta($wp_user_id, 'pos_status', 'active');
+    if ($phone) update_user_meta($wp_user_id, 'pos_phone', $phone);
+    if ($pin !== '') update_user_meta($wp_user_id, 'pos_pin', $pin);
+ 
+    // Link back to HR record if possible
+    if ($emp_id && isset($linked_user_id)) {
+        $hr_table = $wpdb->prefix . 'hr_employees';
+        if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $hr_table))) {
+            $uid_col = in_array('wp_user_id', $wpdb->get_col("DESCRIBE {$hr_table}", 0)) ? 'wp_user_id' :
+                      (in_array('user_id', $wpdb->get_col("DESCRIBE {$hr_table}", 0))    ? 'user_id'    : null);
+            if ($uid_col) {
+                $wpdb->update($hr_table, [$uid_col => $wp_user_id], ['id' => $emp_id], ['%d'], ['%d']);
+            }
+        }
+    }
+ 
+    wp_send_json_success([
+        'message'    => "{$name} successfully imported as a POS cashier" . ($pin ? " with PIN set." : "."),
+        'wp_user_id' => $wp_user_id,
+    ]);
+}
+add_action('wp_ajax_pos_import_hr_staff', 'bntm_ajax_pos_import_hr_staff');
+ 
+ 
+/* ═══════════════════════════════════════════════════════════════════
+   AJAX: Set or update a PIN for any POS staff member
+═══════════════════════════════════════════════════════════════════ */
+function bntm_ajax_pos_set_staff_pin() {
+    check_ajax_referer('pos_nonce', 'nonce');
+ 
+    if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Unauthorized']);
+    }
+ 
+    $staff_id = intval($_POST['staff_id'] ?? 0);
+    $pin      = sanitize_text_field($_POST['pin'] ?? '');
+ 
+    if (!$staff_id) {
+        wp_send_json_error(['message' => 'Invalid staff ID.']);
+    }
+ 
+    if ($pin !== '' && !preg_match('/^[0-9]{4,6}$/', $pin)) {
+        wp_send_json_error(['message' => 'PIN must be 4–6 digits.']);
+    }
+ 
+    // Check uniqueness (exclude self)
+    if ($pin !== '') {
+        $users_with_pin = get_users([
+            'meta_key'   => 'pos_pin',
+            'meta_value' => $pin,
+            'exclude'    => [$staff_id],
+            'number'     => 1,
+        ]);
+        if (!empty($users_with_pin)) {
+            wp_send_json_error(['message' => "PIN {$pin} is already assigned to another cashier."]);
+        }
+    }
+ 
+    $user = get_userdata($staff_id);
+    if (!$user) {
+        wp_send_json_error(['message' => 'Staff member not found.']);
+    }
+ 
+    if ($pin === '') {
+        delete_user_meta($staff_id, 'pos_pin');
+        wp_send_json_success(['message' => "PIN removed for {$user->display_name}."]);
+    } else {
+        update_user_meta($staff_id, 'pos_pin', $pin);
+        wp_send_json_success(['message' => "PIN updated for {$user->display_name}."]);
+    }
+}
+add_action('wp_ajax_pos_set_staff_pin', 'bntm_ajax_pos_set_staff_pin');
 
 /* ---------- AJAX HANDLERS ---------- */
 // Get product data for editing
