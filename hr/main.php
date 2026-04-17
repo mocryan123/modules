@@ -1101,6 +1101,7 @@ function bntm_hr_employees_view($can_manage) {
                     <div class="bntm-form-group"><label>Employee PIN (for Kiosk)</label><input type="text" name="pin" maxlength="6" placeholder="4-6 digit PIN" /><small>Used for clock in/out at kiosk</small></div>
                     <div class="bntm-form-group"><label>Emergency Contact Name</label><input type="text" name="emergency_name" /></div>
                     <div class="bntm-form-group"><label>Emergency Contact Phone</label><input type="tel" name="emergency_phone" /></div>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 15px; margin-bottom: 15px;"><div style="font-weight: 600; color: #166534; margin-bottom: 10px;">📋 Tax & Benefits Information</div><div class="bntm-form-row"><div class="bntm-form-group"><label>TIN (Tax ID Number)</label><input type="text" name="tin" placeholder="e.g., 123-456-789-000" /></div><div class="bntm-form-group"><label>SSS Number</label><input type="text" name="sss" placeholder="e.g., XX-XXXXXXX-X" /></div></div><div class="bntm-form-row"><div class="bntm-form-group"><label>Employee Number</label><input type="text" name="employee_number" placeholder="e.g., EMP-001" /></div><div class="bntm-form-group"><label>Pag-IBIG Number</label><input type="text" name="pagibig" placeholder="e.g., XXXX-XXXX-XXXX" /></div></div></div>
                     <div style="display: flex; gap: 10px; margin-top: 20px;"><button type="submit" class="bntm-btn-primary" id="add-submit-btn">Add Employee</button><button type="button" id="close-employee-modal" class="bntm-btn-secondary">Cancel</button></div>
                     <div id="employee-modal-message"></div>
                 </form>
@@ -1127,22 +1128,37 @@ function bntm_hr_employees_view($can_manage) {
                     <div class="bntm-form-group"><label>Emergency Contact Name</label><input type="text" name="emergency_name" /></div>
                     <div class="bntm-form-group"><label>Emergency Contact Phone</label><input type="tel" name="emergency_phone" /></div>
                     <div class="bntm-form-group"><label>Status</label><select name="status"><option value="active">Active</option><option value="inactive">Inactive</option><option value="on_leave">On Leave</option><option value="terminated">Terminated</option></select></div>
+                    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 15px; margin-bottom: 15px;"><div style="font-weight: 600; color: #166534; margin-bottom: 10px;">📋 Tax & Benefits Information</div><div class="bntm-form-row"><div class="bntm-form-group"><label>TIN (Tax ID Number)</label><input type="text" name="tin" placeholder="e.g., 123-456-789-000" /></div><div class="bntm-form-group"><label>SSS Number</label><input type="text" name="sss" placeholder="e.g., XX-XXXXXXX-X" /></div></div><div class="bntm-form-row"><div class="bntm-form-group"><label>Employee Number</label><input type="text" name="employee_number" placeholder="e.g., EMP-001" /></div><div class="bntm-form-group"><label>Pag-IBIG Number</label><input type="text" name="pagibig" placeholder="e.g., XXXX-XXXX-XXXX" /></div></div></div>
                     <div style="display: flex; gap: 10px; margin-top: 20px;"><button type="submit" class="bntm-btn-primary" id="edit-submit-btn">Update Employee</button><button type="button" id="close-edit-modal" class="bntm-btn-secondary">Cancel</button></div>
                     <div id="edit-employee-message"></div>
                 </form>
             </div>
         </div>
         <?php if ($employees): ?>
-        <div class="bntm-table-wrapper"><table class="bntm-table"><thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Hourly Rate</th><th>Status</th><th>PIN</th><th>Actions</th></tr></thead><tbody>
+        <div class="bntm-table-wrapper"><table class="bntm-table"><thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Hourly Rate</th><th>Status</th><th>PIN</th><th>Tax Info</th><th>Actions</th></tr></thead><tbody>
             <?php foreach ($employees as $employee):
                 $role = get_user_meta($employee->ID, 'bntm_role', true); $department = get_user_meta($employee->ID, 'bntm_department', true); $status = get_user_meta($employee->ID, 'bntm_status', true) ?: 'active'; $pin = get_user_meta($employee->ID, 'bntm_hr_pin', true); $hourly_rate = get_user_meta($employee->ID, 'bntm_hourly_rate', true);
                 if (!$hourly_rate) { $settings = bntm_get_employee_payroll_settings($employee->ID); $hourly_rate = $settings['hourly_rate']; }
+                // Get tax info
+                $tin = get_user_meta($employee->ID, 'bntm_tin', true);
+                $sss = get_user_meta($employee->ID, 'bntm_sss', true);
+                $employee_number = get_user_meta($employee->ID, 'bntm_employee_number', true);
+                $pagibig = get_user_meta($employee->ID, 'bntm_pagibig', true);
+                $tax_info = '';
+                if ($tin || $sss || $employee_number || $pagibig) {
+                    $tax_info = '';
+                    if ($tin) $tax_info .= 'TIN: ' . $tin . ' ';
+                    if ($sss) $tax_info .= 'SSS: ' . $sss . ' ';
+                    if ($employee_number) $tax_info .= 'Emp#: ' . $employee_number . ' ';
+                    if ($pagibig) $tax_info .= 'Pag-IBIG: ' . $pagibig;
+                }
                 $status_colors = ['active' => 'background: #d1fae5; color: #065f46;', 'inactive' => 'background: #fee2e2; color: #991b1b;', 'on_leave' => 'background: #fef3c7; color: #92400e;', 'terminated' => 'background: #f3f4f6; color: #6b7280;'];
                 $status_style = isset($status_colors[$status]) ? $status_colors[$status] : '';
             ?>
                 <tr><td><?php echo esc_html($employee->display_name); ?></td><td><?php echo esc_html($role ? ucfirst($role) : 'Not Set'); ?></td><td><?php echo esc_html($department ?: '-'); ?></td><td><strong>₱<?php echo number_format($hourly_rate, 2); ?></strong></td>
                 <td><span style="padding: 4px 8px; border-radius: 4px; display: inline-block; <?php echo $status_style; ?>"><?php echo esc_html(ucfirst(str_replace('_', ' ', $status))); ?></span></td>
                 <td><?php echo esc_html($pin ?: 'Not set'); ?></td>
+                <td style="font-size: 9px; white-space: pre-wrap; word-break: break-word;"><?php echo esc_html($tax_info ?: '-'); ?></td>
                 <td><button class="bntm-btn-small edit-employee" data-id="<?php echo $employee->ID; ?>">Edit</button><button class="bntm-btn-small view-attendance" data-id="<?php echo $employee->ID; ?>" data-name="<?php echo esc_attr($employee->display_name); ?>">Attendance</button><button class="bntm-btn-small bntm-btn-danger delete-employee" data-id="<?php echo $employee->ID; ?>" data-name="<?php echo esc_attr($employee->display_name); ?>">Delete</button></td></tr>
             <?php endforeach; ?></tbody></table></div>
         <?php else: ?><p>No employees found.</p><?php endif; ?>
@@ -1213,7 +1229,23 @@ function bntm_ajax_hr_add_employee() {
     $user_id = wp_create_user($username, $password, $email);
     if (is_wp_error($user_id)) { wp_send_json_error(['message' => $user_id->get_error_message()]); }
     wp_update_user(['ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name, 'display_name' => $first_name . ' ' . $last_name]);
-    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', 'active');
+    update_user_meta($user_id, 'bntm_role', $role); 
+    update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); 
+    update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); 
+    update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); 
+    update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); 
+    update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); 
+    update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); 
+    update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); 
+    update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); 
+    update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); 
+    update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? ''));
+    // New tax & benefits fields
+    update_user_meta($user_id, 'bntm_tin', sanitize_text_field($_POST['tin'] ?? ''));
+    update_user_meta($user_id, 'bntm_sss', sanitize_text_field($_POST['sss'] ?? ''));
+    update_user_meta($user_id, 'bntm_employee_number', sanitize_text_field($_POST['employee_number'] ?? ''));
+    update_user_meta($user_id, 'bntm_pagibig', sanitize_text_field($_POST['pagibig'] ?? ''));
+    update_user_meta($user_id, 'bntm_status', 'active');
     if ($role === 'pos_cashier') { $user = new WP_User($user_id); $user->set_role('pos_cashier'); }
     wp_send_json_success(['message' => 'Employee added successfully!']);
 }
@@ -1223,7 +1255,7 @@ function bntm_ajax_hr_get_employee() {
     check_ajax_referer('bntm_hr_nonce', 'nonce');
     $user_id = intval($_POST['user_id']); $user = get_userdata($user_id);
     if (!$user) { wp_send_json_error(['message' => 'Employee not found.']); }
-    wp_send_json_success(['first_name' => $user->first_name, 'last_name' => $user->last_name, 'email' => $user->user_email, 'role' => get_user_meta($user_id, 'bntm_role', true), 'phone' => get_user_meta($user_id, 'bntm_phone', true), 'dob' => get_user_meta($user_id, 'bntm_dob', true), 'address' => get_user_meta($user_id, 'bntm_address', true), 'department' => get_user_meta($user_id, 'bntm_department', true), 'position' => get_user_meta($user_id, 'bntm_position', true), 'hire_date' => get_user_meta($user_id, 'bntm_hire_date', true), 'hourly_rate' => get_user_meta($user_id, 'bntm_hourly_rate', true), 'pin' => get_user_meta($user_id, 'bntm_hr_pin', true), 'emergency_name' => get_user_meta($user_id, 'bntm_emergency_contact_name', true), 'emergency_phone' => get_user_meta($user_id, 'bntm_emergency_contact_phone', true), 'status' => get_user_meta($user_id, 'bntm_status', true) ?: 'active']);
+    wp_send_json_success(['first_name' => $user->first_name, 'last_name' => $user->last_name, 'email' => $user->user_email, 'role' => get_user_meta($user_id, 'bntm_role', true), 'phone' => get_user_meta($user_id, 'bntm_phone', true), 'dob' => get_user_meta($user_id, 'bntm_dob', true), 'address' => get_user_meta($user_id, 'bntm_address', true), 'department' => get_user_meta($user_id, 'bntm_department', true), 'position' => get_user_meta($user_id, 'bntm_position', true), 'hire_date' => get_user_meta($user_id, 'bntm_hire_date', true), 'hourly_rate' => get_user_meta($user_id, 'bntm_hourly_rate', true), 'pin' => get_user_meta($user_id, 'bntm_hr_pin', true), 'emergency_name' => get_user_meta($user_id, 'bntm_emergency_contact_name', true), 'emergency_phone' => get_user_meta($user_id, 'bntm_emergency_contact_phone', true), 'status' => get_user_meta($user_id, 'bntm_status', true) ?: 'active', 'tin' => get_user_meta($user_id, 'bntm_tin', true), 'sss' => get_user_meta($user_id, 'bntm_sss', true), 'employee_number' => get_user_meta($user_id, 'bntm_employee_number', true), 'pagibig' => get_user_meta($user_id, 'bntm_pagibig', true)]);
 }
 
 add_action('wp_ajax_bntm_hr_delete_employee', 'bntm_ajax_hr_delete_employee');
@@ -1252,7 +1284,23 @@ function bntm_ajax_hr_update_employee() {
     if (!empty($password)) $update_data['user_pass'] = $password;
     $updated = wp_update_user($update_data);
     if (is_wp_error($updated)) { wp_send_json_error(['message' => $updated->get_error_message()]); }
-    update_user_meta($user_id, 'bntm_role', $role); update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? '')); update_user_meta($user_id, 'bntm_status', sanitize_text_field($_POST['status'] ?? 'active'));
+    update_user_meta($user_id, 'bntm_role', $role); 
+    update_user_meta($user_id, 'bntm_phone', sanitize_text_field($_POST['phone'] ?? '')); 
+    update_user_meta($user_id, 'bntm_dob', sanitize_text_field($_POST['dob'] ?? '')); 
+    update_user_meta($user_id, 'bntm_address', sanitize_textarea_field($_POST['address'] ?? '')); 
+    update_user_meta($user_id, 'bntm_department', sanitize_text_field($_POST['department'] ?? '')); 
+    update_user_meta($user_id, 'bntm_position', sanitize_text_field($_POST['position'] ?? '')); 
+    update_user_meta($user_id, 'bntm_hire_date', sanitize_text_field($_POST['hire_date'] ?? '')); 
+    update_user_meta($user_id, 'bntm_hourly_rate', floatval($_POST['hourly_rate'] ?? 0)); 
+    update_user_meta($user_id, 'bntm_hr_pin', sanitize_text_field($_POST['pin'] ?? '')); 
+    update_user_meta($user_id, 'bntm_emergency_contact_name', sanitize_text_field($_POST['emergency_name'] ?? '')); 
+    update_user_meta($user_id, 'bntm_emergency_contact_phone', sanitize_text_field($_POST['emergency_phone'] ?? ''));
+    // New tax & benefits fields
+    update_user_meta($user_id, 'bntm_tin', sanitize_text_field($_POST['tin'] ?? ''));
+    update_user_meta($user_id, 'bntm_sss', sanitize_text_field($_POST['sss'] ?? ''));
+    update_user_meta($user_id, 'bntm_employee_number', sanitize_text_field($_POST['employee_number'] ?? ''));
+    update_user_meta($user_id, 'bntm_pagibig', sanitize_text_field($_POST['pagibig'] ?? ''));
+    update_user_meta($user_id, 'bntm_status', sanitize_text_field($_POST['status'] ?? 'active'));
     if ($role === 'pos_cashier') { $user = new WP_User($user_id); $user->set_role('pos_cashier'); }
     wp_send_json_success(['message' => 'Employee updated successfully!']);
 }
@@ -1454,6 +1502,27 @@ function bntm_hr_payslips_view($user_id, $can_manage) {
         </div>
         <?php endif; ?>
 
+        <!-- Month Filter and Bulk Actions -->
+        <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <label for="month-filter" style="font-weight: 500; margin: 0;">Filter by Month:</label>
+                <select id="month-filter" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white; cursor: pointer;">
+                    <option value="">All Months</option>
+                    <?php
+                    // Generate month options for the last 12 months
+                    for ($i = 11; $i >= 0; $i--) {
+                        $date = date('Y-m', strtotime("-$i months"));
+                        $label = date('F Y', strtotime($date));
+                        echo '<option value="' . esc_attr($date) . '">' . esc_html($label) . '</option>';
+                    }
+                    ?>
+                </select>
+            </div>
+            <?php if ($can_manage && $payslips): ?>
+            <button id="bulk-download-payslips" class="bntm-btn-primary" style="padding: 8px 16px; font-size: 14px;">⬇ Download Selected</button>
+            <?php endif; ?>
+        </div>
+
         <!-- Payslips Table -->
         <?php if ($payslips): ?>
         <div class="bntm-table-wrapper">
@@ -1645,6 +1714,118 @@ function bntm_hr_payslips_view($user_id, $can_manage) {
                     try { const response = await fetch(bntmAjax.ajax_url, { method: 'POST', body: formData }); const data = await response.json(); alert(data.data ? data.data.message : 'Operation completed'); if (data.success) location.reload(); } catch (error) { alert('Error: ' + error.message); }
                 });
             }
+
+            // ─── MONTH FILTERING ───
+            const monthFilter = document.getElementById('month-filter');
+            if (monthFilter) {
+                monthFilter.addEventListener('change', function() {
+                    const selectedMonth = this.value; // Format: YYYY-MM
+                    const tableRows = document.querySelectorAll('.bntm-table tbody tr');
+                    
+                    tableRows.forEach(row => {
+                        const periodCell = row.querySelector('td:nth-child(' + (<?php echo $can_manage ? '3' : '2'; ?>) + ')');
+                        if (!periodCell) {
+                            row.style.display = '';
+                            return;
+                        }
+                        
+                        if (selectedMonth === '') {
+                            row.style.display = '';
+                        } else {
+                            const periodText = periodCell.textContent.trim();
+                            const dateMatch = periodText.match(/\w+ \d+/);
+                            if (dateMatch) {
+                                const currentYear = new Date().getFullYear();
+                                const periodDate = new Date(periodText + ', ' + currentYear);
+                                const periodYearMonth = ('0' + (periodDate.getMonth() + 1)).slice(-2);
+                                const filterYearMonth = selectedMonth.split('-')[1];
+                                
+                                // Try to parse the period more accurately
+                                const periodParts = periodText.match(/(\w+)\s+(\d+),\s+(\d{4})/);
+                                if (periodParts) {
+                                    const months = {
+                                        'January': '01', 'February': '02', 'March': '03', 'April': '04',
+                                        'May': '05', 'June': '06', 'July': '07', 'August': '08',
+                                        'September': '09', 'October': '10', 'November': '11', 'December': '12',
+                                        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+                                        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                                    };
+                                    const foundMonth = months[periodParts[1]];
+                                    if (foundMonth && foundMonth + '-' === selectedMonth.split('-')[1] + '-') {
+                                        row.style.display = '';
+                                    } else if (foundMonth && selectedMonth.endsWith('-' + foundMonth)) {
+                                        row.style.display = '';
+                                    } else {
+                                        row.style.display = 'none';
+                                    }
+                                } else {
+                                    row.style.display = 'none';
+                                }
+                            } else {
+                                row.style.display = 'none';
+                            }
+                        }
+                    });
+                });
+            }
+
+            // ─── BULK DOWNLOAD PAYSLIPS ───
+            const bulkDownloadBtn = document.getElementById('bulk-download-payslips');
+            if (bulkDownloadBtn) {
+                bulkDownloadBtn.addEventListener('click', async function() {
+                    const selected = [];
+                    document.querySelectorAll('.payslip-checkbox:checked').forEach(cb => {
+                        selected.push(cb.value);
+                    });
+                    
+                    if (selected.length === 0) {
+                        alert('Please select at least one payslip to download.');
+                        return;
+                    }
+                    
+                    const originalText = this.textContent;
+                    this.textContent = 'Generating...';
+                    this.disabled = true;
+                    
+                    try {
+                        const formData = new FormData();
+                        formData.append('action', 'bntm_hr_bulk_download_payslips');
+                        formData.append('nonce', bntmAjax.nonce);
+                        formData.append('payslip_ids', JSON.stringify(selected));
+                        
+                        const response = await fetch(bntmAjax.ajax_url, {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+                        
+                        if (data.success && data.data.download_urls) {
+                            // Open each PDF in a new tab/window
+                            let delay = 0;
+                            data.data.download_urls.forEach((url, index) => {
+                                setTimeout(() => {
+                                    window.open(url, '_blank');
+                                }, delay);
+                                delay += 300; // Stagger the downloads to avoid popup blocking
+                            });
+                            
+                            const toast = document.createElement('div');
+                            toast.textContent = '✓ Opening ' + selected.length + ' payslip PDF(s)...';
+                            toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#059669;color:white;padding:12px 20px;border-radius:8px;z-index:9999;font-size:14px;font-weight:500;';
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 3000);
+                        } else {
+                            alert('Error: ' + (data.data?.message || 'Failed to generate download links'));
+                        }
+                    } catch (error) {
+                        alert('Error: ' + error.message);
+                    } finally {
+                        this.textContent = originalText;
+                        this.disabled = false;
+                    }
+                });
+            }
         });
     })();
     </script>
@@ -1762,6 +1943,31 @@ function bntm_ajax_generate_payslip_token() {
     wp_send_json_success(['url' => $url]);
 }
 
+// ─── BULK DOWNLOAD PAYSLIPS ───────────────────────────────────────────────────
+add_action('wp_ajax_bntm_hr_bulk_download_payslips', 'bntm_ajax_hr_bulk_download_payslips');
+function bntm_ajax_hr_bulk_download_payslips() {
+    check_ajax_referer('bntm_hr_nonce', 'nonce');
+    $payslip_ids = json_decode(stripslashes($_POST['payslip_ids'] ?? '[]'), true);
+    
+    if (empty($payslip_ids) || !is_array($payslip_ids)) {
+        wp_send_json_error(['message' => 'No payslips selected']);
+    }
+    
+    // Sanitize all IDs
+    $payslip_ids = array_map('intval', $payslip_ids);
+    
+    $download_urls = [];
+    
+    foreach ($payslip_ids as $payslip_id) {
+        $token = wp_generate_password(32, false);
+        set_transient('payslip_token_' . $token, ['payslip_id' => $payslip_id, 'generated_at' => time()], 300);
+        $url = admin_url('admin-ajax.php') . '?action=bntm_hr_download_payslip&token=' . $token . '&nonce=' . wp_create_nonce('bntm_hr_nonce');
+        $download_urls[] = $url;
+    }
+    
+    wp_send_json_success(['download_urls' => $download_urls, 'count' => count($download_urls)]);
+}
+
 function bntm_generate_payslip_pdf_html($payslip, $employee, $position, $department, $deductions_data, $logo, $site_title) {
     $employee_name = esc_html($employee->display_name); $position_text = esc_html($position ?: 'N/A'); $department_text = esc_html($department ?: 'N/A'); $employee_int = intval($payslip->employee_id); $employee_id = get_user_meta($employee_int, 'bntm_hr_pin', true); $site_name = esc_html($site_title ?: get_bloginfo('name'));
     $period_start = date('F d, Y', strtotime($payslip->period_start)); $period_end = date('F d, Y', strtotime($payslip->period_end)); $period_short = date('M d', strtotime($payslip->period_start)) . ' - ' . date('M d, Y', strtotime($payslip->period_end)); $generated_date = date('F d, Y h:i A'); $payslip_number = 'PS-' . str_pad($payslip->id, 6, '0', STR_PAD_LEFT); $ot_rate_default = floatval(bntm_get_setting('hr_ot_rate', '1'));
@@ -1776,7 +1982,24 @@ function bntm_generate_payslip_pdf_html($payslip, $employee, $position, $departm
     <body>
     <div class="header"><div class="header-top"><div><?php if ($logo_html): ?><?php echo $logo_html; ?><?php endif; ?><div class="company-name"><?php echo $site_name; ?></div></div><div class="document-title">PAYSLIP</div></div><div class="header-info"><div><strong>Payslip #:</strong> <?php echo $payslip_number; ?></div><div><strong>Pay Period:</strong> <?php echo $period_short; ?></div><div><strong>Generated:</strong> <?php echo date('M d, Y', strtotime($payslip->created_at ?? 'now')); ?></div></div></div>
     <div class="content">
-        <div class="employee-section"><div class="info-label">Employee Name</div><div class="info-value"><?php echo $employee_name; ?></div><div class="info-label">Employee ID</div><div class="info-value"><?php echo $employee_id; ?></div><div class="info-label">Position</div><div class="info-value"><?php echo $position_text; ?></div><div class="info-label">Department</div><div class="info-value"><?php echo $department_text; ?></div><div class="info-label">Pay Period</div><div class="info-value"><?php echo $period_start; ?><br>to<br><?php echo $period_end; ?></div></div>
+        <div class="employee-section"><div class="info-label">Employee Name</div><div class="info-value"><?php echo $employee_name; ?></div><div class="info-label">Employee ID</div><div class="info-value"><?php echo $employee_id; ?></div><div class="info-label">Position</div><div class="info-value"><?php echo $position_text; ?></div><div class="info-label">Department</div><div class="info-value"><?php echo $department_text; ?></div><div class="info-label">Pay Period</div><div class="info-value"><?php echo $period_start; ?><br>to<br><?php echo $period_end; ?></div>
+        <?php 
+            // Get tax and benefits information
+            $tin = get_user_meta($payslip->employee_id, 'bntm_tin', true);
+            $sss = get_user_meta($payslip->employee_id, 'bntm_sss', true);
+            $employee_number = get_user_meta($payslip->employee_id, 'bntm_employee_number', true);
+            $pagibig = get_user_meta($payslip->employee_id, 'bntm_pagibig', true);
+            if ($tin || $sss || $employee_number || $pagibig):
+        ?>
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ccc;">
+                <div style="font-size: 9pt; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; color: #333;">Tax & Benefits</div>
+                <?php if ($tin): ?><div class="info-label" style="margin-top: 6px;">TIN</div><div class="info-value" style="font-size: 9pt;"><?php echo esc_html($tin); ?></div><?php endif; ?>
+                <?php if ($sss): ?><div class="info-label" style="margin-top: 6px;">SSS</div><div class="info-value" style="font-size: 9pt;"><?php echo esc_html($sss); ?></div><?php endif; ?>
+                <?php if ($employee_number): ?><div class="info-label" style="margin-top: 6px;">Emp. Number</div><div class="info-value" style="font-size: 9pt;"><?php echo esc_html($employee_number); ?></div><?php endif; ?>
+                <?php if ($pagibig): ?><div class="info-label" style="margin-top: 6px;">Pag-IBIG</div><div class="info-value" style="font-size: 9pt;"><?php echo esc_html($pagibig); ?></div><?php endif; ?>
+            </div>
+        <?php endif; ?>
+        </div>
         <div class="calculation-section">
             <?php if ($hours_breakdown && !empty($hours_breakdown['breakdown'])): ?>
             <table><thead><tr><th colspan="8" class="section-header">Work Hours Summary</th></tr><tr><th>Date</th><th class="text-right">Day</th><th class="text-right">Clocked</th><th class="text-right">Lunch</th><th class="text-right">After Lunch</th><th class="text-right">Capped</th><th class="text-right">Payable</th></tr></thead><tbody>
