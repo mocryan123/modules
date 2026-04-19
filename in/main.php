@@ -45,6 +45,7 @@ function bntm_in_get_tables() {
             sku VARCHAR(50),
             barcode VARCHAR(100) UNIQUE,
             inventory_type VARCHAR(50) DEFAULT 'Product',
+            unit_label VARCHAR(50) DEFAULT 'pcs',
             cost_per_unit DECIMAL(10,2) DEFAULT 0,
             selling_price DECIMAL(10,2) NOT NULL,
             stock_quantity INT DEFAULT 0,
@@ -117,6 +118,65 @@ add_action('wp_ajax_in_add_batch', 'bntm_ajax_in_add_batch');
 add_action('wp_ajax_in_delete_batch', 'bntm_ajax_in_delete_batch');
 add_action('wp_ajax_in_import_batch_expense', 'bntm_ajax_in_import_batch_expense');
 add_action('wp_ajax_in_revert_batch_expense', 'bntm_ajax_in_revert_batch_expense');
+add_action('wp_ajax_in_record_material_movement', 'bntm_ajax_in_record_material_movement');
+add_action('init', 'bntm_in_maybe_upgrade_schema', 20);
+
+function bntm_in_get_material_types() {
+    return ['Raw Material', 'Material', 'Supplies'];
+}
+
+function bntm_in_get_unit_options() {
+    return [
+        'pcs' => 'Pieces (pcs)',
+        'box' => 'Box',
+        'pack' => 'Pack',
+        'set' => 'Set',
+        'pair' => 'Pair',
+        'roll' => 'Roll',
+        'bag' => 'Bag',
+        'bottle' => 'Bottle',
+        'can' => 'Can',
+        'tray' => 'Tray',
+        'kg' => 'Kilogram (kg)',
+        'g' => 'Gram (g)',
+        'lb' => 'Pound (lb)',
+        'l' => 'Liter (L)',
+        'ml' => 'Milliliter (mL)',
+        'm' => 'Meter (m)',
+        'cm' => 'Centimeter (cm)',
+        'sheet' => 'Sheet',
+    ];
+}
+
+function bntm_in_normalize_unit_label($unit) {
+    $unit = sanitize_text_field($unit);
+    $options = bntm_in_get_unit_options();
+    return array_key_exists($unit, $options) ? $unit : 'pcs';
+}
+
+function bntm_in_format_quantity($quantity, $unit) {
+    return $quantity . ' ' . $unit;
+}
+
+function bntm_in_maybe_upgrade_schema() {
+    global $wpdb;
+
+    $products_table = $wpdb->prefix . 'in_products';
+    $column = $wpdb->get_var("SHOW COLUMNS FROM {$products_table} LIKE 'unit_label'");
+
+    if (!$column) {
+        $wpdb->query("ALTER TABLE {$products_table} ADD COLUMN unit_label VARCHAR(50) DEFAULT 'pcs' AFTER inventory_type");
+    }
+}
+
+function bntm_in_get_material_where_clause() {
+    $types = array_map('esc_sql', bntm_in_get_material_types());
+    $quoted = array_map(function($type) {
+        return "'" . $type . "'";
+    }, $types);
+
+    return "inventory_type IN (" . implode(', ', $quoted) . ")";
+}
 
 /* ---------- MAIN INVENTORY SHORTCODE ---------- */
 function bntm_in_shortcode_dashboard() {
@@ -134,6 +194,7 @@ function bntm_in_shortcode_dashboard() {
         <div class="bntm-tabs">
             <a href="?tab=overview" class="bntm-tab <?php echo $active_tab === 'overview' ? 'active' : ''; ?>">Overview</a>
             <a href="?tab=products" class="bntm-tab <?php echo $active_tab === 'products' ? 'active' : ''; ?>">Products</a>
+            <a href="?tab=materials" class="bntm-tab <?php echo $active_tab === 'materials' ? 'active' : ''; ?>">Materials</a>
             <a href="?tab=batches" class="bntm-tab <?php echo $active_tab === 'batches' ? 'active' : ''; ?>">Batches</a>
             <?php if (bntm_is_module_enabled('fn') && bntm_is_module_visible('fn')): ?>
             <a href="?tab=import" class="bntm-tab <?php echo $active_tab === 'import' ? 'active' : ''; ?>">Import to Finance</a>
@@ -146,6 +207,8 @@ function bntm_in_shortcode_dashboard() {
                 <?php echo in_overview_tab($business_id); ?>
             <?php elseif ($active_tab === 'products'): ?>
                 <?php echo in_products_tab($business_id); ?>
+            <?php elseif ($active_tab === 'materials'): ?>
+                <?php echo in_materials_tab($business_id); ?>
             <?php elseif ($active_tab === 'batches'): ?>
                 <?php echo in_batches_tab($business_id); ?>
             <?php elseif ($active_tab === 'import'): ?>
@@ -531,11 +594,13 @@ function in_overview_tab($business_id) {
     }
     
     .in-stat-number {
-        font-size: 28px;
+       font-size: 18px;
         font-weight: 700;
         color: #111827;
         margin: 0;
-        line-height: 1;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+        word-break: break-word;
     }
     
     .in-stat-content small {
@@ -676,10 +741,7 @@ function in_overview_tab($business_id) {
                                 precision: 0
                             },
                             title: {
-                                display: true,
-                                text: 'Stock Quantity',
-                                color: '#374151',
-                                font: { size: 12, weight: '600' }
+                                display: false
                             }
                         },
                         y: {
@@ -826,6 +888,7 @@ function in_products_tab($business_id) {
     $product_limit = isset($limits[$table]) ? $limits[$table] : 0;
     $limit_text = $product_limit > 0 ? " ({$current_products}/{$product_limit})" : " ({$current_products})";
     $limit_reached = $product_limit > 0 && $current_products >= $product_limit;
+    $unit_options = bntm_in_get_unit_options();
 
     ob_start();
     ?>
@@ -860,10 +923,16 @@ function in_products_tab($business_id) {
                     
                     <div class="bntm-upload-area" id="product-upload-area">
                         <input type="file" id="product-image-upload" accept="image/*" style="display: none;">
-                        <button type="button" class="bntm-btn bntm-btn-secondary" id="product-upload-btn">
+                        <div class="in-upload-prompt">
+                            <div class="in-upload-icon" aria-hidden="true">+</div>
+                            <div>
+                                <strong>Choose Product Image</strong>
+                                <p>Upload a cover photo or drag and drop it here.</p>
+                            </div>
+                        </div>
+                        <button type="button" class="bntm-btn bntm-btn-primary in-upload-button" id="product-upload-btn">
                             Choose Image
                         </button>
-                        <p style="margin: 10px 0; color: #6b7280;">or drag and drop here</p>
                         <small>Recommended: JPG or PNG, max 2MB</small>
                     </div>
                     
@@ -875,11 +944,20 @@ function in_products_tab($business_id) {
                         <label>Inventory Type *</label>
                         <select name="inventory_type" required>
                             <option value="Product">Product</option>
+                            <option value="Material">Material</option>
                             <option value="Raw Material">Raw Material</option>
                             <option value="Finished Goods">Finished Goods</option>
                             <option value="Supplies">Supplies</option>
                             <option value="Equipment">Equipment</option>
                             <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Unit *</label>
+                        <select name="unit_label" required>
+                            <?php foreach ($unit_options as $value => $label): ?>
+                                <option value="<?php echo esc_attr($value); ?>" <?php selected($value, 'pcs'); ?>><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="bntm-form-group">
@@ -984,10 +1062,16 @@ function in_products_tab($business_id) {
                     
                     <div class="bntm-upload-area" id="edit-product-upload-area">
                         <input type="file" id="edit-product-image-upload" accept="image/*" style="display: none;">
-                        <button type="button" class="bntm-btn bntm-btn-secondary" id="edit-product-upload-btn">
+                        <div class="in-upload-prompt">
+                            <div class="in-upload-icon" aria-hidden="true">+</div>
+                            <div>
+                                <strong>Choose Product Image</strong>
+                                <p>Replace the current photo or drag and drop a new one here.</p>
+                            </div>
+                        </div>
+                        <button type="button" class="bntm-btn bntm-btn-primary in-upload-button" id="edit-product-upload-btn">
                             Choose Image
                         </button>
-                        <p style="margin: 10px 0; color: #6b7280;">or drag and drop here</p>
                         <small>Recommended: JPG or PNG, max 2MB</small>
                     </div>
                     
@@ -999,11 +1083,20 @@ function in_products_tab($business_id) {
                         <label>Inventory Type *</label>
                         <select id="edit-inventory-type" name="inventory_type" required>
                             <option value="Product">Product</option>
+                            <option value="Material">Material</option>
                             <option value="Raw Material">Raw Material</option>
                             <option value="Finished Goods">Finished Goods</option>
                             <option value="Supplies">Supplies</option>
                             <option value="Equipment">Equipment</option>
                             <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Unit *</label>
+                        <select id="edit-unit-label" name="unit_label" required>
+                            <?php foreach ($unit_options as $value => $label): ?>
+                                <option value="<?php echo esc_attr($value); ?>" <?php selected($value, 'pcs'); ?>><?php echo esc_html($label); ?></option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="bntm-form-group">
@@ -1092,6 +1185,7 @@ function in_products_tab($business_id) {
                            <th>Image</th>
                            <th>Type</th>
                            <th>Name</th>
+                           <th>Unit</th>
                            <th>SKU</th>
                            <th>Barcode</th>
                            <th>Cost</th>
@@ -1114,12 +1208,15 @@ function in_products_tab($business_id) {
                                </td>
                                <td><?php echo esc_html($product->inventory_type); ?></td>
                                <td><?php echo esc_html($product->name); ?></td>
+                               <td><?php echo esc_html($product->unit_label ?: 'pcs'); ?></td>
                                <td><?php echo esc_html($product->sku); ?></td>
                                <td><?php echo esc_html($product->barcode ?: 'N/A'); ?></td>
                                <td>₱<?php echo number_format($product->cost_per_unit, 2); ?></td>
                                <td>₱<?php echo number_format($product->selling_price, 2); ?></td>
                                <td><?php echo esc_html($product->stock_quantity); ?></td>
                                <td><?php echo esc_html($product->reorder_level); ?></td>
+                               <td><?php echo esc_html(bntm_in_format_quantity($product->stock_quantity, $product->unit_label ?: 'pcs')); ?></td>
+                               <td><?php echo esc_html(bntm_in_format_quantity($product->reorder_level, $product->unit_label ?: 'pcs')); ?></td>
                                <td>
                                    <?php if ($product->stock_quantity == 0): ?>
                                        <span style="color: #991b1b; font-weight: 500;">Out of Stock</span>
@@ -1136,6 +1233,7 @@ function in_products_tab($business_id) {
                                        data-sku="<?php echo esc_attr($product->sku); ?>"
                                        data-barcode="<?php echo esc_attr($product->barcode); ?>"
                                        data-type="<?php echo esc_attr($product->inventory_type); ?>"
+                                       data-unit="<?php echo esc_attr($product->unit_label ?: 'pcs'); ?>"
                                        data-cost="<?php echo $product->cost_per_unit; ?>"
                                        data-price="<?php echo $product->selling_price; ?>"
                                        data-stock="<?php echo $product->stock_quantity; ?>"
@@ -1186,6 +1284,42 @@ function in_products_tab($business_id) {
         border-color: #3b82f6;
         background: #eff6ff;
     }
+    .in-upload-prompt {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        margin-bottom: 14px;
+        text-align: left;
+    }
+    .in-upload-prompt strong {
+        display: block;
+        font-size: 15px;
+        color: #111827;
+        margin-bottom: 4px;
+    }
+    .in-upload-prompt p {
+        margin: 0;
+        color: #6b7280;
+        font-size: 13px;
+    }
+    .in-upload-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 12px;
+        background: #dbeafe;
+        color: #1d4ed8;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+    .in-upload-button {
+        min-width: 180px;
+        margin-bottom: 10px;
+    }
     .in-product-image-preview {
         position: relative;
         display: inline-block;
@@ -1217,6 +1351,15 @@ function in_products_tab($business_id) {
     }
     .bntm-btn-remove-logo:hover {
         background: #dc2626;
+    }
+    @media (max-width: 640px) {
+        .in-upload-prompt {
+            flex-direction: column;
+            text-align: center;
+        }
+        .in-upload-button {
+            width: 100%;
+        }
     }
     </style>
 <script>
@@ -1540,6 +1683,7 @@ function in_products_tab($business_id) {
             document.getElementById('edit-sku').value = data.sku;
             document.getElementById('edit-barcode').value = data.barcode || '';
             document.getElementById('edit-inventory-type').value = data.type;
+            document.getElementById('edit-unit-label').value = data.unit || 'pcs';
             document.getElementById('edit-cost-per-unit').value = data.cost;
             document.getElementById('edit-selling-price').value = data.price;
             document.getElementById('edit-current-stock').value = data.stock;
@@ -1631,6 +1775,332 @@ function in_products_tab($business_id) {
     <?php
     return ob_get_clean();
 }
+
+function in_materials_tab($business_id) {
+    global $wpdb;
+    $products_table = $wpdb->prefix . 'in_products';
+    $batches_table = $wpdb->prefix . 'in_batches';
+    $materials_where = bntm_in_get_material_where_clause();
+
+    $materials = $wpdb->get_results(
+        "SELECT * FROM $products_table WHERE $materials_where ORDER BY name ASC"
+    );
+
+    $material_history = $wpdb->get_results(
+        "SELECT b.*, p.name as product_name, p.inventory_type, p.unit_label
+        FROM $batches_table b
+        LEFT JOIN $products_table p ON b.product_id = p.id
+        WHERE $materials_where
+        ORDER BY b.created_at DESC
+        LIMIT 25"
+    );
+
+    $nonce = wp_create_nonce('in_nonce');
+
+    ob_start();
+    ?>
+    <script>
+    var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
+    </script>
+
+    <div class="bntm-form-section">
+        <h3>Materials Stock Movement</h3>
+        <p style="margin-top: 0; color: #6b7280;">Track raw materials and supplies separately from finished products. Use the quantity option to add stock, deduct used stock, or set the exact on-hand amount.</p>
+
+        <?php if (empty($materials)): ?>
+            <div class="bntm-notice bntm-notice-info">
+                No materials found yet. Create items in the Products tab and set their type to <strong>Material</strong>, <strong>Raw Material</strong>, or <strong>Supplies</strong>.
+            </div>
+        <?php else: ?>
+            <form id="in-material-movement-form" class="bntm-form">
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Material *</label>
+                        <select name="product_id" id="material-product-select" required>
+                            <option value="">Select Material</option>
+                            <?php foreach ($materials as $material): ?>
+                                <option
+                                    value="<?php echo esc_attr($material->id); ?>"
+                                    data-stock="<?php echo esc_attr($material->stock_quantity); ?>"
+                                    data-cost="<?php echo esc_attr($material->cost_per_unit); ?>"
+                                    data-unit="<?php echo esc_attr($material->unit_label ?: 'pcs'); ?>"
+                                    data-type="<?php echo esc_attr($material->inventory_type); ?>">
+                                    <?php echo esc_html($material->name); ?> (<?php echo esc_html($material->inventory_type); ?>, Stock: <?php echo esc_html(bntm_in_format_quantity($material->stock_quantity, $material->unit_label ?: 'pcs')); ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Quantity Option *</label>
+                        <select name="movement_mode" id="material-movement-mode" required>
+                            <option value="add">Add Stock</option>
+                            <option value="use">Use / Deduct Stock</option>
+                            <option value="set">Set Exact Stock</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Quantity *</label>
+                        <input type="number" name="quantity" id="material-quantity" min="0" step="1" required>
+                        <small id="material-quantity-hint">Enter the quantity to add to stock.</small>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Reference</label>
+                        <input type="text" name="reference_number" placeholder="e.g., PO-001, Production Run, Waste Log">
+                        <small>Optional reference for your internal tracking.</small>
+                    </div>
+                </div>
+
+                <div class="bntm-form-row">
+                    <div class="bntm-form-group">
+                        <label>Date</label>
+                        <input type="date" name="transaction_date" value="<?php echo esc_attr(date('Y-m-d')); ?>" required>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Cost Per Unit</label>
+                        <input type="number" name="cost_per_unit" id="material-cost-per-unit" step="0.01" min="0">
+                        <small id="material-cost-hint">Product default cost will be used.</small>
+                    </div>
+                </div>
+
+                <div class="in-material-summary">
+                    <div>
+                        <strong>Current Stock:</strong> <span id="material-current-stock">0 pcs</span>
+                    </div>
+                    <div>
+                        <strong>Resulting Stock:</strong> <span id="material-result-stock">0 pcs</span>
+                    </div>
+                    <div>
+                        <strong>Movement Cost:</strong> ₱<span id="material-total-cost">0.00</span>
+                    </div>
+                </div>
+
+                <div class="bntm-form-group" style="margin-top: 15px;">
+                    <label>Notes</label>
+                    <textarea name="notes" rows="3" placeholder="Explain why this material moved, such as production use, spoilage, receiving, or adjustment."></textarea>
+                </div>
+
+                <button type="submit" class="bntm-btn-primary">Save Material Movement</button>
+            </form>
+            <div id="material-movement-message"></div>
+        <?php endif; ?>
+    </div>
+
+    <div class="bntm-form-section">
+        <h3>Materials Inventory (<?php echo count($materials); ?>)</h3>
+        <?php if (empty($materials)): ?>
+            <p>No materials to show yet.</p>
+        <?php else: ?>
+            <div class="bntm-table-wrapper">
+                <table class="bntm-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Name</th>
+                            <th>Unit</th>
+                            <th>SKU</th>
+                            <th>Stock</th>
+                            <th>Reorder Level</th>
+                            <th>Cost/Unit</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($materials as $material): ?>
+                            <tr>
+                                <td><?php echo esc_html($material->inventory_type); ?></td>
+                                <td><?php echo esc_html($material->name); ?></td>
+                                <td><?php echo esc_html($material->unit_label ?: 'pcs'); ?></td>
+                                <td><?php echo esc_html($material->sku ?: 'N/A'); ?></td>
+                                <td><?php echo esc_html(bntm_in_format_quantity($material->stock_quantity, $material->unit_label ?: 'pcs')); ?></td>
+                                <td><?php echo esc_html(bntm_in_format_quantity($material->reorder_level, $material->unit_label ?: 'pcs')); ?></td>
+                                <td>₱<?php echo number_format((float) $material->cost_per_unit, 2); ?></td>
+                                <td>
+                                    <?php if ((int) $material->stock_quantity === 0): ?>
+                                        <span style="color: #991b1b; font-weight: 600;">Out of Stock</span>
+                                    <?php elseif ((int) $material->stock_quantity <= (int) $material->reorder_level): ?>
+                                        <span style="color: #dc2626; font-weight: 600;">Low Stock</span>
+                                    <?php else: ?>
+                                        <span style="color: #059669; font-weight: 600;">Healthy</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <div class="bntm-form-section">
+        <h3>Recent Material Movements</h3>
+        <?php if (empty($material_history)): ?>
+            <p>No material movements recorded yet.</p>
+        <?php else: ?>
+            <div class="bntm-table-wrapper">
+                <table class="bntm-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Material</th>
+                            <th>Type</th>
+                            <th>Movement</th>
+                            <th>Qty</th>
+                            <th>Unit</th>
+                            <th>Reference</th>
+                            <th>Total Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($material_history as $row): ?>
+                            <tr>
+                                <td><?php echo esc_html(date('M d, Y', strtotime($row->manufacture_date ?: $row->created_at))); ?></td>
+                                <td><?php echo esc_html($row->product_name); ?></td>
+                                <td><?php echo esc_html($row->inventory_type); ?></td>
+                                <td>
+                                    <?php if ($row->type === 'stock_in'): ?>
+                                        <span style="color: #059669; font-weight: 600;">Added</span>
+                                    <?php else: ?>
+                                        <span style="color: #dc2626; font-weight: 600;">Deducted</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?php echo esc_html($row->quantity); ?></td>
+                                <td><?php echo esc_html($row->unit_label ?: 'pcs'); ?></td>
+                                <td><?php echo esc_html($row->reference_number ?: $row->batch_code); ?></td>
+                                <td>₱<?php echo number_format((float) $row->total_cost, 2); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <style>
+    .in-material-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        padding: 16px;
+        border-radius: 10px;
+        background: #eff6ff;
+        color: #1e3a8a;
+        margin-top: 6px;
+    }
+    .in-material-summary strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    </style>
+
+    <?php if (!empty($materials)): ?>
+    <script>
+    (function() {
+        const form = document.getElementById('in-material-movement-form');
+        if (!form) return;
+
+        const materialSelect = document.getElementById('material-product-select');
+        const movementMode = document.getElementById('material-movement-mode');
+        const quantityInput = document.getElementById('material-quantity');
+        const costInput = document.getElementById('material-cost-per-unit');
+        const quantityHint = document.getElementById('material-quantity-hint');
+        const costHint = document.getElementById('material-cost-hint');
+        const currentStockEl = document.getElementById('material-current-stock');
+        const resultStockEl = document.getElementById('material-result-stock');
+        const totalCostEl = document.getElementById('material-total-cost');
+        const messageEl = document.getElementById('material-movement-message');
+
+        function getSelectedOption() {
+            return materialSelect.options[materialSelect.selectedIndex];
+        }
+
+        function syncMaterialSummary() {
+            const option = getSelectedOption();
+            const currentStock = parseInt(option?.getAttribute('data-stock') || '0', 10);
+            const defaultCost = parseFloat(option?.getAttribute('data-cost') || '0');
+            const unit = option?.getAttribute('data-unit') || 'pcs';
+            const quantity = parseInt(quantityInput.value || '0', 10);
+            const mode = movementMode.value;
+
+            if (!costInput.dataset.userEdited) {
+                costInput.value = defaultCost.toFixed(2);
+            }
+
+            let resultingStock = currentStock;
+            if (mode === 'add') resultingStock = currentStock + quantity;
+            if (mode === 'use') resultingStock = Math.max(0, currentStock - quantity);
+            if (mode === 'set') resultingStock = quantity;
+
+            currentStockEl.textContent = currentStock + ' ' + unit;
+            resultStockEl.textContent = resultingStock + ' ' + unit;
+            totalCostEl.textContent = ((parseFloat(costInput.value || '0') || 0) * quantity).toFixed(2);
+
+            if (mode === 'add') quantityHint.textContent = 'Enter the quantity to add to stock.';
+            if (mode === 'use') quantityHint.textContent = 'Enter the quantity to deduct from available stock.';
+            if (mode === 'set') quantityHint.textContent = 'Enter the exact stock count you want after this adjustment.';
+
+            costHint.textContent = 'Default cost for this item: ₱' + defaultCost.toFixed(2);
+        }
+
+        materialSelect.addEventListener('change', function() {
+            costInput.dataset.userEdited = '';
+            syncMaterialSummary();
+        });
+
+        movementMode.addEventListener('change', syncMaterialSummary);
+        quantityInput.addEventListener('input', syncMaterialSummary);
+        costInput.addEventListener('input', function() {
+            costInput.dataset.userEdited = '1';
+            syncMaterialSummary();
+        });
+
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(form);
+            formData.append('action', 'in_record_material_movement');
+            formData.append('nonce', '<?php echo esc_js($nonce); ?>');
+
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Saving...';
+
+            fetch(ajaxurl, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(json => {
+                if (json.success) {
+                    messageEl.innerHTML = '<div class="bntm-notice bntm-notice-success">' + json.data.message + '</div>';
+                    setTimeout(() => location.reload(), 1200);
+                    return;
+                }
+
+                messageEl.innerHTML = '<div class="bntm-notice bntm-notice-error">' + json.data.message + '</div>';
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            })
+            .catch(error => {
+                messageEl.innerHTML = '<div class="bntm-notice bntm-notice-error">Error: ' + error.message + '</div>';
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            });
+        });
+
+        syncMaterialSummary();
+    })();
+    </script>
+    <?php endif; ?>
+    <?php
+    return ob_get_clean();
+}
 function bntm_ajax_in_add_product() {
     check_ajax_referer('in_nonce', 'nonce');
     
@@ -1655,6 +2125,7 @@ function bntm_ajax_in_add_product() {
     $sku = sanitize_text_field($_POST['sku']);
     $barcode = sanitize_text_field($_POST['barcode']);
     $inventory_type = sanitize_text_field($_POST['inventory_type']);
+    $unit_label = bntm_in_normalize_unit_label($_POST['unit_label'] ?? 'pcs');
     $cost_per_unit = floatval($_POST['cost_per_unit']);
     $selling_price = floatval($_POST['selling_price']);
     $initial_stock = intval($_POST['initial_stock']);
@@ -1690,13 +2161,14 @@ function bntm_ajax_in_add_product() {
         'sku' => $sku,
         'barcode' => $barcode,
         'inventory_type' => $inventory_type,
+        'unit_label' => $unit_label,
         'cost_per_unit' => $cost_per_unit,
         'selling_price' => $selling_price,
         'stock_quantity' => $initial_stock,
         'reorder_level' => $reorder_level,
         'description' => $description,
         'image' => $product_image
-    ], ['%s', '%d', '%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s']);
+    ], ['%s', '%d', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s']);
 
     if ($result) {
         wp_send_json_success(['message' => 'Product added successfully!']);
@@ -1790,6 +2262,7 @@ function bntm_ajax_in_update_product() {
         'sku' => sanitize_text_field($_POST['sku']),
         'barcode' => $barcode,
         'inventory_type' => sanitize_text_field($_POST['inventory_type']),
+        'unit_label' => bntm_in_normalize_unit_label($_POST['unit_label'] ?? 'pcs'),
         'cost_per_unit' => floatval($_POST['cost_per_unit']),
         'selling_price' => floatval($_POST['selling_price']),
         'stock_quantity' => $new_stock,
@@ -1802,7 +2275,7 @@ function bntm_ajax_in_update_product() {
         $table,
         $update_data,
         ['id' => $product_id],
-        ['%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s'],
+        ['%s', '%s', '%s', '%s', '%s', '%f', '%f', '%d', '%d', '%s', '%s'],
         ['%d']
     );
 
@@ -1851,7 +2324,7 @@ function in_batches_tab($business_id) {
     ));
     
     $batches = $wpdb->get_results($wpdb->prepare(
-        "SELECT b.*, p.name as product_name, p.cost_per_unit as product_cost
+        "SELECT b.*, p.name as product_name, p.cost_per_unit as product_cost, p.unit_label
         FROM $batches_table b
         LEFT JOIN $products_table p ON b.product_id = p.id
         ORDER BY b.created_at DESC",
@@ -1876,8 +2349,9 @@ function in_batches_tab($business_id) {
                         <option value="">Select Product</option>
                         <?php foreach ($products as $product): ?>
                             <option value="<?php echo $product->id; ?>" 
-                                    data-cost="<?php echo $product->cost_per_unit; ?>">
-                                <?php echo esc_html($product->name); ?> (Stock: <?php echo $product->stock_quantity; ?>)
+                                    data-cost="<?php echo $product->cost_per_unit; ?>"
+                                    data-unit="<?php echo esc_attr($product->unit_label ?: 'pcs'); ?>">
+                                <?php echo esc_html($product->name); ?> (Stock: <?php echo esc_html(bntm_in_format_quantity($product->stock_quantity, $product->unit_label ?: 'pcs')); ?>)
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -1949,6 +2423,7 @@ function in_batches_tab($business_id) {
                            <th>Reference</th>
                            <th>Product</th>
                            <th>Quantity</th>
+                           <th>Unit</th>
                            <th>Cost/Unit</th>
                            <th>Total Cost</th>
                            <th>Actions</th>
@@ -1968,6 +2443,7 @@ function in_batches_tab($business_id) {
                                <td><?php echo esc_html($batch->reference_number ?: $batch->batch_code); ?></td>
                                <td><?php echo esc_html($batch->product_name); ?></td>
                                <td><?php echo esc_html($batch->quantity); ?></td>
+                               <td><?php echo esc_html($batch->unit_label ?: 'pcs'); ?></td>
                                <td>₱<?php echo number_format($batch->cost_per_unit, 2); ?></td>
                                <td>₱<?php echo number_format($batch->total_cost, 2); ?></td>
                                <td>
@@ -1976,6 +2452,7 @@ function in_batches_tab($business_id) {
                                        'reference' => $batch->reference_number ?: $batch->batch_code,
                                        'product' => $batch->product_name,
                                        'quantity' => $batch->quantity,
+                                       'unit' => $batch->unit_label ?: 'pcs',
                                        'cost_per_unit' => $batch->cost_per_unit,
                                        'total_cost' => $batch->total_cost,
                                        'notes' => $batch->notes,
@@ -2035,8 +2512,10 @@ function in_batches_tab($business_id) {
         productSelect.addEventListener('change', function() {
             const selectedOption = this.options[this.selectedIndex];
             const productCost = selectedOption.getAttribute('data-cost') || '0';
+            const productUnit = selectedOption.getAttribute('data-unit') || 'pcs';
             
             costInput.value = productCost;
+            document.getElementById('batch-quantity').placeholder = 'Enter quantity in ' + productUnit;
             costHint.textContent = 'Using product default cost: ₱' + parseFloat(productCost).toFixed(2);
             
             updateTotalCost();
@@ -2105,7 +2584,7 @@ function in_batches_tab($business_id) {
                         <p><strong>Type:</strong> ${typeLabel}</p>
                         <p><strong>Reference Number:</strong> ${details.reference}</p>
                         <p><strong>Product:</strong> ${details.product}</p>
-                        <p><strong>Quantity:</strong> ${details.quantity} units</p>
+                        <p><strong>Quantity:</strong> ${details.quantity} ${details.unit || 'pcs'}</p>
                         <hr style="margin: 15px 0; border: none; border-top: 1px solid #e5e7eb;">
                         <p><strong>Cost Per Unit:</strong> ₱${parseFloat(details.cost_per_unit).toFixed(2)}</p>
                         <p style="font-size: 16px;"><strong>Total Cost:</strong> ₱${parseFloat(details.total_cost).toFixed(2)}</p>
@@ -2314,6 +2793,141 @@ function bntm_ajax_in_delete_batch() {
         wp_send_json_error(['message' => 'Failed to delete transaction. Please try again.']);
     }
 }
+
+function bntm_ajax_in_record_material_movement() {
+    check_ajax_referer('in_nonce', 'nonce');
+
+    if (!is_user_logged_in()) {
+        wp_send_json_error(['message' => 'Unauthorized access.']);
+    }
+
+    global $wpdb;
+    $products_table = $wpdb->prefix . 'in_products';
+    $batches_table = $wpdb->prefix . 'in_batches';
+    $business_id = get_current_user_id();
+    $material_where = bntm_in_get_material_where_clause();
+
+    $product_id = intval($_POST['product_id'] ?? 0);
+    $movement_mode = sanitize_text_field($_POST['movement_mode'] ?? 'add');
+    $quantity = intval($_POST['quantity'] ?? 0);
+    $reference_number = sanitize_text_field($_POST['reference_number'] ?? '');
+    $transaction_date = sanitize_text_field($_POST['transaction_date'] ?? date('Y-m-d'));
+    $cost_per_unit = floatval($_POST['cost_per_unit'] ?? 0);
+    $notes = sanitize_textarea_field($_POST['notes'] ?? '');
+
+    if ($product_id <= 0) {
+        wp_send_json_error(['message' => 'Please select a material.']);
+    }
+
+    if ($quantity < 0) {
+        wp_send_json_error(['message' => 'Quantity cannot be negative.']);
+    }
+
+    $material = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM $products_table WHERE id = %d AND $material_where",
+            $product_id
+        )
+    );
+
+    if (!$material) {
+        wp_send_json_error(['message' => 'Material not found.']);
+    }
+
+    $current_stock = (int) $material->stock_quantity;
+    $batch_type = 'stock_in';
+    $movement_quantity = $quantity;
+    $resulting_stock = $current_stock;
+    $movement_label = 'added';
+
+    if ($movement_mode === 'use') {
+        if ($quantity <= 0) {
+            wp_send_json_error(['message' => 'Enter the quantity to deduct.']);
+        }
+        if ($current_stock < $quantity) {
+            wp_send_json_error(['message' => 'Insufficient stock. Available: ' . $current_stock]);
+        }
+
+        $batch_type = 'stock_out';
+        $movement_quantity = $quantity;
+        $resulting_stock = $current_stock - $quantity;
+        $movement_label = 'deducted';
+    } elseif ($movement_mode === 'set') {
+        $difference = $quantity - $current_stock;
+
+        if ($difference === 0) {
+            wp_send_json_error(['message' => 'The exact stock is already ' . $current_stock . '. No movement was recorded.']);
+        }
+
+        $batch_type = $difference > 0 ? 'stock_in' : 'stock_out';
+        $movement_quantity = abs($difference);
+        $resulting_stock = $quantity;
+        $movement_label = 'adjusted';
+    } else {
+        if ($quantity <= 0) {
+            wp_send_json_error(['message' => 'Enter the quantity to add.']);
+        }
+
+        $batch_type = 'stock_in';
+        $movement_quantity = $quantity;
+        $resulting_stock = $current_stock + $quantity;
+        $movement_label = 'added';
+    }
+
+    if ($cost_per_unit <= 0) {
+        $cost_per_unit = (float) $material->cost_per_unit;
+    }
+
+    if ($reference_number === '') {
+        $reference_number = strtoupper($batch_type) . '-MAT-' . date('Ymd') . '-' . substr(md5(uniqid('', true)), 0, 6);
+    }
+
+    $note_prefix = '';
+    if ($movement_mode === 'set') {
+        $note_prefix = "Exact stock set to {$quantity} from {$current_stock}.";
+    } elseif ($movement_mode === 'use') {
+        $note_prefix = "Material usage recorded: {$movement_quantity} deducted.";
+    } else {
+        $note_prefix = "Material replenishment recorded: {$movement_quantity} added.";
+    }
+
+    $final_notes = trim($note_prefix . ' ' . $notes);
+    $total_cost = $movement_quantity * $cost_per_unit;
+
+    $inserted = $wpdb->insert($batches_table, [
+        'rand_id' => bntm_rand_id(),
+        'business_id' => $business_id,
+        'product_id' => $product_id,
+        'batch_code' => $reference_number,
+        'type' => $batch_type,
+        'quantity' => $movement_quantity,
+        'cost_per_unit' => $cost_per_unit,
+        'total_cost' => $total_cost,
+        'reference_number' => $reference_number,
+        'manufacture_date' => $transaction_date,
+        'notes' => $final_notes,
+    ], ['%s', '%d', '%d', '%s', '%s', '%d', '%f', '%f', '%s', '%s', '%s']);
+
+    if (!$inserted) {
+        wp_send_json_error(['message' => 'Failed to save material movement.']);
+    }
+
+    $updated = $wpdb->update(
+        $products_table,
+        ['stock_quantity' => $resulting_stock],
+        ['id' => $product_id, 'business_id' => $business_id],
+        ['%d'],
+        ['%d', '%d']
+    );
+
+    if ($updated === false) {
+        wp_send_json_error(['message' => 'Material movement was recorded but stock could not be updated.']);
+    }
+
+    wp_send_json_success([
+        'message' => 'Material stock ' . $movement_label . ' successfully. New stock: ' . $resulting_stock . '.'
+    ]);
+}
 function in_import_tab($business_id) {
     global $wpdb;
     $batches_table = $wpdb->prefix . 'in_batches';
@@ -2322,7 +2936,7 @@ function in_import_tab($business_id) {
     
     // Only show stock_in transactions with cost > 0
     $batches = $wpdb->get_results($wpdb->prepare("
-        SELECT b.*, p.name as product_name,
+        SELECT b.*, p.name as product_name, p.unit_label,
         (SELECT COUNT(*) FROM {$txn_table} WHERE reference_type='inventory_batch' AND reference_id=b.id) as is_imported
         FROM {$batches_table} b
         LEFT JOIN {$products_table} p ON b.product_id = p.id
@@ -2372,6 +2986,7 @@ function in_import_tab($business_id) {
                     <th>Reference</th>
                     <th>Product</th>
                     <th>Quantity</th>
+                    <th>Unit</th>
                     <th>Cost/Unit</th>
                     <th>Total Cost</th>
                     <th>Status</th>
@@ -2379,7 +2994,7 @@ function in_import_tab($business_id) {
             </thead>
             <tbody>
                 <?php if (empty($batches)): ?>
-                <tr><td colspan="8" style="text-align:center;">No stock-in transactions with costs found</td></tr>
+                <tr><td colspan="9" style="text-align:center;">No stock-in transactions with costs found</td></tr>
                 <?php else: foreach ($batches as $batch): ?>
                 <tr>
                     <td>
@@ -2390,13 +3005,15 @@ function in_import_tab($business_id) {
                                data-ref="<?php echo esc_attr($batch->reference_number ?: $batch->batch_code); ?>"
                                data-product="<?php echo esc_attr($batch->product_name); ?>"
                                data-qty="<?php echo $batch->quantity; ?>"
+                               data-unit="<?php echo esc_attr($batch->unit_label ?: 'pcs'); ?>"
                                data-cost="<?php echo $batch->cost_per_unit; ?>"
                                data-imported="<?php echo $batch->is_imported ? '1' : '0'; ?>">
                     </td>
                     <td><?php echo date('M d, Y', strtotime($batch->manufacture_date ?: $batch->created_at)); ?></td>
                     <td><?php echo esc_html($batch->reference_number ?: $batch->batch_code); ?></td>
                     <td><?php echo esc_html($batch->product_name); ?></td>
-                    <td><?php echo esc_html($batch->quantity); ?> units</td>
+                    <td><?php echo esc_html($batch->quantity); ?></td>
+                    <td><?php echo esc_html($batch->unit_label ?: 'pcs'); ?></td>
                     <td>₱<?php echo number_format($batch->cost_per_unit, 2); ?></td>
                     <td class="bntm-stat-expense">₱<?php echo number_format($batch->total_cost, 2); ?></td>
                     <td>
@@ -2480,6 +3097,7 @@ function in_import_tab($business_id) {
                 data.append('reference', cb.dataset.ref);
                 data.append('product', cb.dataset.product);
                 data.append('quantity', cb.dataset.qty);
+                data.append('unit_label', cb.dataset.unit || 'pcs');
                 data.append('cost_per_unit', cb.dataset.cost);
                 data.append('nonce', nonce);
                 
@@ -2654,6 +3272,7 @@ function bntm_ajax_in_import_batch_expense() {
     $reference = sanitize_text_field($_POST['reference']);
     $product = sanitize_text_field($_POST['product']);
     $quantity = sanitize_text_field($_POST['quantity']);
+    $unit_label = bntm_in_normalize_unit_label($_POST['unit_label'] ?? 'pcs');
     $cost_per_unit = sanitize_text_field($_POST['cost_per_unit']);
     
     // Check if already imported
@@ -2666,7 +3285,7 @@ function bntm_ajax_in_import_batch_expense() {
         wp_send_json_error(['message' => 'This stock purchase has already been imported.']);
     }
     
-    $notes = "Inventory Stock Purchase\nReference: {$reference}\nProduct: {$product}\nQuantity: {$quantity} units @ ₱{$cost_per_unit}";
+    $notes = "Inventory Stock Purchase\nReference: {$reference}\nProduct: {$product}\nQuantity: {$quantity} {$unit_label} @ ₱{$cost_per_unit}";
     
     $data = [
         'rand_id' => bntm_rand_id(),
@@ -2732,4 +3351,3 @@ function bntm_ajax_in_save_settings() {
     wp_send_json_success(['message' => 'Settings saved successfully!']);
 }
 add_action('wp_ajax_in_save_settings', 'bntm_ajax_in_save_settings');
-
