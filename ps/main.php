@@ -43,8 +43,6 @@ function bntm_ps_get_tables() {
             last_name VARCHAR(100) NOT NULL DEFAULT '',
             middle_name VARCHAR(100) NOT NULL DEFAULT '',
             address TEXT NOT NULL DEFAULT '',
-            city VARCHAR(100) NOT NULL DEFAULT '',
-            zip_code VARCHAR(20) NOT NULL DEFAULT '',
             contact_number VARCHAR(30) NOT NULL DEFAULT '',
             email VARCHAR(150) NOT NULL DEFAULT '',
             id_type VARCHAR(50) NOT NULL DEFAULT '',
@@ -88,9 +86,12 @@ function bntm_ps_get_tables() {
             business_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
             root_ticket VARCHAR(30) NOT NULL DEFAULT '',
             ticket_number VARCHAR(30) UNIQUE NOT NULL,
+            ticket_tag VARCHAR(100) NOT NULL DEFAULT '',
+            or_number VARCHAR(50) NOT NULL DEFAULT '',
             parent_loan_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
             customer_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
             collateral_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            branch VARCHAR(100) NOT NULL DEFAULT '',
             principal DECIMAL(12,2) NOT NULL DEFAULT 0,
             interest_rate DECIMAL(8,4) NOT NULL DEFAULT 0,
             service_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -114,7 +115,8 @@ function bntm_ps_get_tables() {
             INDEX idx_customer (customer_id),
             INDEX idx_status (status),
             INDEX idx_root (root_ticket),
-            INDEX idx_parent (parent_loan_id)
+            INDEX idx_parent (parent_loan_id),
+            INDEX idx_branch (branch)
         ) {$charset};",
 
         'ps_payments' => "CREATE TABLE {$prefix}ps_payments (
@@ -194,6 +196,8 @@ function bntm_ps_create_tables() {
 // ============================================================
 
 add_action('wp_ajax_ps_create_loan',              'bntm_ajax_ps_create_loan');
+add_action('wp_ajax_ps_get_loan_edit',            'bntm_ajax_ps_get_loan_edit');
+add_action('wp_ajax_ps_update_loan',              'bntm_ajax_ps_update_loan');
 add_action('wp_ajax_ps_renew_loan',               'bntm_ajax_ps_renew_loan');
 add_action('wp_ajax_ps_redeem_loan',              'bntm_ajax_ps_redeem_loan');
 add_action('wp_ajax_ps_forfeit_loan',             'bntm_ajax_ps_forfeit_loan');
@@ -237,12 +241,45 @@ function bntm_ps_get_business_id() {
     return (int) get_option('bntm_primary_business_id', 1);
 }
 
+function ps_user_can_manage_tickets(): bool {
+    $current_user = wp_get_current_user();
+    $is_wp_admin = current_user_can('manage_options');
+    $current_role = function_exists('bntm_get_user_role') ? bntm_get_user_role($current_user->ID) : '';
+    return $is_wp_admin || in_array($current_role, ['owner', 'manager'], true);
+}
+
+function ps_get_ticket_tags(): array {
+    $raw = (string) bntm_get_setting('ps_ticket_tags', '');
+    $tags = preg_split('/\r\n|\r|\n/', $raw);
+    $tags = array_map(static fn($tag) => trim((string) $tag), $tags ?: []);
+    $tags = array_values(array_unique(array_filter($tags, static fn($tag) => $tag !== '')));
+    return $tags;
+}
+
+function ps_normalize_ticket_tag(string $tag): string {
+    $tag = trim($tag);
+    if ($tag === '') return '';
+    return in_array($tag, ps_get_ticket_tags(), true) ? $tag : '';
+}
+
+function ps_ensure_ticket_tag_column(): void {
+    global $wpdb;
+    static $done = false;
+    if ($done) return;
+    $table = $wpdb->prefix . 'ps_loans';
+    $exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM {$table} LIKE %s", 'ticket_tag'));
+    if (!$exists) {
+        $wpdb->query("ALTER TABLE {$table} ADD ticket_tag VARCHAR(100) NOT NULL DEFAULT '' AFTER ticket_number");
+    }
+    $done = true;
+}
+
 function ps_auto_mark_overdue($business_id) {
     global $wpdb;
     $grace = (int)bntm_get_setting('ps_grace_period', '0');
     $wpdb->query($wpdb->prepare(
         "UPDATE {$wpdb->prefix}ps_loans SET status='overdue'
-         WHERE business_id=%d AND status IN ('active','renewed')
+         WHERE business_id=%d AND status='active'
          AND DATEDIFF(CURDATE(), due_date) > %d",
         $business_id, $grace
     ));
@@ -266,6 +303,9 @@ function ps_compute_interest_breakdown($loan) {
 
     $days_elapsed  = max(0, floor(($today - $loan_date) / 86400));
     $days_past_due = max(0, floor(($today - $due_date) / 86400));
+    $term_days      = max(0, floor(($due_date - $loan_date) / 86400));
+    $regular_days   = $term_days > 0 ? min($days_elapsed, $term_days) : $days_elapsed;
+    $effective_overdue = $days_past_due > $grace_days ? $days_past_due : 0;
 
     // --- Rates ---
     $monthly_rate = $rate / 100;  // Convert to decimal (3% = 0.03)
@@ -278,8 +318,8 @@ function ps_compute_interest_breakdown($loan) {
         // Still in grace period: no charge yet
         $regular_interest = 0;
     } else {
-        // Grace period ended: charge interest for ALL days elapsed
-        $regular_interest = $loan->principal * $daily_rate * $days_elapsed;
+        // Grace period ended: charge regular interest only up to the due date.
+        $regular_interest = $loan->principal * $daily_rate * $regular_days;
     }
 
     // --- Overdue Interest: accrues DAILY after due date, charged after grace ---
@@ -311,6 +351,7 @@ function ps_compute_interest_breakdown($loan) {
         'days_elapsed'        => $days_elapsed,
         'grace_days'          => $grace_days,
         'days_past_due'       => $days_past_due,
+        'effective_overdue'   => $effective_overdue,
         'daily_rate'          => round($daily_rate * 100, 4),  // As percentage for display
 
         'regular_interest'    => round($regular_interest, 2),
@@ -371,6 +412,15 @@ function ps_log_ticket_event($data) {
         ['rand_id' => bntm_rand_id()],
         $data
     ));
+}
+
+function ps_get_branches(): array {
+    $raw = (string) bntm_get_setting('ps_branches', '');
+    if (empty($raw)) {
+        return [];
+    }
+    $branches = preg_split('/\r\n|\r|\n/', $raw);
+    return array_filter(array_map('trim', $branches));
 }
 
 function ps_get_cash_denominations(): array {
@@ -479,6 +529,7 @@ function bntm_shortcode_ps() {
         return '<div class="bntm-notice">Please log in to access the Pawnshop Management System.</div>';
     }
     $business_id  = bntm_ps_get_business_id();
+    ps_ensure_ticket_tag_column();
     $active_tab   = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'overview';
     ps_auto_mark_overdue($business_id);
 
@@ -647,6 +698,8 @@ function bntm_shortcode_ps() {
 // RENDER ALL MODALS
 // ============================================================
 function ps_render_modals() {
+    $ticket_tags = ps_get_ticket_tags();
+    $next_ticket_number = ps_generate_ticket_number(bntm_ps_get_business_id());
     ob_start();
     ?>
 
@@ -681,6 +734,64 @@ function ps_render_modals() {
                 <button onclick="document.getElementById('ps-loan-detail-modal').style.display='none'" style="background:none;border:none;cursor:pointer;color:#6b7280;font-size:20px;">✕</button>
             </div>
             <div id="ps-loan-detail-body" style="padding:24px;"><div style="text-align:center;padding:40px;color:#9ca3af;">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ======== EDIT TICKET MODAL ======== -->
+    <div id="ps-edit-ticket-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99999;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 0;">
+        <div style="background:#fff;border-radius:12px;width:760px;max-width:95vw;box-shadow:0 25px 60px rgba(0,0,0,.35);margin:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid #e5e7eb;background:#f8fafc;">
+                <h3 style="margin:0;font-size:16px;font-weight:700;">Edit Pawn Ticket</h3>
+                <button onclick="document.getElementById('ps-edit-ticket-modal').style.display='none'" style="background:none;border:none;cursor:pointer;color:#6b7280;font-size:20px;">âœ•</button>
+            </div>
+            <form id="ps-edit-ticket-form" style="padding:24px;">
+                <input type="hidden" name="nonce" value="<?php echo wp_create_nonce('ps_loan_nonce'); ?>">
+                <input type="hidden" name="loan_id" id="edit-loan-id">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                    <div class="bntm-form-group">
+                        <label>Ticket Number</label>
+                        <input type="text" name="ticket_number" id="edit-ticket-number" required style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();">
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Ticket Tag</label>
+                        <select name="ticket_tag" id="edit-ticket-tag">
+                            <option value="">No Tag</option>
+                            <?php foreach ($ticket_tags as $tag): ?>
+                                <option value="<?php echo esc_attr($tag); ?>"><?php echo esc_html($tag); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group"><label>Principal</label><input type="number" name="principal" id="edit-principal" step=".01" required></div>
+                    <div class="bntm-form-group"><label>Interest Rate (%/month)</label><input type="number" name="interest_rate" id="edit-interest-rate" step=".01" required></div>
+                    <div class="bntm-form-group"><label>Service Fee</label><input type="number" name="service_fee" id="edit-service-fee" step=".01"></div>
+                    <div class="bntm-form-group"><label>Penalty Rate (%/month)</label><input type="number" name="penalty_rate" id="edit-penalty-rate" step=".01"></div>
+                    <div class="bntm-form-group"><label>Loan Date</label><input type="date" name="loan_date" id="edit-loan-date" required></div>
+                    <div class="bntm-form-group"><label>Due Date</label><input type="date" name="due_date" id="edit-due-date" required></div>
+                    <div class="bntm-form-group"><label>Term Months</label><input type="number" name="term_months" id="edit-term-months" min="1"></div>
+                    <div class="bntm-form-group">
+                        <label>Status</label>
+                        <select name="status" id="edit-status">
+                            <option value="active">Active</option><option value="overdue">Overdue</option><option value="renewed">Renewed</option><option value="redeemed">Redeemed</option><option value="forfeited">Forfeited</option>
+                        </select>
+                    </div>
+                    <div class="bntm-form-group">
+                        <label>Payment Method</label>
+                        <select name="payment_method" id="edit-payment-method"><option value="cash">Cash</option><option value="gcash">GCash</option><option value="bank_transfer">Bank Transfer</option></select>
+                    </div>
+                    <div class="bntm-form-group"><label>Appraised Value</label><input type="number" name="appraised_value" id="edit-appraised-value" step=".01"></div>
+                    <div class="bntm-form-group" style="grid-column:1/-1;"><label>Item Description</label><textarea name="collateral_description" id="edit-collateral-description" rows="2"></textarea></div>
+                    <div class="bntm-form-group"><label>Condition</label><select name="item_condition" id="edit-item-condition"><option value="excellent">Excellent</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></div>
+                    <div class="bntm-form-group"><label>Karat</label><input type="text" name="karat" id="edit-karat"></div>
+                    <div class="bntm-form-group"><label>Weight (grams)</label><input type="number" name="weight_grams" id="edit-weight-grams" step=".0001"></div>
+                    <div class="bntm-form-group"><label>Serial Number</label><input type="text" name="serial_number" id="edit-serial-number"></div>
+                    <div class="bntm-form-group" style="grid-column:1/-1;"><label>Notes</label><textarea name="notes" id="edit-notes" rows="2"></textarea></div>
+                </div>
+                <div id="edit-ticket-message" style="margin-top:10px;"></div>
+                <div style="display:flex;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid #f3f4f6;">
+                    <button type="submit" id="edit-ticket-submit-btn" style="flex:1;background:#1e40af;color:#fff;border:none;border-radius:8px;padding:10px;font-size:14px;font-weight:700;cursor:pointer;">Save Changes</button>
+                    <button type="button" onclick="document.getElementById('ps-edit-ticket-modal').style.display='none'" style="background:#f3f4f6;color:#374151;border:none;border-radius:8px;padding:10px 18px;font-size:13px;cursor:pointer;">Cancel</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -732,7 +843,7 @@ function ps_render_modals() {
                     <input type="hidden" name="nonce" value="<?php echo wp_create_nonce('ps_create_nonce'); ?>">
                     <input type="hidden" name="customer_id" id="cl-form-customer-id">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-                        <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;border-left:4px solid #1e40af;">
+                        <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;">
                             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#1e40af;margin-bottom:4px;">Collateral</div>
                         </div>
                     
@@ -753,18 +864,36 @@ function ps_render_modals() {
                             <select name="collateral_karat"><option value="">N/A</option><option value="10k">10k</option><option value="14k">14k</option><option value="18k">18k</option><option value="21k">21k</option><option value="22k">22k</option><option value="24k">24k</option></select>
                         </div>
                         <div class="bntm-form-group">
-                            <label>Principal Amount <span style="color:#ef4444;">*</span></label>
-                            <input type="number" name="principal" step=".01" placeholder="0.00" required id="loan-principal-input">
-                            <div style="font-size:11px;color:#6b7280;margin-top:4px;">Amount to be lent — appraisal will auto-calculate as Principal × 1.15</div>
+                            <label>Appraised Value <span style="color:#ef4444;">*</span></label>
+                            <input type="number" name="collateral_appraised_value" step=".01" placeholder="0.00" required id="appraised-val-input">
+                        </div>
+                      
+
+                        <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;margin-top:4px;">
+                            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#059669;margin-bottom:4px;">Loan Terms</div>
                         </div>
                         <div class="bntm-form-group">
-                            <label>Appraised Value (Auto-Calculated) <span style="color:#ef4444;">*</span></label>
-                            <input type="number" name="collateral_appraised_value" step=".01" placeholder="0.00" required id="appraised-val-input" readonly style="background:#f9fafb;cursor:not-allowed;">
-                            <div style="font-size:11px;color:#059669;margin-top:4px;font-weight:600;">Automatically calculated as Principal × 1.15</div>
+                            <label>Principal Amount <span style="color:#ef4444;">*</span></label>
+                            <input type="number" name="principal" step=".01" placeholder="0.00" required id="loan-principal-input">
+                            <div style="font-size:11px;color:#6b7280;margin-top:4px;">Amount to be lent based on collateral valuation.</div>
                         </div>
-
-                        <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;border-left:4px solid #059669;margin-top:4px;">
-                            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#059669;margin-bottom:4px;">Loan Terms</div>
+                        <div class="bntm-form-group">
+                            <label>Ticket Number Override</label>
+                            <input type="text" name="ticket_number_override" id="loan-ticket-override-input" value="<?php echo esc_attr($next_ticket_number); ?>" data-default-ticket="<?php echo esc_attr($next_ticket_number); ?>" placeholder="Leave blank to auto-generate" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();">
+                            <div style="font-size:11px;color:#6b7280;margin-top:4px;">Optional. The system will reject an existing ticket number.</div>
+                        </div>
+                        <div class="bntm-form-group">
+                            <label>Ticket Tag</label>
+                            <select name="ticket_tag">
+                                <option value="">No Tag</option>
+                                <?php foreach ($ticket_tags as $tag): ?>
+                                    <option value="<?php echo esc_attr($tag); ?>"><?php echo esc_html($tag); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="bntm-form-group">
+                            <label>Serial   Number</label>
+                            <input type="text" name="or_number" placeholder="Serial Number" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase();">
                         </div>
                         <div class="bntm-form-group">
                             <label>Interest Rate (%/month)</label>
@@ -773,7 +902,7 @@ function ps_render_modals() {
                         <div class="bntm-form-group">
                             <label>Term (months)</label>
                             <select name="term_months" id="loan-term-select" required>
-                               <option value="10">10 Months</option>
+                               <option value="4">10 Months</option>
                             </select>
                         </div>
                         <div class="bntm-form-group">
@@ -1034,9 +1163,7 @@ function ps_render_modals() {
                                 <div class="bntm-form-group"><label>First Name <span style="color:#ef4444;">*</span></label><input type="text" name="first_name" required placeholder="First name"></div>
                                 <div class="bntm-form-group"><label>Last Name <span style="color:#ef4444;">*</span></label><input type="text" name="last_name" required placeholder="Last name"></div>
                                 <div class="bntm-form-group" style="grid-column:1/-1;"><label>Middle Name</label><input type="text" name="middle_name" placeholder="Middle name"></div>
-                                <div class="bntm-form-group" style="grid-column:1/-1;"><label>Address <span style="color:#ef4444;">*</span></label><textarea name="address" rows="2" required placeholder="Street address"></textarea></div>
-                                <div class="bntm-form-group"><label>City <span style="color:#ef4444;">*</span></label><input type="text" name="city" required placeholder="City"></div>
-                                <div class="bntm-form-group"><label>Zip Code <span style="color:#ef4444;">*</span></label><input type="text" name="zip_code" required placeholder="Zip code"></div>
+                                <div class="bntm-form-group" style="grid-column:1/-1;"><label>Address <span style="color:#ef4444;">*</span></label><textarea name="address" rows="2" required placeholder="Complete address"></textarea></div>
                                 <div class="bntm-form-group"><label>Contact <span style="color:#ef4444;">*</span></label><input type="text" name="contact_number" required placeholder="09XX XXX XXXX"></div>
                                 <div class="bntm-form-group"><label>Email</label><input type="email" name="email" placeholder="email@example.com"></div>
                                 <div class="bntm-form-group">
@@ -1260,6 +1387,8 @@ function ps_render_js() {
         document.getElementById('cl-customer-search').value = '';
         document.getElementById('cl-step-1').style.display = 'block';
         document.getElementById('cl-step-2').style.display = 'none';
+        const ticketOverride = document.getElementById('loan-ticket-override-input');
+        if (ticketOverride) ticketOverride.value = ticketOverride.dataset.defaultTicket || ticketOverride.value || '';
         document.getElementById('ps-create-loan-modal').style.display = 'flex';
         psUpdateLoanSummary();
     };
@@ -1371,10 +1500,6 @@ function ps_render_js() {
         const ld = document.getElementById('loan-date-input')?.value;
         const daily = p * (r / 100 / 30);
         const int = daily * t * 30;
-        // Auto-calculate appraisal value as principal × 1.15
-        const appraisal = p * 1.15;
-        const appInput = document.getElementById('appraised-val-input');
-        if (appInput) appInput.value = appraisal.toFixed(2);
         if (document.getElementById('sum-principal')) document.getElementById('sum-principal').textContent = '₱' + p.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (document.getElementById('sum-interest')) document.getElementById('sum-interest').textContent = '₱' + int.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (document.getElementById('sum-fee')) document.getElementById('sum-fee').textContent = '₱' + f.toLocaleString('en-PH', {minimumFractionDigits:2});
@@ -1446,16 +1571,28 @@ function ps_render_js() {
             extraTotal += amt;
             if (amt > 0) extraEl.innerHTML += `<tr><td style="color:#6b7280;padding:2px 0;">${desc}</td><td style="text-align:right;font-weight:600;">₱${amt.toLocaleString('en-PH',{minimumFractionDigits:2})}</td></tr>`;
         });
-        const total = (d.interest || 0) + (d.penalty || 0) + fee + lostFee + extraTotal;
+        const principalPayment = type === 'reduce_principal' ? Math.min(adj, d.principal || 0) : 0;
+        let principalRow = document.getElementById('rsum-principal-row');
+        if (!principalRow) {
+            principalRow = document.createElement('tr');
+            principalRow.id = 'rsum-principal-row';
+            principalRow.innerHTML = '<td style="color:#6b7280;padding:2px 0;">Principal Reduction</td><td style="text-align:right;font-weight:600;" id="rsum-principal-pay">PHP 0.00</td>';
+            document.getElementById('rsum-lost-row')?.before(principalRow);
+        }
+        if (principalRow) {
+            principalRow.style.display = principalPayment > 0 ? '' : 'none';
+            document.getElementById('rsum-principal-pay').textContent = 'PHP ' + principalPayment.toLocaleString('en-PH', {minimumFractionDigits:2});
+        }
+        const total = (d.interest || 0) + (d.penalty || 0) + fee + principalPayment + lostFee + extraTotal;
         document.getElementById('rsum-total').textContent = '₱' + total.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (type === 'add_principal' && adj > 0) {
             const np = d.principal + adj;
-            const newAppraisal = np * 1.15;
-            document.getElementById('renew-new-principal-preview').textContent = `Current Principal: ₱${d.principal.toLocaleString('en-PH',{minimumFractionDigits:2})} → New Principal: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})} | New Appraisal: ₱${newAppraisal.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+            document.getElementById('renew-new-principal-preview').textContent = `New principal will be: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
         } else if (type === 'reduce_principal' && adj > 0) {
             const np = Math.max(0, d.principal - adj);
-            const newAppraisal = np * 1.15;
-            document.getElementById('renew-new-principal-preview').textContent = `Current Principal: ₱${d.principal.toLocaleString('en-PH',{minimumFractionDigits:2})} → New Principal: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})} | New Appraisal: ₱${newAppraisal.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+            document.getElementById('renew-new-principal-preview').textContent = `New principal will be: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+        } else {
+            document.getElementById('renew-new-principal-preview').textContent = '';
         }
     };
 
@@ -1475,7 +1612,7 @@ function ps_render_js() {
         const d = redeemCurrentData;
         if (!d) return;
         const lostFee = document.getElementById('redeem-lost-ticket')?.checked ? (psLostTicketFee||0) : 0;
-        document.getElementById('rdsum-principal').textContent = '₱' + (d.principal||0).toLocaleString('en-PH',{minimumFractionDigits:2}) + ' (Appraisal: ₱' + ((d.principal||0) * 1.15).toLocaleString('en-PH',{minimumFractionDigits:2}) + ')';
+        document.getElementById('rdsum-principal').textContent = '₱' + (d.principal||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         document.getElementById('rdsum-interest').textContent = '₱' + (d.interest||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         document.getElementById('rdsum-penalty').textContent = '₱' + (d.penalty||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         const lostRow = document.getElementById('rdsum-lost-row');
@@ -1604,7 +1741,62 @@ function ps_render_js() {
         document.getElementById('ps-redeem-modal').style.display = 'flex';
     };
 
+    window.psOpenEditTicket = function(loanId) {
+        const modal = document.getElementById('ps-edit-ticket-modal');
+        const msg = document.getElementById('edit-ticket-message');
+        if (msg) msg.innerHTML = '';
+        const fd = new FormData();
+        fd.append('action', 'ps_get_loan_edit');
+        fd.append('loan_id', loanId);
+        fd.append('nonce', PS_NONCES.loan);
+        modal.style.display = 'flex';
+        fetch(ajaxurl, {method:'POST', body:fd}).then(r=>r.json()).then(json => {
+            if (!json.success) {
+                msg.innerHTML = '<div class="bntm-notice bntm-notice-error">' + json.data.message + '</div>';
+                return;
+            }
+            const d = json.data.loan;
+            document.getElementById('edit-loan-id').value = d.id || '';
+            document.getElementById('edit-ticket-number').value = d.ticket_number || '';
+            document.getElementById('edit-ticket-tag').value = d.ticket_tag || '';
+            document.getElementById('edit-principal').value = d.principal || 0;
+            document.getElementById('edit-interest-rate').value = d.interest_rate || 0;
+            document.getElementById('edit-service-fee').value = d.service_fee || 0;
+            document.getElementById('edit-penalty-rate').value = d.penalty_rate || 0;
+            document.getElementById('edit-loan-date').value = d.loan_date || '';
+            document.getElementById('edit-due-date').value = d.due_date || '';
+            document.getElementById('edit-term-months').value = d.term_months || 1;
+            document.getElementById('edit-status').value = d.status || 'active';
+            document.getElementById('edit-payment-method').value = d.payment_method || 'cash';
+            document.getElementById('edit-appraised-value').value = d.appraised_value || 0;
+            document.getElementById('edit-collateral-description').value = d.collateral_desc || '';
+            document.getElementById('edit-item-condition').value = d.item_condition || 'good';
+            document.getElementById('edit-karat').value = d.karat || '';
+            document.getElementById('edit-weight-grams').value = d.weight_grams || 0;
+            document.getElementById('edit-serial-number').value = d.serial_number || '';
+            document.getElementById('edit-notes').value = d.notes || '';
+        });
+    };
+
     // ---- Form Submissions ----
+    document.getElementById('ps-edit-ticket-form')?.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const btn = document.getElementById('edit-ticket-submit-btn');
+        btn.disabled = true; btn.textContent = 'Saving...';
+        const fd = new FormData(this);
+        fd.append('action', 'ps_update_loan');
+        fetch(ajaxurl, {method:'POST', body:fd}).then(r=>r.json()).then(json => {
+            const msg = document.getElementById('edit-ticket-message');
+            if (json.success) {
+                msg.innerHTML = '<div class="bntm-notice bntm-notice-success">' + json.data.message + '</div>';
+                setTimeout(() => location.reload(), 700);
+            } else {
+                msg.innerHTML = '<div class="bntm-notice bntm-notice-error">' + json.data.message + '</div>';
+                btn.disabled = false; btn.textContent = 'Save Changes';
+            }
+        });
+    });
+
     document.getElementById('ps-create-loan-form')?.addEventListener('submit', function(e) {
         e.preventDefault();
         const btn = document.getElementById('create-loan-submit-btn');
@@ -1640,7 +1832,7 @@ function ps_render_js() {
         fetch(ajaxurl, {method:'POST', body:fd}).then(r=>r.json()).then(json => {
             if (json.success) {
                 document.getElementById('ps-renew-modal').style.display = 'none';
-                psShowPrintModal(json.data.loan_id, 'renewal_notice');
+                psShowPrintModal(json.data.loan_id, json.data.doc_type || 'pawn_ticket');
                 // Removed: setTimeout(() => location.reload(), 2500);
             } else {
                 document.getElementById('renew-message').innerHTML =
@@ -1716,7 +1908,7 @@ function ps_render_js() {
         const autoPrint = options.autoPrint === true;
         const modal = document.getElementById('ps-print-modal');
         const preview = document.getElementById('ps-print-preview');
-        const titles = { pawn_ticket:'Pawn Ticket', renewal_notice:'Renewal Notice', redemption_receipt:'Redemption Receipt', forfeiture_notice:'Forfeiture Notice', customer_statement:'Customer Statement', payment_receipt:'Payment Receipt', daily_summary:'Daily Summary' };
+        const titles = { pawn_ticket:'Pawn Ticket', renewal_notice:'Renewal Notice', redemption_receipt:'Redemption Receipt', forfeiture_notice:'Forfeiture Notice', customer_statement:'Customer Statement', payment_receipt:'Payment Receipt', daily_summary:'Daily Summary', cash_flow_summary:'Cash Flow Summary' };
         document.getElementById('print-modal-title').textContent = titles[docType] || 'Document';
         document.getElementById('print-modal-subtitle').textContent = 'Loan ID: ' + loanId + ' — Review before printing';
         document.getElementById('print-modal-subtitle').textContent = autoPrint
@@ -1905,12 +2097,12 @@ function ps_render_js() {
         });
     };
 
-    window.psEditCustomer = function(id, fn, ln, mn, addr, city, zip, con, email, idt, idn, flag, notes, photo) {
+    window.psEditCustomer = function(id, fn, ln, mn, addr, con, email, idt, idn, flag, notes, photo) {
         psOpenCustomerModal(id, '', photo || '');
         // Populate form fields immediately
         const f = document.getElementById('ps-customer-form');
         f.first_name.value = fn; f.last_name.value = ln; f.middle_name.value = mn;
-        f.address.value = addr; f.city.value = city; f.zip_code.value = zip; f.contact_number.value = con; f.email.value = email;
+        f.address.value = addr; f.contact_number.value = con; f.email.value = email;
         f.id_type.value = idt; f.id_number.value = idn; f.customer_flag.value = flag; f.notes.value = notes;
     };
 
@@ -2025,7 +2217,7 @@ function ps_render_js() {
     };
 
     // Backdrop close
-    document.querySelectorAll(['#ps-loan-detail-modal','#ps-create-loan-modal','#ps-renew-modal','#ps-redeem-modal','#ps-customer-modal','#ps-profile-modal'].join(',')).forEach(el => {
+    document.querySelectorAll(['#ps-loan-detail-modal','#ps-edit-ticket-modal','#ps-create-loan-modal','#ps-renew-modal','#ps-redeem-modal','#ps-customer-modal','#ps-profile-modal'].join(',')).forEach(el => {
         el.addEventListener('click', function(e) { if (e.target === this) { stopCamera(); this.style.display = 'none'; } });
     });
     // Print modal: close AND reload to refresh all modal data
@@ -2131,6 +2323,7 @@ var PS_MODAL_IDS = [
     'ps-customer-modal',
     'ps-profile-modal',
     'ps-loan-detail-modal',
+    'ps-edit-ticket-modal',
     'ps-print-modal'
 ];
  
@@ -2233,18 +2426,18 @@ function ps_overview_tab($business_id) {
     $ct  = $wpdb->prefix.'ps_customers';
     $colt= $wpdb->prefix.'ps_collaterals';
 
-    $total_active   = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$lt} WHERE business_id=%d AND status IN ('active','renewed')", $business_id));
+    $total_active   = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$lt} WHERE business_id=%d AND status='active'", $business_id));
     $total_overdue  = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$lt} WHERE business_id=%d AND status='overdue'", $business_id));
     $total_custs    = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$ct} WHERE business_id=%d AND status='active'", $business_id));
-    $due_today      = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$lt} WHERE business_id=%d AND due_date=CURDATE() AND status IN ('active','renewed')", $business_id));
+    $due_today      = (int)$wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$lt} WHERE business_id=%d AND due_date=CURDATE() AND status='active'", $business_id));
     $monthly_income = (float)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(interest_amount+service_fee),0) FROM {$pt} WHERE business_id=%d AND MONTH(created_at)=MONTH(CURDATE()) AND YEAR(created_at)=YEAR(CURDATE())", $business_id));
-    $portfolio      = (float)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(principal),0) FROM {$lt} WHERE business_id=%d AND status IN ('active','renewed','overdue')", $business_id));
+    $portfolio      = (float)$wpdb->get_var($wpdb->prepare("SELECT COALESCE(SUM(principal),0) FROM {$lt} WHERE business_id=%d AND status IN ('active','overdue')", $business_id));
 
     $grace = (int)bntm_get_setting('ps_grace_period', '0');
     $due_loans = $wpdb->get_results($wpdb->prepare(
         "SELECT l.*,CONCAT(c.last_name,', ',c.first_name) AS customer_name,c.photo_path,col.description AS collateral_desc
          FROM {$lt} l JOIN {$ct} c ON c.id=l.customer_id JOIN {$colt} col ON col.id=l.collateral_id
-         WHERE l.business_id=%d AND l.due_date=CURDATE() AND l.status IN ('active','renewed')
+         WHERE l.business_id=%d AND l.due_date=CURDATE() AND l.status='active'
          ORDER BY l.ticket_number DESC", $business_id));
 
     $overdue_loans = $wpdb->get_results($wpdb->prepare(
@@ -2419,6 +2612,7 @@ function ps_overview_tab($business_id) {
 function ps_loans_tab($business_id) {
     global $wpdb;
     $lt = $wpdb->prefix.'ps_loans';
+    $can_manage = ps_user_can_manage_tickets();
     $fs = isset($_GET['ls']) ? sanitize_text_field($_GET['ls']) : '';
     $fq = isset($_GET['lq']) ? sanitize_text_field($_GET['lq']) : '';
     $fr = isset($_GET['lr']) ? sanitize_text_field($_GET['lr']) : ''; // filter by root
@@ -2476,6 +2670,7 @@ function ps_loans_tab($business_id) {
     <tr style="<?php echo $is_od ? 'background:#fff9f9;' : ''; ?>">
         <td>
             <strong style="font-family:monospace;"><?php echo esc_html($loan->ticket_number); ?></strong>
+            <?php if (!empty($loan->ticket_tag)): ?><div style="font-size:10px;color:#047857;margin-top:2px;"><?php echo esc_html($loan->ticket_tag); ?></div><?php endif; ?>
             <?php if (!$is_new_ticket): ?>
             <div style="font-size:10px;color:#7c3aed;margin-top:2px;">renewal ticket</div>
             <?php endif; ?>
@@ -2516,6 +2711,9 @@ function ps_loans_tab($business_id) {
         <td><span class="ps-status-badge ps-status-<?php echo $loan->status; ?>"><?php echo ucfirst($loan->status); ?></span></td>
         <td><div style="display:flex;gap:3px;flex-wrap:wrap;">
             <button class="ps-action-btn ps-btn-view" onclick="psViewLoanDetail(<?php echo $loan->id; ?>)" title="Details">View</button>
+            <?php if ($can_manage): ?>
+            <button class="ps-action-btn ps-btn-print" onclick="psOpenEditTicket(<?php echo $loan->id; ?>)" title="Edit">Edit</button>
+            <?php endif; ?>
             <?php if ($loan->status === 'active' || $loan->status === 'overdue'): ?>
             <button class="ps-action-btn ps-btn-renew" onclick="psOpenRenewModal(<?php echo $loan->id; ?>)">Renew</button>
             <button class="ps-action-btn ps-btn-redeem" onclick="psOpenRedeemModal(<?php echo $loan->id; ?>)">Redeem</button>
@@ -2667,8 +2865,8 @@ function ps_customers_tab($business_id) {
     $customers = $wpdb->get_results(
         "SELECT c.*,
             (SELECT COUNT(*) FROM {$lt} WHERE customer_id=c.id) AS total_loans,
-            (SELECT COUNT(*) FROM {$lt} WHERE customer_id=c.id AND status IN ('active','renewed','overdue')) AS active_loans,
-            (SELECT COALESCE(SUM(principal),0) FROM {$lt} WHERE customer_id=c.id AND status IN ('active','renewed','overdue')) AS outstanding
+            (SELECT COUNT(*) FROM {$lt} WHERE customer_id=c.id AND status IN ('active','overdue')) AS active_loans,
+            (SELECT COALESCE(SUM(principal),0) FROM {$lt} WHERE customer_id=c.id AND status IN ('active','overdue')) AS outstanding
          FROM {$ct} c {$w} ORDER BY c.last_name ASC LIMIT 200"
     );
 
@@ -2710,7 +2908,7 @@ function ps_customers_tab($business_id) {
         <td><span class="ps-status-badge <?php echo $fm; ?>"><?php echo ucfirst($c->customer_flag); ?></span></td>
         <td><div style="display:flex;gap:4px;">
             <button class="ps-action-btn ps-btn-view" onclick="psViewCustomerProfile(<?php echo $c->id; ?>)">Profile</button>
-            <button class="ps-action-btn" style="background:#f3f4f6;color:#374151;" onclick="psEditCustomer(<?php echo $c->id; ?>,'<?php echo esc_js($c->first_name); ?>','<?php echo esc_js($c->last_name); ?>','<?php echo esc_js($c->middle_name); ?>','<?php echo esc_js($c->address); ?>','<?php echo esc_js($c->city); ?>','<?php echo esc_js($c->zip_code); ?>','<?php echo esc_js($c->contact_number); ?>','<?php echo esc_js($c->email); ?>','<?php echo esc_js($c->id_type); ?>','<?php echo esc_js($c->id_number); ?>','<?php echo $c->customer_flag; ?>','<?php echo esc_js($c->notes); ?>','<?php echo esc_js($c->photo_path); ?>')">Edit</button>
+            <button class="ps-action-btn" style="background:#f3f4f6;color:#374151;" onclick="psEditCustomer(<?php echo $c->id; ?>,'<?php echo esc_js($c->first_name); ?>','<?php echo esc_js($c->last_name); ?>','<?php echo esc_js($c->middle_name); ?>','<?php echo esc_js($c->address); ?>','<?php echo esc_js($c->contact_number); ?>','<?php echo esc_js($c->email); ?>','<?php echo esc_js($c->id_type); ?>','<?php echo esc_js($c->id_number); ?>','<?php echo $c->customer_flag; ?>','<?php echo esc_js($c->notes); ?>','<?php echo esc_js($c->photo_path); ?>')">Edit</button>
             <?php if ($c->active_loans == 0): ?><button class="ps-action-btn ps-btn-forfeit" onclick="if(confirm('Delete customer?')){const fd=new FormData();fd.append('action','ps_delete_customer');fd.append('customer_id',<?php echo $c->id; ?>);fd.append('nonce','<?php echo wp_create_nonce('ps_customer_nonce'); ?>');fetch(ajaxurl,{method:'POST',body:fd}).then(r=>r.json()).then(j=>{if(j.success)location.reload();else alert(j.data.message);});}">Del</button><?php endif; ?>
         </div></td>
     </tr>
@@ -3015,6 +3213,7 @@ function ps_reports_tab( $business_id ) {
         'list_loans'        => ['label' => 'List of Loans Granted',  'date' => 'range'],
         'list_payments'     => ['label' => 'List of Payments',       'date' => 'range'],
         'daily_summary'     => ['label' => 'Daily Summary',          'date' => 'single'],
+        'cash_flow_summary' => ['label' => 'Cash Flow Summary',      'date' => 'range'],
         'tickets_by_status' => ['label' => 'Tickets by Status',      'date' => 'range'],
     ];
  
@@ -3052,8 +3251,8 @@ function ps_reports_tab( $business_id ) {
         </select>
         <?php endif; ?>
  
-        <?php if ($rtype === 'daily_summary'): ?>
-        <button type="button" onclick="psGenerateDailySummaryPDF()" class="bntm-btn-primary" style="padding:7px 16px;">Generate Daily Summary</button>
+        <?php if (in_array($rtype, ['daily_summary','cash_flow_summary'], true)): ?>
+        <button type="button" onclick="psGenerateDailySummaryPDF()" class="bntm-btn-primary" style="padding:7px 16px;">Generate <?php echo $rtype === 'cash_flow_summary' ? 'Cash Flow Summary' : 'Daily Summary'; ?></button>
         <button type="button" onclick="psOpenDenominationModal('edit')" class="bntm-btn-secondary" style="padding:7px 14px;">Cash Count</button>
         <?php else: ?>
         <button type="button" onclick="psReportPrepareGenerate()" class="bntm-btn-primary" style="padding:7px 16px;">Apply</button>
@@ -3105,6 +3304,7 @@ function ps_reports_tab( $business_id ) {
         case 'list_loans':        echo ps_analytics_loans($business_id, $rfrom, $rto);                        break;
         case 'list_payments':     echo ps_analytics_payments($business_id, $rfrom, $rto);                     break;
         case 'daily_summary':     echo ps_analytics_daily_summary($business_id, $rdate, $cash_breakdown);     break;
+        case 'cash_flow_summary': echo ps_analytics_cash_flow_summary($business_id, $rfrom, $rto, $cash_breakdown); break;
         case 'tickets_by_status': echo ps_analytics_tickets_by_status($business_id, $rfrom, $rto, $rstatus); break;
         default:                  echo ps_analytics_summary($business_id, $rfrom, $rto);
     }
@@ -3176,12 +3376,12 @@ function ps_reports_tab( $business_id ) {
         }
     };
     window.psGenerateDailySummaryPDF = function() {
-        // For daily summary, always open denomination modal first, then generate PDF
+        // For cash-count reports, always open denomination modal first, then generate PDF
         psDenominationModalAction = 'print_direct';
         psOpenDenominationModal('print_direct');
     };
     window.psReportPrepareGenerate = function() {
-        if (psReportParams.rtype === 'daily_summary' && !document.getElementById('ps-denomination-data').value) {
+        if (['daily_summary','cash_flow_summary'].includes(psReportParams.rtype) && !document.getElementById('ps-denomination-data').value) {
             psOpenDenominationModal('generate');
             return;
         }
@@ -3189,7 +3389,7 @@ function ps_reports_tab( $business_id ) {
     };
     window.psReportOpenModal = function(skipPrompt) {
         var p = psReportParams;
-        if (!skipPrompt && p.rtype === 'daily_summary' && !document.getElementById('ps-denomination-data').value) {
+        if (!skipPrompt && ['daily_summary','cash_flow_summary'].includes(p.rtype) && !document.getElementById('ps-denomination-data').value) {
             psOpenDenominationModal('print');
             return;
         }
@@ -3303,7 +3503,7 @@ function ps_reports_tab( $business_id ) {
                             <div class="ps-denom-total-value">P <span id="ps-denomination-grand-total">0.00</span></div>
                         </div>
                         <div class="ps-denom-tip">
-                            This total will be included in the daily summary report.
+                            This total will be included in the selected cash-count report.
                         </div>
                     </div>
                 </div>
@@ -3460,6 +3660,131 @@ function ps_analytics_loans($business_id, $from, $to): string {
     return ob_get_clean();
 }
 
+function ps_cash_flow_data(int $business_id, string $from, string $to): array {
+    global $wpdb;
+    $lt = $wpdb->prefix . 'ps_loans';
+    $pt = $wpdb->prefix . 'ps_payments';
+    $ct = $wpdb->prefix . 'ps_customers';
+
+    $payments_before = $wpdb->get_results($wpdb->prepare(
+        "SELECT amount,payment_method FROM {$pt} WHERE business_id=%d AND DATE(created_at)<%s",
+        $business_id, $from
+    ));
+    $loans_before = $wpdb->get_results($wpdb->prepare(
+        "SELECT principal,service_fee,additional_to_principal,transaction_type,payment_method
+         FROM {$lt} WHERE business_id=%d AND DATE(loan_date)<%s",
+        $business_id, $from
+    ));
+
+    $payments = $wpdb->get_results($wpdb->prepare(
+        "SELECT p.*, l.ticket_number, l.root_ticket, CONCAT(c.last_name, ', ', c.first_name) AS customer_name
+         FROM {$pt} p
+         JOIN {$lt} l ON l.id=p.loan_id
+         JOIN {$ct} c ON c.id=l.customer_id
+         WHERE p.business_id=%d AND DATE(p.created_at) BETWEEN %s AND %s
+         ORDER BY p.created_at ASC, p.id ASC",
+        $business_id, $from, $to
+    ));
+    $loans = $wpdb->get_results($wpdb->prepare(
+        "SELECT l.*, CONCAT(c.last_name, ', ', c.first_name) AS customer_name
+         FROM {$lt} l
+         JOIN {$ct} c ON c.id=l.customer_id
+         WHERE l.business_id=%d AND DATE(l.loan_date) BETWEEN %s AND %s
+         ORDER BY l.loan_date ASC, l.id ASC",
+        $business_id, $from, $to
+    ));
+
+    $cash_in_before = 0;
+    foreach ($payments_before as $p) {
+        if (ps_is_cash_method($p->payment_method ?? 'cash')) $cash_in_before += (float)$p->amount;
+    }
+
+    $cash_out_before = 0;
+    foreach ($loans_before as $l) {
+        if (!ps_is_cash_method($l->payment_method ?? 'cash')) continue;
+        $cash_out_before += $l->transaction_type === 'additional'
+            ? (float)$l->additional_to_principal
+            : (float)$l->principal - (float)$l->service_fee;
+    }
+
+    $cash_payments = array_values(array_filter($payments, static fn($p) => ps_is_cash_method($p->payment_method ?? 'cash')));
+    $cash_loans = array_values(array_filter($loans, static fn($l) => ps_is_cash_method($l->payment_method ?? 'cash') && in_array($l->transaction_type, ['new','additional'], true)));
+
+    $payment_total = array_sum(array_map(static fn($p) => (float)$p->amount, $cash_payments));
+    $redemption_total = array_sum(array_map(static fn($p) => $p->payment_type === 'redemption' ? (float)$p->amount : 0, $cash_payments));
+    $affidavit_total = array_sum(array_map(static fn($p) => stripos((string)$p->notes, 'Affidavit') !== false ? (float)$p->service_fee : 0, $cash_payments));
+
+    $loan_total = 0;
+    foreach ($cash_loans as $l) {
+        $loan_total += $l->transaction_type === 'additional'
+            ? (float)$l->additional_to_principal
+            : (float)$l->principal - (float)$l->service_fee;
+    }
+
+    $beginning_cash = round($cash_in_before - $cash_out_before, 2);
+    $cash_in_subtotal = round($beginning_cash + $payment_total, 2);
+    $cash_ending = round($cash_in_subtotal - $loan_total, 2);
+
+    return [
+        'beginning_cash' => $beginning_cash,
+        'payments' => $cash_payments,
+        'loans' => $cash_loans,
+        'payment_total' => round($payment_total, 2),
+        'redemption_total' => round($redemption_total, 2),
+        'affidavit_total' => round($affidavit_total, 2),
+        'loan_total' => round($loan_total, 2),
+        'cash_in_subtotal' => $cash_in_subtotal,
+        'cash_out_subtotal' => round($loan_total, 2),
+        'cash_ending' => $cash_ending,
+    ];
+}
+
+function ps_analytics_cash_flow_summary($business_id, $from, $to, array $cash_breakdown = []): string {
+    $data = ps_cash_flow_data((int)$business_id, $from, $to);
+    $counted = (float)($cash_breakdown['total_counted'] ?? 0);
+    $over_short = round($counted - $data['cash_ending'], 2);
+
+    ob_start(); ?>
+    <div class="ps-analytics-grid">
+        <div class="ps-analytics-card"><div class="ps-analytics-label">Beginning Cash</div><div class="ps-analytics-value">P <?php echo number_format($data['beginning_cash'],2); ?></div></div>
+        <div class="ps-analytics-card"><div class="ps-analytics-label">Cash In</div><div class="ps-analytics-value">P <?php echo number_format($data['payment_total'],2); ?></div><div class="ps-analytics-meta"><?php echo number_format(count($data['payments'])); ?> cash payment rows</div></div>
+        <div class="ps-analytics-card"><div class="ps-analytics-label">Cash Out</div><div class="ps-analytics-value">P <?php echo number_format($data['loan_total'],2); ?></div><div class="ps-analytics-meta"><?php echo number_format(count($data['loans'])); ?> loan rows</div></div>
+        <div class="ps-analytics-card"><div class="ps-analytics-label">Ending Cash</div><div class="ps-analytics-value">P <?php echo number_format($data['cash_ending'],2); ?></div><div class="ps-analytics-meta">Over/short: <?php echo ($over_short >= 0 ? 'P ' : '-P ') . number_format(abs($over_short),2); ?></div></div>
+    </div>
+    <div class="ps-analytics-layout">
+        <div class="ps-analytics-panel">
+            <h4>Cash Flow Activity</h4>
+            <table class="ps-analytics-table">
+                <thead><tr><th>Metric</th><th class="r">Amount</th></tr></thead>
+                <tbody>
+                    <tr><td>Beginning Cash</td><td class="r">P <?php echo number_format($data['beginning_cash'],2); ?></td></tr>
+                    <tr><td>Total Redemption</td><td class="r">P <?php echo number_format($data['redemption_total'],2); ?></td></tr>
+                    <tr><td>Affidavit of Loss</td><td class="r">P <?php echo number_format($data['affidavit_total'],2); ?></td></tr>
+                    <tr><td>Total Cash In</td><td class="r">P <?php echo number_format($data['payment_total'],2); ?></td></tr>
+                    <tr><td>Total Loans Extended</td><td class="r">P <?php echo number_format($data['loan_total'],2); ?></td></tr>
+                    <tr><td>Cash Ending Balance</td><td class="r">P <?php echo number_format($data['cash_ending'],2); ?></td></tr>
+                    <tr><td>Counted Cash</td><td class="r">P <?php echo number_format($counted,2); ?></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="ps-analytics-panel">
+            <h4>Recent Cash Rows</h4>
+            <div class="ps-mini-list">
+                <?php foreach (array_slice($data['payments'], 0, 5) as $p): ?>
+                <div class="ps-mini-item"><strong><?php echo esc_html($p->ticket_number); ?></strong><br><?php echo esc_html($p->customer_name); ?><br><span style="color:#64748b;">Cash in: P <?php echo number_format($p->amount,2); ?></span></div>
+                <?php endforeach; ?>
+                <?php foreach (array_slice($data['loans'], 0, 4) as $l):
+                    $out = $l->transaction_type === 'additional' ? (float)$l->additional_to_principal : (float)$l->principal - (float)$l->service_fee;
+                ?>
+                <div class="ps-mini-item"><strong><?php echo esc_html($l->ticket_number); ?></strong><br><?php echo esc_html($l->customer_name); ?><br><span style="color:#64748b;">Cash out: P <?php echo number_format($out,2); ?></span></div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
 function ps_analytics_payments($business_id, $from, $to): string {
     global $wpdb;
     $rows = $wpdb->get_results($wpdb->prepare(
@@ -3524,14 +3849,14 @@ function ps_analytics_daily_summary($business_id, $report_date, array $cash_brea
     $pt = $wpdb->prefix . 'ps_payments';
     $ct = $wpdb->prefix . 'ps_customers';
     $rows_loans = $wpdb->get_results($wpdb->prepare(
-        "SELECT l.ticket_number,l.principal,l.service_fee,l.payment_method,CONCAT(c.last_name, ', ', c.first_name) AS customer_name
+        "SELECT l.ticket_number,l.ticket_tag,l.principal,l.service_fee,l.payment_method,CONCAT(c.last_name, ', ', c.first_name) AS customer_name
          FROM {$lt} l JOIN {$ct} c ON c.id=l.customer_id
          WHERE l.business_id=%d AND DATE(l.loan_date)=%s AND l.transaction_type='new'
          ORDER BY l.id DESC",
         $business_id, $report_date
     ));
     $rows_payments = $wpdb->get_results($wpdb->prepare(
-        "SELECT p.amount,p.payment_method,p.interest_amount,p.principal_amount,p.penalty_amount,l.ticket_number,CONCAT(c.last_name, ', ', c.first_name) AS customer_name
+        "SELECT p.amount,p.payment_method,p.interest_amount,p.principal_amount,p.penalty_amount,l.ticket_number,l.ticket_tag,CONCAT(c.last_name, ', ', c.first_name) AS customer_name
          FROM {$pt} p JOIN {$lt} l ON l.id=p.loan_id JOIN {$ct} c ON c.id=l.customer_id
          WHERE p.business_id=%d AND DATE(p.created_at)=%s
          ORDER BY p.id DESC",
@@ -3549,6 +3874,21 @@ function ps_analytics_daily_summary($business_id, $report_date, array $cash_brea
     $expected_cash = $cash_in - $loan_out;
     $counted_cash = (float)($cash_breakdown['total_counted'] ?? 0);
     $over_short = $counted_cash - $expected_cash;
+    $daily_tag_totals = [];
+    foreach ($rows_loans as $row) {
+        $tag = trim((string)($row->ticket_tag ?? ''));
+        if ($tag === '') continue;
+        if (!isset($daily_tag_totals[$tag])) $daily_tag_totals[$tag] = ['loans'=>0,'loan_out'=>0,'payments'=>0,'payment_in'=>0];
+        $daily_tag_totals[$tag]['loans']++;
+        $daily_tag_totals[$tag]['loan_out'] += (float)$row->principal - (float)$row->service_fee;
+    }
+    foreach ($rows_payments as $row) {
+        $tag = trim((string)($row->ticket_tag ?? ''));
+        if ($tag === '') continue;
+        if (!isset($daily_tag_totals[$tag])) $daily_tag_totals[$tag] = ['loans'=>0,'loan_out'=>0,'payments'=>0,'payment_in'=>0];
+        $daily_tag_totals[$tag]['payments']++;
+        $daily_tag_totals[$tag]['payment_in'] += (float)$row->amount;
+    }
 
     ob_start(); ?>
     <div class="ps-analytics-grid">
@@ -3570,6 +3910,17 @@ function ps_analytics_daily_summary($business_id, $report_date, array $cash_brea
                 </tbody>
             </table>
             <?php if (!empty($cash_breakdown['has_input'])) echo ps_render_cash_breakdown_panel($cash_breakdown, ['cash_in'=>$cash_in,'cash_out'=>$loan_out,'noncash_in'=>$noncash_in,'expected_cash'=>$expected_cash,'over_short'=>$over_short]); ?>
+            <?php if (!empty($daily_tag_totals)): ?>
+            <h4 style="margin-top:16px;">Tag Totals</h4>
+            <table class="ps-analytics-table">
+                <thead><tr><th>Tag</th><th class="r">Loans</th><th class="r">Loan Out</th><th class="r">Payments</th><th class="r">Payment In</th></tr></thead>
+                <tbody>
+                <?php foreach ($daily_tag_totals as $tag => $tot): ?>
+                <tr><td><?php echo esc_html($tag); ?></td><td class="r"><?php echo number_format($tot['loans']); ?></td><td class="r">P <?php echo number_format($tot['loan_out'],2); ?></td><td class="r"><?php echo number_format($tot['payments']); ?></td><td class="r">P <?php echo number_format($tot['payment_in'],2); ?></td></tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php endif; ?>
         </div>
         <div class="ps-analytics-panel">
             <h4>Recent Transactions</h4>
@@ -3754,7 +4105,7 @@ function ps_rpt_list_loans( int $business_id, string $from, string $to, array $b
     $loans = $wpdb->get_results( $wpdb->prepare(
         "SELECT l.*,
                 CONCAT(c.last_name,', ',c.first_name) AS cname,
-                c.address, c.city, c.zip_code,
+                c.address,
                 col.description   AS col_desc,
                 col.karat, col.weight_grams,
                 col.appraised_value AS col_appraised
@@ -3796,7 +4147,7 @@ function ps_rpt_list_loans( int $business_id, string $from, string $to, array $b
             <td style="font-weight:700;"><?php echo esc_html($ln->ticket_number); ?></td>
             <td style="text-transform:capitalize;"><?php echo str_replace('_',' ',$ln->transaction_type); ?></td>
             <td style="text-transform:uppercase;"><?php echo esc_html($ln->cname); ?></td>
-            <td style="max-width:70px;font-size:8.5px;"><?php echo esc_html($ln->address . ', ' . $ln->city . ' ' . $ln->zip_code); ?></td>
+            <td style="max-width:70px;font-size:8.5px;"><?php echo esc_html($ln->address); ?></td>
             <td class="r"><?php echo number_format($ln->principal,2); ?> /</td>
             <td class="r"><?php echo number_format($net,2); ?></td>
             <td class="r"><?php echo number_format($ln->col_appraised,2); ?></td>
@@ -3893,6 +4244,84 @@ function ps_rpt_list_payments( int $business_id, string $from, string $to, array
 /**
  * ④ DAILY SUMMARY — loans granted + payments received for one day.
  */
+function ps_rpt_cash_flow_summary(int $business_id, string $from, string $to, array $b, array $cash_breakdown = []): string {
+    $data = ps_cash_flow_data($business_id, $from, $to);
+    $dlabel = date('F d, Y', strtotime($from)) . ' to ' . date('F d, Y', strtotime($to));
+    $counted_cash = (float)($cash_breakdown['total_counted'] ?? 0);
+    $over_short = round($counted_cash - $data['cash_ending'], 2);
+    $fmt = static fn($n) => number_format((float)$n, 2);
+    $row = static function(string $label, $amount = '', bool $bold = false) use ($fmt): string {
+        $amount_text = $amount === '' ? '' : 'P ' . $fmt($amount);
+        return '<tr' . ($bold ? ' style="font-weight:700;"' : '') . '><td>' . esc_html($label) . '</td><td class="r">' . esc_html($amount_text) . '</td></tr>';
+    };
+    $loan_out = static function($loan): float {
+        return $loan->transaction_type === 'additional'
+            ? (float)$loan->additional_to_principal
+            : (float)$loan->principal - (float)$loan->service_fee;
+    };
+
+    ob_start();
+    echo ps_reg_table_style();
+    ?>
+    <style>
+        .cash-flow { font-family:"Courier New",Courier,monospace; font-size:10px; max-width:720px; margin:0 auto; }
+        .cash-flow h2 { text-align:center; font-size:13px; letter-spacing:1px; margin:2px 0 12px; }
+        .cash-flow .date { text-align:center; font-weight:700; margin-bottom:14px; }
+        .cash-flow .section { font-weight:700; margin:10px 0 2px; }
+        .cash-flow .rule { letter-spacing:1px; margin-bottom:4px; }
+        .cash-flow table { width:100%; border-collapse:collapse; font-size:10px; }
+        .cash-flow td { padding:1px 4px; vertical-align:top; }
+        .cash-flow .r { text-align:right; white-space:nowrap; }
+        .cash-flow .total-line td.r { border-top:1px dashed #000; border-bottom:2px double #000; font-weight:700; padding-top:3px; }
+        .cash-flow .spacer td { height:8px; }
+        .cash-flow .sign { display:grid; grid-template-columns:1fr 1fr; gap:48px; margin-top:34px; }
+        .cash-flow .sign div { border-top:1px solid #000; text-align:center; padding-top:3px; font-size:10px; }
+    </style>
+    <div class="cash-flow">
+        <?php echo ps_corp_header($b); ?>
+        <h2>CASH FLOW SUMMARY</h2>
+        <div class="date">Date Covered: <?php echo esc_html($dlabel); ?></div>
+        <div class="section">Cash In</div>
+        <div class="rule">--------</div>
+        <table>
+            <?php echo $row('Beginning Cash', $data['beginning_cash'], true); ?>
+            <?php echo $row('Total Redemption', $data['redemption_total']); ?>
+            <?php echo $row('Sub-Total Redemption', $data['redemption_total']); ?>
+            <?php echo $row('Auction Sales', 0); ?>
+            <?php echo $row('Affidavit of Loss', $data['affidavit_total']); ?>
+            <?php foreach ($data['payments'] as $p): ?>
+                <?php echo $row(trim($p->ticket_number . ($p->reference_number ? ' ' . $p->reference_number : '')), $p->amount); ?>
+            <?php endforeach; ?>
+            <tr class="total-line"><td style="text-align:center;">Sub-Totals</td><td class="r">P <?php echo $fmt($data['cash_in_subtotal']); ?></td></tr>
+            <tr class="spacer"><td colspan="2"></td></tr>
+        </table>
+        <div class="section">Cash Out</div>
+        <div class="rule">---------</div>
+        <table>
+            <?php echo $row('Total Loans Extended', $data['loan_total'], true); ?>
+            <?php foreach ($data['loans'] as $l): ?>
+                <?php echo $row($l->ticket_number, $loan_out($l)); ?>
+            <?php endforeach; ?>
+            <tr class="total-line"><td style="text-align:center;">Sub-Totals</td><td class="r">P <?php echo $fmt($data['cash_out_subtotal']); ?></td></tr>
+            <tr class="spacer"><td colspan="2"></td></tr>
+            <tr class="total-line"><td style="font-weight:700;">Cash Ending Balance</td><td class="r">P <?php echo $fmt($data['cash_ending']); ?></td></tr>
+        </table>
+        <div style="height:20px;"></div>
+        <div class="section">Denomination</div>
+        <div class="rule">------------</div>
+        <table>
+            <?php foreach (($cash_breakdown['rows'] ?? []) as $denom): ?>
+            <tr><td><?php echo number_format((float)$denom['denomination'], 0); ?></td><td>x <?php echo number_format((int)$denom['quantity']); ?></td><td class="r">P <?php echo $fmt($denom['amount']); ?></td></tr>
+            <?php endforeach; ?>
+            <tr><td>Counted Cash</td><td></td><td class="r">P <?php echo $fmt($counted_cash); ?></td></tr>
+            <tr><td>Over / Short</td><td></td><td class="r"><?php echo ($over_short >= 0 ? 'P ' : '-P ') . $fmt(abs($over_short)); ?></td></tr>
+        </table>
+        <div class="sign"><div>Noted by:</div><div>Approved by:</div></div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
 function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, array $cash_breakdown = [] ): string {
     global $wpdb;
     $lt   = $wpdb->prefix . 'ps_loans';
@@ -3903,8 +4332,8 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
     $dlabel = date('F d, Y', strtotime($rd));
  
     $loans_today = $wpdb->get_results( $wpdb->prepare(
-        "SELECT l.*, CONCAT(c.last_name,', ',c.first_name) AS cname, c.address, c.city, c.zip_code,
-                col.description AS col_desc, col.karat, col.weight_grams
+        "SELECT l.*, CONCAT(c.last_name,', ',c.first_name) AS cname, c.address,
+                col.description AS col_desc, col.karat, col.weight_grams, col.appraised_value
          FROM {$lt} l JOIN {$ct} c ON c.id=l.customer_id JOIN {$colt} col ON col.id=l.collateral_id
          WHERE l.business_id=%d AND DATE(l.loan_date)=%s AND l.transaction_type='new'
          ORDER BY l.ticket_number ASC",
@@ -3912,7 +4341,7 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
     ) );
  
     $payments_today = $wpdb->get_results( $wpdb->prepare(
-        "SELECT p.*, l.ticket_number, l.root_ticket, CONCAT(c.last_name,', ',c.first_name) AS cname
+        "SELECT p.*, l.ticket_number, l.root_ticket, l.ticket_tag, CONCAT(c.last_name,', ',c.first_name) AS cname
          FROM {$pt} p JOIN {$lt} l ON l.id=p.loan_id JOIN {$ct} c ON c.id=l.customer_id
          WHERE p.business_id=%d AND DATE(p.created_at)=%s ORDER BY l.ticket_number ASC",
         $business_id, $rd
@@ -3925,6 +4354,27 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
     $s_prin   = array_sum(array_column($payments_today, 'principal_amount'));
     $s_int    = array_sum(array_column($payments_today, 'interest_amount'));
     $s_add    = array_sum(array_column($payments_today, 'penalty_amount'));
+    $loan_tag_totals = [];
+    foreach ($loans_today as $loan_row) {
+        $tag = trim((string)($loan_row->ticket_tag ?? ''));
+        if ($tag === '') continue;
+        if (!isset($loan_tag_totals[$tag])) $loan_tag_totals[$tag] = ['count'=>0,'principal'=>0,'net'=>0,'appraised'=>0];
+        $loan_tag_totals[$tag]['count']++;
+        $loan_tag_totals[$tag]['principal'] += (float)$loan_row->principal;
+        $loan_tag_totals[$tag]['net'] += (float)$loan_row->principal - (float)$loan_row->service_fee;
+        $loan_tag_totals[$tag]['appraised'] += (float)($loan_row->appraised_value ?? 0);
+    }
+    $payment_tag_totals = [];
+    foreach ($payments_today as $payment_row) {
+        $tag = trim((string)($payment_row->ticket_tag ?? ''));
+        if ($tag === '') continue;
+        if (!isset($payment_tag_totals[$tag])) $payment_tag_totals[$tag] = ['count'=>0,'amount'=>0,'principal'=>0,'interest'=>0,'penalty'=>0];
+        $payment_tag_totals[$tag]['count']++;
+        $payment_tag_totals[$tag]['amount'] += (float)$payment_row->amount;
+        $payment_tag_totals[$tag]['principal'] += (float)$payment_row->principal_amount;
+        $payment_tag_totals[$tag]['interest'] += (float)$payment_row->interest_amount;
+        $payment_tag_totals[$tag]['penalty'] += (float)$payment_row->penalty_amount;
+    }
     $cash_in  = 0;
     $noncash_in = 0;
     foreach ($payments_today as $payment_row) {
@@ -3965,7 +4415,7 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
         <thead><tr>
             <th>PAWN TKT NO.</th><th>NAME OF CUSTOMER</th><th>ADDRESS</th>
             <th class="r">AMOUNT OF LOAN</th><th class="r">NET PROCEEDS</th><th class="r">APPRAISED VALUE</th>
-            <th>PAWNED ITEMS</th>
+            <th>TAG</th><th>PAWNED ITEMS</th>
         </tr></thead>
         <tbody>
         <?php foreach ($loans_today as $ln):
@@ -3977,10 +4427,11 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
         <tr>
             <td style="font-weight:700;"><?php echo esc_html($ln->ticket_number); ?> /</td>
             <td style="text-transform:uppercase;"><?php echo esc_html(strtoupper($ln->cname)); ?></td>
-            <td style="max-width:70px;font-size:8.5px;"><?php echo esc_html(strtoupper($ln->address . ', ' . $ln->city . ' ' . $ln->zip_code)); ?></td>
+            <td style="max-width:70px;font-size:8.5px;"><?php echo esc_html(strtoupper($ln->address)); ?></td>
             <td class="r"><?php echo number_format($ln->principal,2); ?> /</td>
             <td class="r"><?php echo number_format($net,2); ?></td>
             <td class="r"><?php echo number_format($ln->appraised_value ?? 0,2); ?></td>
+            <td><?php echo esc_html($ln->ticket_tag ?: ''); ?></td>
             <td style="max-width:90px;font-size:8.5px;"><?php echo esc_html($pw); ?></td>
         </tr>
         <?php endforeach; ?>
@@ -3990,15 +4441,27 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
             <td class="r"><?php echo number_format($sum_loan,2); ?></td>
             <td class="r"><?php echo number_format($sum_net,2); ?></td>
             <td class="r"><?php echo number_format($sum_appr,2); ?></td>
-            <td></td>
+            <td colspan="2"></td>
         </tr></tfoot>
     </table>
+
+    <?php if (!empty($loan_tag_totals)): ?>
+    <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;margin:4px 0 3px;text-decoration:underline;">Loans Granted by Tag</div>
+    <table class="reg" style="margin-bottom:10px;">
+        <thead><tr><th>TAG</th><th class="r">COUNT</th><th class="r">AMOUNT OF LOAN</th><th class="r">NET PROCEEDS</th><th class="r">APPRAISED VALUE</th></tr></thead>
+        <tbody>
+        <?php foreach ($loan_tag_totals as $tag => $tot): ?>
+        <tr><td><?php echo esc_html($tag); ?></td><td class="r"><?php echo number_format($tot['count']); ?></td><td class="r"><?php echo number_format($tot['principal'],2); ?></td><td class="r"><?php echo number_format($tot['net'],2); ?></td><td class="r"><?php echo number_format($tot['appraised'],2); ?></td></tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php endif; ?>
  
     <!-- (B) LIST OF PAYMENTS RECEIVED -->
     <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;margin:4px 0 3px;text-decoration:underline;">Payments Received</div>
     <table class="reg">
         <thead><tr>
-            <th>NAME OF CUSTOMER</th><th>TICKET NUMBER</th><th>OR NUMBER</th>
+            <th>NAME OF CUSTOMER</th><th>TICKET NUMBER</th><th>TAG</th><th>OR NUMBER</th>
             <th class="r">CASH</th><th class="r">PRINCIPAL</th><th class="r">INTEREST</th>
             <th class="r">INT. DISC.</th><th class="r">ADDT'L INT.</th><th class="r">AFF. OF LOSS</th>
         </tr></thead>
@@ -4007,6 +4470,7 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
         <tr>
             <td style="text-transform:uppercase;"><?php echo esc_html(strtoupper($p->cname)); ?></td>
             <td style="font-weight:700;"><?php echo esc_html($p->ticket_number); ?> / <?php echo esc_html($p->reference_number ?: ''); ?></td>
+            <td><?php echo esc_html($p->ticket_tag ?: ''); ?></td>
             <td><?php echo esc_html($p->reference_number ?: '—'); ?></td>
             <td class="r"><?php echo number_format($p->amount,2); ?> /</td>
             <td class="r"><?php echo $p->principal_amount > 0 ? number_format($p->principal_amount,2) : '—'; ?> /</td>
@@ -4018,7 +4482,7 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
         <?php endforeach; ?>
         </tbody>
         <tfoot><tr>
-            <td colspan="3" style="text-align:right;font-weight:700;">TOTAL: P</td>
+            <td colspan="4" style="text-align:right;font-weight:700;">TOTAL: P</td>
             <td class="r"><?php echo number_format($s_cash,2); ?></td>
             <td class="r"><?php echo number_format($s_prin,2); ?></td>
             <td class="r"><?php echo number_format($s_int,2); ?></td>
@@ -4027,6 +4491,18 @@ function ps_rpt_daily_summary( int $business_id, string $report_date, array $b, 
             <td class="r">0.00</td>
         </tr></tfoot>
     </table>
+
+    <?php if (!empty($payment_tag_totals)): ?>
+    <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;margin:8px 0 3px;text-decoration:underline;">Payments Received by Tag</div>
+    <table class="reg">
+        <thead><tr><th>TAG</th><th class="r">COUNT</th><th class="r">CASH</th><th class="r">PRINCIPAL</th><th class="r">INTEREST</th><th class="r">ADDT'L INT.</th></tr></thead>
+        <tbody>
+        <?php foreach ($payment_tag_totals as $tag => $tot): ?>
+        <tr><td><?php echo esc_html($tag); ?></td><td class="r"><?php echo number_format($tot['count']); ?></td><td class="r"><?php echo number_format($tot['amount'],2); ?></td><td class="r"><?php echo number_format($tot['principal'],2); ?></td><td class="r"><?php echo number_format($tot['interest'],2); ?></td><td class="r"><?php echo number_format($tot['penalty'],2); ?></td></tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php endif; ?>
  
     <?php
     echo ps_sig_footer(['Prepared by','Checked by','Noted by','Approved by']);
@@ -4277,6 +4753,14 @@ function ps_settings_tab($business_id) {
             </div>
         </div>
 
+        <div class="bntm-form-section"><h4 style="margin:0 0 14px;font-size:14px;font-weight:700;">Ticket Tags</h4>
+            <div class="bntm-form-group">
+                <label>Available Tags</label>
+                <textarea name="ps_ticket_tags" rows="5" placeholder="VIP&#10;Auction&#10;Special Terms"><?php echo esc_textarea(bntm_get_setting('ps_ticket_tags','')); ?></textarea>
+                <div style="font-size:11px;color:#6b7280;margin-top:3px;">Enter one tag per line. These appear as optional choices when creating or editing pawn tickets.</div>
+            </div>
+        </div>
+
         <div class="bntm-form-section"><h4 style="margin:0 0 14px;font-size:14px;font-weight:700;">Lost Ticket Settings</h4>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div class="bntm-form-group">
@@ -4403,6 +4887,116 @@ function ps_settings_tab($business_id) {
 
 
 // ============================================================
+// AJAX: EDIT TICKET
+// ============================================================
+
+function bntm_ajax_ps_get_loan_edit() {
+    check_ajax_referer('ps_loan_nonce', 'nonce');
+    if (!is_user_logged_in()) { wp_send_json_error(['message'=>'Unauthorized']); }
+    if (!ps_user_can_manage_tickets()) { wp_send_json_error(['message'=>'Only admin, owner, or manager can edit tickets.']); }
+    ps_ensure_ticket_tag_column();
+
+    global $wpdb;
+    $business_id = bntm_ps_get_business_id();
+    $loan_id = intval($_POST['loan_id'] ?? 0);
+
+    $loan = $wpdb->get_row($wpdb->prepare(
+        "SELECT l.*, col.description AS collateral_desc, col.item_condition, col.appraised_value,
+                col.karat, col.weight_grams, col.serial_number
+         FROM {$wpdb->prefix}ps_loans l
+         JOIN {$wpdb->prefix}ps_collaterals col ON col.id=l.collateral_id
+         WHERE l.id=%d AND l.business_id=%d",
+        $loan_id, $business_id
+    ), ARRAY_A);
+    if (!$loan) { wp_send_json_error(['message'=>'Ticket not found.']); return; }
+
+    wp_send_json_success(['loan'=>$loan]);
+}
+
+function bntm_ajax_ps_update_loan() {
+    check_ajax_referer('ps_loan_nonce', 'nonce');
+    if (!is_user_logged_in()) { wp_send_json_error(['message'=>'Unauthorized']); }
+    if (!ps_user_can_manage_tickets()) { wp_send_json_error(['message'=>'Only admin, owner, or manager can edit tickets.']); }
+    ps_ensure_ticket_tag_column();
+
+    global $wpdb;
+    $business_id = bntm_ps_get_business_id();
+    $loan_id = intval($_POST['loan_id'] ?? 0);
+    $ticket_number = strtoupper(trim(sanitize_text_field($_POST['ticket_number'] ?? '')));
+    $ticket_tag = ps_normalize_ticket_tag(sanitize_text_field($_POST['ticket_tag'] ?? ''));
+    $status = sanitize_text_field($_POST['status'] ?? 'active');
+    $valid_status = ['active','overdue','renewed','redeemed','forfeited'];
+
+    if (!$loan_id || $ticket_number === '' || !in_array($status, $valid_status, true)) {
+        wp_send_json_error(['message'=>'Invalid ticket data.']);
+        return;
+    }
+
+    $loan = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d",
+        $loan_id, $business_id
+    ));
+    if (!$loan) { wp_send_json_error(['message'=>'Ticket not found.']); return; }
+
+    $exists = (int)$wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE ticket_number=%s AND id<>%d",
+        $ticket_number, $loan_id
+    ));
+    if ($exists > 0) {
+        wp_send_json_error(['message'=>'Ticket number already exists.']);
+        return;
+    }
+
+    $old_ticket = $loan->ticket_number;
+    $old_root = $loan->root_ticket;
+    $root_ticket = ($loan->parent_loan_id == 0 && $loan->root_ticket === $old_ticket) ? $ticket_number : $loan->root_ticket;
+
+    $loan_data = [
+        'ticket_number' => $ticket_number,
+        'ticket_tag' => $ticket_tag,
+        'root_ticket' => $root_ticket,
+        'principal' => round(max(0, (float)($_POST['principal'] ?? 0)), 2),
+        'interest_rate' => round(max(0, (float)($_POST['interest_rate'] ?? 0)), 4),
+        'service_fee' => round(max(0, (float)($_POST['service_fee'] ?? 0)), 2),
+        'penalty_rate' => round(max(0, (float)($_POST['penalty_rate'] ?? 0)), 4),
+        'loan_date' => sanitize_text_field($_POST['loan_date'] ?? $loan->loan_date),
+        'due_date' => sanitize_text_field($_POST['due_date'] ?? $loan->due_date),
+        'term_months' => max(1, (int)($_POST['term_months'] ?? 1)),
+        'status' => $status,
+        'payment_method' => sanitize_text_field($_POST['payment_method'] ?? 'cash'),
+        'notes' => sanitize_textarea_field($_POST['notes'] ?? ''),
+        'updated_at' => current_time('mysql'),
+    ];
+
+    $collateral_data = [
+        'description' => sanitize_textarea_field($_POST['collateral_description'] ?? ''),
+        'item_condition' => sanitize_text_field($_POST['item_condition'] ?? 'good'),
+        'appraised_value' => round(max(0, (float)($_POST['appraised_value'] ?? 0)), 2),
+        'karat' => sanitize_text_field($_POST['karat'] ?? ''),
+        'weight_grams' => round(max(0, (float)($_POST['weight_grams'] ?? 0)), 4),
+        'serial_number' => sanitize_text_field($_POST['serial_number'] ?? ''),
+    ];
+
+    $wpdb->query('START TRANSACTION');
+    $loan_updated = $wpdb->update($wpdb->prefix.'ps_loans', $loan_data, ['id'=>$loan_id,'business_id'=>$business_id]);
+    if ($loan_updated === false) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to update ticket.']); return; }
+
+    if ($root_ticket !== $old_root) {
+        $wpdb->update($wpdb->prefix.'ps_loans', ['root_ticket'=>$root_ticket], ['root_ticket'=>$old_root,'business_id'=>$business_id]);
+        $wpdb->update($wpdb->prefix.'ps_ticket_history', ['root_ticket'=>$root_ticket], ['root_ticket'=>$old_root,'business_id'=>$business_id]);
+    }
+
+    $collateral_updated = $wpdb->update($wpdb->prefix.'ps_collaterals', $collateral_data, ['id'=>$loan->collateral_id,'business_id'=>$business_id]);
+    if ($collateral_updated === false) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to update collateral.']); return; }
+
+    $wpdb->update($wpdb->prefix.'ps_ticket_history', ['ticket_number'=>$ticket_number], ['loan_id'=>$loan_id,'business_id'=>$business_id]);
+    $wpdb->query('COMMIT');
+
+    wp_send_json_success(['message'=>'Pawn ticket updated.','loan_id'=>$loan_id,'ticket_number'=>$ticket_number]);
+}
+
+
+// ============================================================
 // AJAX: FORFEIT LOAN (complete)
 // ============================================================
 
@@ -4414,7 +5008,7 @@ function bntm_ajax_ps_forfeit_loan() {
     $loan_id     = intval($_POST['loan_id'] ?? 0);
 
     $loan = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','renewed','overdue')",
+        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','overdue')",
         $loan_id, $business_id
     ));
     if (!$loan) { wp_send_json_error(['message'=>'Loan not found or cannot be forfeited.']); return; }
@@ -4482,13 +5076,14 @@ function bntm_ajax_ps_compute_interest() {
         'days_elapsed'    => $bd['days_elapsed'],
         'grace_days'      => $bd['grace_days'],
         'days_past_due'   => $bd['days_past_due'],
+        'effective_overdue'=> $bd['effective_overdue'],
         'daily_rate'      => $bd['daily_rate'],
         'regular_interest'=> $bd['regular_interest'],
         'overdue_interest'=> $bd['overdue_interest'],
         'penalty_interest'=> $bd['penalty_interest'],
         'carried_interest'=> $bd['carried_interest'],
         'total_interest'  => $bd['total_interest'],
-        'interest'        => $bd['total_interest'],
+        'interest'        => max(0, $bd['total_interest'] - $bd['penalty_interest']),
         'penalty'         => $bd['penalty_interest'],
         'total_due'       => $bd['total_due'],
     ]);
@@ -4504,10 +5099,11 @@ function bntm_ajax_ps_get_loan_detail() {
     global $wpdb;
     $business_id = bntm_ps_get_business_id();
     $loan_id     = intval($_POST['loan_id'] ?? 0);
+    $can_manage  = ps_user_can_manage_tickets();
 
     $loan = $wpdb->get_row($wpdb->prepare(
         "SELECT l.*,CONCAT(c.last_name,', ',c.first_name,' ',COALESCE(c.middle_name,'')) AS customer_name,
-                c.contact_number,c.address,c.city,c.zip_code,c.id_type,c.id_number,c.photo_path,c.customer_flag,
+                c.contact_number,c.address,c.id_type,c.id_number,c.photo_path,c.customer_flag,
                 col.description AS collateral_desc,col.category AS collateral_cat,col.brand,col.model,
                 col.item_condition,col.appraised_value,col.karat,col.weight_grams,col.serial_number
          FROM {$wpdb->prefix}ps_loans l
@@ -4553,11 +5149,13 @@ function bntm_ajax_ps_get_loan_detail() {
         <div style="flex:1;min-width:200px;">
             <div style="font-size:17px;font-weight:800;margin-bottom:3px;"><?php echo esc_html(trim($loan->customer_name)); ?></div>
             <div style="font-size:12px;color:#6b7280;margin-bottom:4px;"><?php echo esc_html($loan->contact_number); ?> &bull; <?php echo esc_html($loan->id_type.': '.$loan->id_number); ?></div>
-            <div style="font-size:12px;color:#6b7280;margin-bottom:4px;"><?php echo esc_html($loan->address . ', ' . $loan->city . ' ' . $loan->zip_code); ?></div>
             <span class="ps-status-badge <?php echo $flag_class; ?>"><?php echo ucfirst($loan->customer_flag); ?></span>
         </div>
         <div style="text-align:right;">
             <div style="font-family:monospace;font-size:18px;font-weight:800;color:#1e40af;"><?php echo esc_html($loan->ticket_number); ?></div>
+            <?php if (!empty($loan->ticket_tag)): ?>
+            <div style="font-size:11px;color:#047857;font-weight:700;"><?php echo esc_html($loan->ticket_tag); ?></div>
+            <?php endif; ?>
             <?php if ($loan->root_ticket !== $loan->ticket_number): ?>
             <div style="font-size:11px;color:#7c3aed;">Root: <?php echo esc_html($loan->root_ticket); ?></div>
             <?php endif; ?>
@@ -4614,6 +5212,9 @@ function bntm_ajax_ps_get_loan_detail() {
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             This ticket is <?php echo ucfirst($loan->status); ?>. No further actions available.
         </div>
+        <?php endif; ?>
+        <?php if ($can_manage): ?>
+        <button class="ps-action-btn ps-btn-print" style="padding:8px 16px;font-size:13px;" onclick="document.getElementById('ps-loan-detail-modal').style.display='none';psOpenEditTicket(<?php echo $loan_id; ?>)">Edit Ticket</button>
         <?php endif; ?>
         <button class="ps-action-btn ps-btn-print" style="padding:8px 16px;font-size:13px;" onclick="psShowPrintModal(<?php echo $loan_id; ?>,'pawn_ticket')">Print Ticket</button>
     </div>
@@ -4744,7 +5345,7 @@ function bntm_ajax_ps_search_customers() {
 
     $customers = $wpdb->get_results($wpdb->prepare(
         "SELECT c.*,
-            (SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE customer_id=c.id AND status IN ('active','renewed','overdue')) AS active_loans
+            (SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE customer_id=c.id AND status IN ('active','overdue')) AS active_loans
          FROM {$wpdb->prefix}ps_customers c
          WHERE c.business_id=%d AND c.status='active'
            AND (c.first_name LIKE %s OR c.last_name LIKE %s OR c.contact_number LIKE %s OR c.id_number LIKE %s)
@@ -4769,8 +5370,6 @@ function bntm_ajax_ps_add_customer() {
     $ln   = sanitize_text_field($_POST['last_name'] ?? '');
     $mn   = sanitize_text_field($_POST['middle_name'] ?? '');
     $addr = sanitize_textarea_field($_POST['address'] ?? '');
-    $city = sanitize_text_field($_POST['city'] ?? '');
-    $zip  = sanitize_text_field($_POST['zip_code'] ?? '');
     $con  = sanitize_text_field($_POST['contact_number'] ?? '');
     $email= sanitize_email($_POST['email'] ?? '');
     $idt  = sanitize_text_field($_POST['id_type'] ?? '');
@@ -4794,8 +5393,6 @@ function bntm_ajax_ps_add_customer() {
         'last_name'     => $ln,
         'middle_name'   => $mn,
         'address'       => $addr,
-        'city'          => $city,
-        'zip_code'      => $zip,
         'contact_number'=> $con,
         'email'         => $email,
         'id_type'       => $idt,
@@ -4806,14 +5403,7 @@ function bntm_ajax_ps_add_customer() {
         'status'        => 'active',
     ]);
 
-    if (!$r) { 
-        $error_msg = 'Failed to add customer.';
-        if ($wpdb->last_error) {
-            $error_msg .= ' ' . $wpdb->last_error;
-        }
-        wp_send_json_error(['message'=>$error_msg]); 
-        return; 
-    }
+    if (!$r) { wp_send_json_error(['message'=>'Failed to add customer.']); return; }
     $cid = $wpdb->insert_id;
 
     // Update photo with real customer ID
@@ -4850,8 +5440,6 @@ function bntm_ajax_ps_edit_customer() {
         'last_name'     => sanitize_text_field($_POST['last_name'] ?? ''),
         'middle_name'   => sanitize_text_field($_POST['middle_name'] ?? ''),
         'address'       => sanitize_textarea_field($_POST['address'] ?? ''),
-        'city'          => sanitize_text_field($_POST['city'] ?? ''),
-        'zip_code'      => sanitize_text_field($_POST['zip_code'] ?? ''),
         'contact_number'=> sanitize_text_field($_POST['contact_number'] ?? ''),
         'email'         => sanitize_email($_POST['email'] ?? ''),
         'id_type'       => sanitize_text_field($_POST['id_type'] ?? ''),
@@ -4883,7 +5471,7 @@ function bntm_ajax_ps_delete_customer() {
     $cid = intval($_POST['customer_id'] ?? 0);
 
     $active = (int)$wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE customer_id=%d AND status IN ('active','renewed','overdue')",
+        "SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE customer_id=%d AND status IN ('active','overdue')",
         $cid
     ));
     if ($active > 0) { wp_send_json_error(['message'=>'Cannot delete customer with active loans.']); return; }
@@ -4924,7 +5512,7 @@ function bntm_ajax_ps_get_customer_profile() {
          WHERE l.customer_id=%d", $cid
     ));
     $outstanding  = (float)$wpdb->get_var($wpdb->prepare(
-        "SELECT COALESCE(SUM(principal),0) FROM {$wpdb->prefix}ps_loans WHERE customer_id=%d AND status IN ('active','renewed','overdue')", $cid
+        "SELECT COALESCE(SUM(principal),0) FROM {$wpdb->prefix}ps_loans WHERE customer_id=%d AND status IN ('active','overdue')", $cid
     ));
 
     $flag_class = ['normal'=>'ps-flag-normal','vip'=>'ps-flag-vip','delinquent'=>'ps-flag-delinquent','blacklisted'=>'ps-flag-blacklisted'][$c->customer_flag] ?? 'ps-flag-normal';
@@ -4945,13 +5533,12 @@ function bntm_ajax_ps_get_customer_profile() {
             <div style="font-size:19px;font-weight:800;margin-bottom:3px;"><?php echo esc_html($c->last_name.', '.$c->first_name.' '.$c->middle_name); ?></div>
             <div style="font-size:12px;color:#6b7280;"><?php echo esc_html($c->contact_number); ?></div>
             <div style="font-size:12px;color:#6b7280;"><?php echo esc_html($c->email); ?></div>
-            <div style="font-size:12px;color:#6b7280;margin-top:2px;"><?php echo esc_html($c->address . ', ' . $c->city . ' ' . $c->zip_code); ?></div>
-            <div style="font-size:12px;color:#6b7280;"><?php echo esc_html($c->id_type.': '.$c->id_number); ?></div>
+            <div style="font-size:12px;color:#6b7280;margin-top:2px;"><?php echo esc_html($c->id_type.': '.$c->id_number); ?></div>
             <span class="ps-status-badge <?php echo $flag_class; ?>" style="margin-top:6px;"><?php echo ucfirst($c->customer_flag); ?></span>
         </div>
         <div>
             <button class="bntm-btn-secondary" style="font-size:12px;padding:6px 12px;"
-                onclick="psEditCustomer(<?php echo $c->id; ?>,'<?php echo esc_js($c->first_name); ?>','<?php echo esc_js($c->last_name); ?>','<?php echo esc_js($c->middle_name); ?>','<?php echo esc_js($c->address); ?>','<?php echo esc_js($c->city); ?>','<?php echo esc_js($c->zip_code); ?>','<?php echo esc_js($c->contact_number); ?>','<?php echo esc_js($c->email); ?>','<?php echo esc_js($c->id_type); ?>','<?php echo esc_js($c->id_number); ?>','<?php echo $c->customer_flag; ?>','<?php echo esc_js($c->notes); ?>','<?php echo esc_js($c->photo_path); ?>')">✏️ Edit</button>
+                onclick="psEditCustomer(<?php echo $c->id; ?>,'<?php echo esc_js($c->first_name); ?>','<?php echo esc_js($c->last_name); ?>','<?php echo esc_js($c->middle_name); ?>','<?php echo esc_js($c->address); ?>','<?php echo esc_js($c->contact_number); ?>','<?php echo esc_js($c->email); ?>','<?php echo esc_js($c->id_type); ?>','<?php echo esc_js($c->id_number); ?>','<?php echo $c->customer_flag; ?>','<?php echo esc_js($c->notes); ?>','<?php echo esc_js($c->photo_path); ?>')">✏️ Edit</button>
         </div>
     </div>
 
@@ -5045,6 +5632,7 @@ function bntm_ajax_ps_generate_document() {
     if ( ! is_user_logged_in() ) {
         wp_send_json_error( ['message' => 'Unauthorized'] );
     }
+    ps_ensure_ticket_tag_column();
  
     global $wpdb;
     $business_id = bntm_ps_get_business_id();
@@ -5060,7 +5648,7 @@ function bntm_ajax_ps_generate_document() {
     $b = ps_biz();
  
     /* ── report types (no loan required) ── */
-    $report_types = ['summary', 'list_loans', 'list_payments', 'daily_summary', 'tickets_by_status'];
+    $report_types = ['summary', 'list_loans', 'list_payments', 'daily_summary', 'cash_flow_summary', 'tickets_by_status'];
  
     if ( in_array( $doc_type, $report_types ) ) {
         $GLOBALS['ps_current_doc_type'] = $doc_type;
@@ -5076,6 +5664,9 @@ function bntm_ajax_ps_generate_document() {
                 break;
             case 'daily_summary':
                 $html = ps_rpt_daily_summary( $business_id, $report_date, $b, $cash_breakdown );
+                break;
+            case 'cash_flow_summary':
+                $html = ps_rpt_cash_flow_summary( $business_id, $rfrom, $rto, $b, $cash_breakdown );
                 break;
             case 'tickets_by_status':
                 $html = ps_rpt_tickets_by_status( $business_id, $rfrom, $rto, $rstatus, $b );
@@ -5097,7 +5688,7 @@ function bntm_ajax_ps_generate_document() {
     $loan = $wpdb->get_row( $wpdb->prepare(
         "SELECT l.*,
                 CONCAT(c.last_name,', ',c.first_name,' ',COALESCE(c.middle_name,'')) AS customer_name,
-                c.contact_number, c.address, c.city, c.zip_code, c.id_type, c.id_number, c.photo_path,
+                c.contact_number, c.address, c.id_type, c.id_number, c.photo_path,
                 col.description  AS collateral_desc,
                 col.category, col.brand, col.model,
                 col.appraised_value, col.item_condition,
@@ -5176,6 +5767,7 @@ function ps_get_document_definitions(): array {
         'list_loans'         => 'List of Loans Granted',
         'list_payments'      => 'List of Payments',
         'daily_summary'      => 'Daily Summary',
+        'cash_flow_summary'  => 'Cash Flow Summary',
         'tickets_by_status'  => 'Tickets by Status',
     ];
 }
@@ -5435,6 +6027,7 @@ body { font-family:'Courier New',Courier,monospace; font-size:10px; }
     height: 126mm;
     margin: 0 auto;
     color: #000;
+    text-transform: uppercase;
 }
 .tk-dot-val {
     position: absolute;
@@ -5475,7 +6068,6 @@ body { font-family:'Courier New',Courier,monospace; font-size:10px; }
 
     <div class="tk-dot-wrap2 tk-dot-small2" style="<?php echo esc_attr($pos(42, 40, 'width:70mm;')); ?>"><?php echo esc_html(ps_number_to_words($loan->principal)); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 110)); ?>"><?php echo esc_html(number_format($loan->principal,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 157)); ?>"><?php echo esc_html($rate_pct); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 176)); ?>"><?php echo esc_html($rate_pct); ?></div>
 
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(48,15)); ?>"><?php echo esc_html($term_display); ?></div>
@@ -5860,6 +6452,9 @@ function bntm_ajax_ps_save_settings() {
     if (isset($_POST['ps_doc_custom_css'])) {
         bntm_set_setting('ps_doc_custom_css', sanitize_textarea_field($_POST['ps_doc_custom_css']));
     }
+    if (isset($_POST['ps_ticket_tags'])) {
+        bntm_set_setting('ps_ticket_tags', sanitize_textarea_field($_POST['ps_ticket_tags']));
+    }
 
     foreach (array_keys(ps_get_document_definitions()) as $doc_key) {
         $prefix = 'ps_doc_' . $doc_key . '_';
@@ -6133,6 +6728,7 @@ function ps_save_customer_photo($base64_data, $business_id, $customer_id) {
 function bntm_ajax_ps_create_loan() {
     check_ajax_referer('ps_create_nonce', 'nonce');
     if (!is_user_logged_in()) { wp_send_json_error(['message'=>'Unauthorized']); }
+    ps_ensure_ticket_tag_column();
     global $wpdb;
     $business_id = bntm_ps_get_business_id();
     $processed_by = get_current_user_id();
@@ -6147,6 +6743,9 @@ function bntm_ajax_ps_create_loan() {
     $due_date      = sanitize_text_field($_POST['due_date'] ?? '');
     $payment_method= sanitize_text_field($_POST['payment_method'] ?? 'cash');
     $notes         = sanitize_textarea_field($_POST['notes'] ?? '');
+    $ticket_tag    = ps_normalize_ticket_tag(sanitize_text_field($_POST['ticket_tag'] ?? ''));
+    $ticket_override = strtoupper(trim(sanitize_text_field($_POST['ticket_number_override'] ?? '')));
+    $or_number     = strtoupper(trim(sanitize_text_field($_POST['or_number'] ?? '')));
     $grace_days    = (int)bntm_get_setting('ps_grace_period', '0');
 
     if (!$customer_id || $principal <= 0 || !$due_date) {
@@ -6161,7 +6760,16 @@ function bntm_ajax_ps_create_loan() {
         wp_send_json_error(['message' => 'Blacklisted customer cannot create new loans.']); return;
     }
 
-    $ticket_number = ps_generate_ticket_number($business_id);
+    if ($ticket_override !== '') {
+        $exists = (int)$wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}ps_loans WHERE ticket_number=%s",
+            $ticket_override
+        ));
+        if ($exists > 0) { wp_send_json_error(['message'=>'Ticket number already exists.']); return; }
+        $ticket_number = $ticket_override;
+    } else {
+        $ticket_number = ps_generate_ticket_number($business_id);
+    }
     $root_ticket   = $ticket_number;
 
     $col_data = [
@@ -6193,6 +6801,7 @@ function bntm_ajax_ps_create_loan() {
         'business_id'      => $business_id,
         'root_ticket'      => $root_ticket,
         'ticket_number'    => $ticket_number,
+        'ticket_tag'       => $ticket_tag,
         'parent_loan_id'   => 0,
         'customer_id'      => $customer_id,
         'collateral_id'    => $collateral_id,
@@ -6207,6 +6816,7 @@ function bntm_ajax_ps_create_loan() {
         'transaction_type' => 'new',
         'status'           => 'active',
         'payment_method'   => $payment_method,
+        'or_number'        => $or_number,
         'notes'            => $notes,
     ]);
 
@@ -6261,17 +6871,32 @@ function bntm_ajax_ps_renew_loan() {
     $extra_fees_raw   = sanitize_text_field($_POST['extra_fees'] ?? '[]');
     $extra_fees       = json_decode($extra_fees_raw, true) ?: [];
     $lost_ticket_fee  = $is_lost_ticket ? (float)bntm_get_setting('ps_lost_ticket_fee','100.00') : 0;
-    $extra_total      = array_sum(array_column($extra_fees, 'amt'));
+    $extra_total      = 0;
+    foreach ($extra_fees as $idx => $ef) {
+        $extra_fees[$idx]['desc'] = sanitize_text_field($ef['desc'] ?? '');
+        $extra_fees[$idx]['amt']  = max(0, (float)($ef['amt'] ?? 0));
+        $extra_total += $extra_fees[$idx]['amt'];
+    }
+
+    $allowed_types = ['interest_payment', 'renewal', 'add_principal', 'reduce_principal'];
+    if (!in_array($transaction_type, $allowed_types, true)) {
+        wp_send_json_error(['message'=>'Invalid transaction type.']);
+        return;
+    }
+    $add_months    = max(1, min(60, $add_months));
+    $renewal_fee   = max(0, $renewal_fee);
+    $principal_adj = max(0, $principal_adj);
 
     $loan = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','renewed','overdue')",
+        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','overdue')",
         $loan_id, $business_id
     ));
     if (!$loan) { wp_send_json_error(['message'=>'Loan not found or cannot be processed.']); return; }
 
     $breakdown  = ps_compute_interest_breakdown($loan);
-    $interest_due = $breakdown['total_interest'];
-    $penalty_due  = $breakdown['penalty_interest'];
+    $interest_due = (float)$breakdown['total_interest'];
+    $penalty_due  = (float)$breakdown['penalty_interest'];
+    $interest_component = max(0, $interest_due - $penalty_due);
 
     $new_principal = (float)$loan->principal;
     $add_to_principal = 0;
@@ -6284,22 +6909,29 @@ function bntm_ajax_ps_renew_loan() {
         $new_principal = max(0, $new_principal - $reduce_principal);
     }
 
+    $today = current_time('Y-m-d');
     $base_due = ($transaction_type === 'renewal')
-        ? date('Y-m-d', strtotime($loan->due_date." +{$add_months} months"))
+        ? date('Y-m-d', strtotime($today." +{$add_months} months"))
         : $loan->due_date;
 
     $total_paid = 0; $event_type = 'payment'; $pay_type = 'interest';
+    $loan_tx_type = 'partial_payment';
     if ($transaction_type === 'interest_payment') {
         $total_paid = round($interest_due, 2); $pay_type = 'interest'; $event_type = 'payment';
     } elseif ($transaction_type === 'renewal') {
         $total_paid = round($interest_due + $renewal_fee, 2); $pay_type = 'renewal'; $event_type = 'renewed';
+        $loan_tx_type = 'renewal';
     } elseif ($transaction_type === 'add_principal') {
         $total_paid = round($interest_due, 2); $pay_type = 'interest'; $event_type = 'additional_principal';
+        $loan_tx_type = 'additional';
     } elseif ($transaction_type === 'reduce_principal') {
         $total_paid = round($interest_due + $reduce_principal, 2); $pay_type = 'partial_principal'; $event_type = 'reduced_principal';
     }
 
     $grace_days = (int)bntm_get_setting('ps_grace_period', '0');
+    $root_ticket = $loan->root_ticket ?: $loan->ticket_number;
+    $new_ticket_number = ps_generate_ticket_number($business_id, $root_ticket);
+    $new_status = strtotime($base_due) < strtotime($today) ? 'overdue' : 'active';
     $wpdb->query('START TRANSACTION');
 
     $payment_notes = $notes;
@@ -6307,35 +6939,59 @@ function bntm_ajax_ps_renew_loan() {
         $payment_notes = trim($payment_notes . ' [LOST TICKET]');
     }
 
-    $wpdb->insert($wpdb->prefix.'ps_payments', [
-        'rand_id'=>bntm_rand_id(),'business_id'=>$business_id,'loan_id'=>$loan_id,
-        'payment_type'=>$pay_type,'amount'=>$total_paid,'interest_amount'=>round($interest_due,2),
-        'penalty_amount'=>round($penalty_due,2),'principal_amount'=>round($reduce_principal,2),
-        'service_fee'=>round($renewal_fee,2),'days_accrued'=>$breakdown['days_elapsed'],
-        'payment_method'=>$payment_method,'reference_number'=>$reference_number,'processed_by'=>$processed_by,'notes'=>$payment_notes,
-    ]);
+    $old_updated = $wpdb->update($wpdb->prefix.'ps_loans', [
+        'status'=>'renewed',
+        'updated_at'=>current_time('mysql'),
+    ], ['id'=>$loan_id,'business_id'=>$business_id]);
 
-    $loan_updated = $wpdb->update($wpdb->prefix.'ps_loans', [
+    if ($old_updated === false) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to close previous pawn ticket.']); return; }
+
+    $loan_inserted = $wpdb->insert($wpdb->prefix.'ps_loans', [
+        'rand_id'=>bntm_rand_id(),
+        'business_id'=>$business_id,
+        'root_ticket'=>$root_ticket,
+        'ticket_number'=>$new_ticket_number,
+        'ticket_tag'=>(string)($loan->ticket_tag ?? ''),
+        'parent_loan_id'=>$loan_id,
+        'customer_id'=>$loan->customer_id,
+        'collateral_id'=>$loan->collateral_id,
         'principal'=>round($new_principal,2),
-        'service_fee'=>$transaction_type==='renewal' ? round($renewal_fee,2) : 0,
-        'loan_date'=>date('Y-m-d'),
+        'interest_rate'=>(float)$loan->interest_rate,
+        'service_fee'=>0,
+        'penalty_rate'=>(float)$loan->penalty_rate,
+        'loan_date'=>$today,
         'due_date'=>$base_due,
         'grace_days'=>$grace_days,
-        'term_months'=>$transaction_type==='renewal' ? $add_months : $loan->term_months,
-        'transaction_type'=>$transaction_type==='renewal' ? 'renewal' : ($transaction_type==='add_principal' ? 'additional' : 'partial_payment'),
+        'term_months'=>$transaction_type==='renewal' ? $add_months : (int)$loan->term_months,
+        'transaction_type'=>$loan_tx_type,
         'additional_to_principal'=>round($add_to_principal,2),
         'reduction_from_principal'=>round($reduce_principal,2),
         'accrued_interest_carried'=>0,
-        'status'=>'active',
+        'status'=>$new_status,
         'payment_method'=>$payment_method,
         'notes'=>$payment_notes,
-    ], ['id'=>$loan_id,'business_id'=>$business_id]);
+    ]);
 
-    if ($loan_updated === false) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to update pawn ticket.']); return; }
+    if (!$loan_inserted) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to create the new pawn ticket.']); return; }
+    $new_loan_id = $wpdb->insert_id;
+
+    $collateral_updated = $wpdb->update($wpdb->prefix.'ps_collaterals', ['loan_id'=>$new_loan_id], ['id'=>$loan->collateral_id,'business_id'=>$business_id]);
+    if ($collateral_updated === false) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to attach collateral to the new pawn ticket.']); return; }
+
+    $payment_inserted = $wpdb->insert($wpdb->prefix.'ps_payments', [
+        'rand_id'=>bntm_rand_id(),'business_id'=>$business_id,'loan_id'=>$new_loan_id,
+        'payment_type'=>$pay_type,'amount'=>$total_paid,'interest_amount'=>round($interest_component,2),
+        'penalty_amount'=>round($penalty_due,2),'principal_amount'=>round($reduce_principal,2),
+        'service_fee'=>round($renewal_fee,2),'days_accrued'=>$breakdown['days_elapsed'],
+        'payment_method'=>$payment_method,'reference_number'=>$reference_number,'processed_by'=>$processed_by,
+        'notes'=>trim($payment_notes . ' Previous ticket: ' . $loan->ticket_number),
+    ]);
+
+    if (!$payment_inserted) { $wpdb->query('ROLLBACK'); wp_send_json_error(['message'=>'Failed to save payment.']); return; }
 
     ps_log_ticket_event([
-        'business_id'=>$business_id,'root_ticket'=>$loan->root_ticket,'loan_id'=>$loan_id,
-        'ticket_number'=>$loan->ticket_number,'event_type'=>$event_type,'principal_before'=>$loan->principal,
+        'business_id'=>$business_id,'root_ticket'=>$root_ticket,'loan_id'=>$new_loan_id,
+        'ticket_number'=>$new_ticket_number,'event_type'=>$event_type,'principal_before'=>$loan->principal,
         'principal_after'=>$new_principal,'interest_paid'=>round($interest_due,2),'amount_paid'=>$total_paid,
         'due_date'=>$base_due,'notes'=>ucwords(str_replace('_',' ',$transaction_type)).'. Paid: ₱'.number_format($total_paid,2),
     ]);
@@ -6347,9 +7003,9 @@ function bntm_ajax_ps_renew_loan() {
         foreach ($extra_fees as $ef) { if (!empty($ef['desc']) && $ef['amt'] > 0) $extra_notes[] = $ef['desc'].': ₱'.number_format($ef['amt'],2); }
         if ($extra_notes) {
             $wpdb->insert($wpdb->prefix.'ps_payments',[
-                'rand_id'=>bntm_rand_id(),'business_id'=>$business_id,'loan_id'=>$loan_id,
+                'rand_id'=>bntm_rand_id(),'business_id'=>$business_id,'loan_id'=>$new_loan_id,
                 'payment_type'=>'service_fee','amount'=>$lost_ticket_fee+$extra_total,
-                'service_fee'=>$lost_ticket_fee,'interest_amount'=>0,'principal_amount'=>0,'penalty_amount'=>0,
+                'service_fee'=>$lost_ticket_fee+$extra_total,'interest_amount'=>0,'principal_amount'=>0,'penalty_amount'=>0,
                 'days_accrued'=>0,'payment_method'=>$payment_method,'reference_number'=>$reference_number,
                 'processed_by'=>$processed_by,'notes'=>implode('; ',$extra_notes),'status'=>'completed',
             ]);
@@ -6358,8 +7014,8 @@ function bntm_ajax_ps_renew_loan() {
 
     $wpdb->query('COMMIT');
     wp_send_json_success([
-        'message'=>"Transaction saved for ticket {$loan->ticket_number}. Paid: ₱".number_format($total_paid,2),
-        'loan_id'=>$loan_id,'ticket_number'=>$loan->ticket_number,'is_lost'=>$is_lost_ticket,
+        'message'=>"New pawn ticket {$new_ticket_number} created from {$loan->ticket_number}. Paid: PHP ".number_format($total_paid + $lost_ticket_fee + $extra_total,2),
+        'loan_id'=>$new_loan_id,'ticket_number'=>$new_ticket_number,'previous_ticket'=>$loan->ticket_number,'doc_type'=>'pawn_ticket','is_lost'=>$is_lost_ticket,
     ]);
 }
 
@@ -6384,7 +7040,7 @@ function bntm_ajax_ps_redeem_loan() {
     $extra_total      = array_sum(array_column($extra_fees, 'amt'));
 
     $loan = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','renewed','overdue')",
+        "SELECT * FROM {$wpdb->prefix}ps_loans WHERE id=%d AND business_id=%d AND status IN ('active','overdue')",
         $loan_id, $business_id
     ));
     if (!$loan) { wp_send_json_error(['message'=>'Loan not found or cannot be redeemed.']); return; }
@@ -6599,7 +7255,7 @@ function bntm_ajax_ps_get_customers_list() {
     $customers = $wpdb->get_results(
         "SELECT c.*,COUNT(l.id) AS active_loans
          FROM {$wpdb->prefix}ps_customers c
-         LEFT JOIN {$wpdb->prefix}ps_loans l ON l.customer_id=c.id AND l.status IN ('active','renewed','overdue')
+         LEFT JOIN {$wpdb->prefix}ps_loans l ON l.customer_id=c.id AND l.status IN ('active','overdue')
          {$where} GROUP BY c.id ORDER BY c.last_name,c.first_name LIMIT 100"
     );
     wp_send_json_success(['customers'=>$customers]);
@@ -6771,7 +7427,7 @@ function bntm_ajax_ps_bulk_mark_overdue() {
 
     $count = $wpdb->query($wpdb->prepare(
         "UPDATE {$wpdb->prefix}ps_loans SET status='overdue'
-         WHERE business_id=%d AND status IN ('active','renewed') AND due_date < CURDATE()",
+         WHERE business_id=%d AND status='active' AND due_date < CURDATE()",
         $business_id
     ));
     wp_send_json_success(['message'=>"Marked {$count} loan(s) as overdue.",'count'=>$count]);
@@ -6831,4 +7487,3 @@ function bntm_ajax_ps_get_loan_compute() {
 // ============================================================
 // END OF MODULE
 // ============================================================
-
