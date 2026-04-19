@@ -4048,7 +4048,14 @@ function bntm_ajax_ps_add_customer() {
         'status'        => 'active',
     ]);
 
-    if (!$r) { wp_send_json_error(['message'=>'Failed to add customer.']); return; }
+    if (!$r) { 
+        $error_msg = 'Failed to add customer.';
+        if ($wpdb->last_error) {
+            $error_msg .= ' ' . $wpdb->last_error;
+        }
+        wp_send_json_error(['message'=>$error_msg]); 
+        return; 
+    }
     $cid = $wpdb->insert_id;
 
     // Update photo with real customer ID

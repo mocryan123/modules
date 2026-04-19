@@ -753,18 +753,18 @@ function ps_render_modals() {
                             <select name="collateral_karat"><option value="">N/A</option><option value="10k">10k</option><option value="14k">14k</option><option value="18k">18k</option><option value="21k">21k</option><option value="22k">22k</option><option value="24k">24k</option></select>
                         </div>
                         <div class="bntm-form-group">
-                            <label>Principal Amount <span style="color:#ef4444;">*</span></label>
-                            <input type="number" name="principal" step=".01" placeholder="0.00" required id="loan-principal-input">
-                            <div style="font-size:11px;color:#6b7280;margin-top:4px;">Amount to be lent — appraisal will auto-calculate as Principal × 1.15</div>
+                            <label>Appraised Value <span style="color:#ef4444;">*</span></label>
+                            <input type="number" name="collateral_appraised_value" step=".01" placeholder="0.00" required id="appraised-val-input">
                         </div>
-                        <div class="bntm-form-group">
-                            <label>Appraised Value (Auto-Calculated) <span style="color:#ef4444;">*</span></label>
-                            <input type="number" name="collateral_appraised_value" step=".01" placeholder="0.00" required id="appraised-val-input" readonly style="background:#f9fafb;cursor:not-allowed;">
-                            <div style="font-size:11px;color:#059669;margin-top:4px;font-weight:600;">Automatically calculated as Principal × 1.15</div>
-                        </div>
+                      
 
                         <div style="grid-column:1/-1;background:#f8fafc;border-radius:8px;padding:12px 14px;border-left:4px solid #059669;margin-top:4px;">
                             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#059669;margin-bottom:4px;">Loan Terms</div>
+                        </div>
+                        <div class="bntm-form-group">
+                            <label>Principal Amount <span style="color:#ef4444;">*</span></label>
+                            <input type="number" name="principal" step=".01" placeholder="0.00" required id="loan-principal-input">
+                            <div style="font-size:11px;color:#6b7280;margin-top:4px;">Amount to be lent based on collateral valuation.</div>
                         </div>
                         <div class="bntm-form-group">
                             <label>Interest Rate (%/month)</label>
@@ -1371,10 +1371,6 @@ function ps_render_js() {
         const ld = document.getElementById('loan-date-input')?.value;
         const daily = p * (r / 100 / 30);
         const int = daily * t * 30;
-        // Auto-calculate appraisal value as principal × 1.15
-        const appraisal = p * 1.15;
-        const appInput = document.getElementById('appraised-val-input');
-        if (appInput) appInput.value = appraisal.toFixed(2);
         if (document.getElementById('sum-principal')) document.getElementById('sum-principal').textContent = '₱' + p.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (document.getElementById('sum-interest')) document.getElementById('sum-interest').textContent = '₱' + int.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (document.getElementById('sum-fee')) document.getElementById('sum-fee').textContent = '₱' + f.toLocaleString('en-PH', {minimumFractionDigits:2});
@@ -1450,12 +1446,10 @@ function ps_render_js() {
         document.getElementById('rsum-total').textContent = '₱' + total.toLocaleString('en-PH', {minimumFractionDigits:2});
         if (type === 'add_principal' && adj > 0) {
             const np = d.principal + adj;
-            const newAppraisal = np * 1.15;
-            document.getElementById('renew-new-principal-preview').textContent = `Current Principal: ₱${d.principal.toLocaleString('en-PH',{minimumFractionDigits:2})} → New Principal: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})} | New Appraisal: ₱${newAppraisal.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+            document.getElementById('renew-new-principal-preview').textContent = `New principal will be: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
         } else if (type === 'reduce_principal' && adj > 0) {
             const np = Math.max(0, d.principal - adj);
-            const newAppraisal = np * 1.15;
-            document.getElementById('renew-new-principal-preview').textContent = `Current Principal: ₱${d.principal.toLocaleString('en-PH',{minimumFractionDigits:2})} → New Principal: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})} | New Appraisal: ₱${newAppraisal.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
+            document.getElementById('renew-new-principal-preview').textContent = `New principal will be: ₱${np.toLocaleString('en-PH',{minimumFractionDigits:2})}`;
         }
     };
 
@@ -1475,7 +1469,7 @@ function ps_render_js() {
         const d = redeemCurrentData;
         if (!d) return;
         const lostFee = document.getElementById('redeem-lost-ticket')?.checked ? (psLostTicketFee||0) : 0;
-        document.getElementById('rdsum-principal').textContent = '₱' + (d.principal||0).toLocaleString('en-PH',{minimumFractionDigits:2}) + ' (Appraisal: ₱' + ((d.principal||0) * 1.15).toLocaleString('en-PH',{minimumFractionDigits:2}) + ')';
+        document.getElementById('rdsum-principal').textContent = '₱' + (d.principal||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         document.getElementById('rdsum-interest').textContent = '₱' + (d.interest||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         document.getElementById('rdsum-penalty').textContent = '₱' + (d.penalty||0).toLocaleString('en-PH',{minimumFractionDigits:2});
         const lostRow = document.getElementById('rdsum-lost-row');
