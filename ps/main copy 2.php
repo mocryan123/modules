@@ -773,7 +773,7 @@ function ps_render_modals() {
                         <div class="bntm-form-group">
                             <label>Term (months)</label>
                             <select name="term_months" id="loan-term-select" required>
-                               <option value="10">10 Months</option>
+                               <option value="4">10 Months</option>
                             </select>
                         </div>
                         <div class="bntm-form-group">
@@ -1041,14 +1041,14 @@ function ps_render_modals() {
                                 <div class="bntm-form-group"><label>Email</label><input type="email" name="email" placeholder="email@example.com"></div>
                                 <div class="bntm-form-group">
                                     <label>ID Type <span style="color:#ef4444;">*</span></label>
-                                    <select name="id_type" required>
+                                    <select name="id_type" >
                                         <option value="">Select ID</option>
                                         <option>National ID</option><option>Driver's License</option><option>Passport</option>
                                         <option>SSS ID</option><option>PhilHealth ID</option><option>UMID</option>
                                         <option>Voter's ID</option><option>Barangay ID</option><option>Other</option>
                                     </select>
                                 </div>
-                                <div class="bntm-form-group"><label>ID Number <span style="color:#ef4444;">*</span></label><input type="text" name="id_number" required placeholder="ID number"></div>
+                                <div class="bntm-form-group"><label>ID Number <span style="color:#ef4444;">*</span></label><input type="text" name="id_number"  placeholder="ID number"></div>
                                 <div class="bntm-form-group">
                                     <label>Customer Flag</label>
                                     <select name="customer_flag">
@@ -5435,6 +5435,7 @@ body { font-family:'Courier New',Courier,monospace; font-size:10px; }
     height: 126mm;
     margin: 0 auto;
     color: #000;
+    text-transform: uppercase;
 }
 .tk-dot-val {
     position: absolute;
@@ -5475,10 +5476,8 @@ body { font-family:'Courier New',Courier,monospace; font-size:10px; }
 
     <div class="tk-dot-wrap2 tk-dot-small2" style="<?php echo esc_attr($pos(42, 40, 'width:70mm;')); ?>"><?php echo esc_html(ps_number_to_words($loan->principal)); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 110)); ?>"><?php echo esc_html(number_format($loan->principal,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 157)); ?>"><?php echo esc_html($rate_pct); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(44, 176)); ?>"><?php echo esc_html($rate_pct); ?></div>
 
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(48,15)); ?>"><?php echo esc_html($term_display); ?></div>
      <div class="tk-dot-wrap2 tk-dot-small2" style="<?php echo esc_attr($pos(54, 20, 'width:70mm;')); ?>"><?php echo esc_html(ps_number_to_words($loan->appraised_value)); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(52, 110)); ?>"><?php echo esc_html(number_format($loan->appraised_value,2)); ?></div>
 
@@ -5491,7 +5490,6 @@ body { font-family:'Courier New',Courier,monospace; font-size:10px; }
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(63, 165)); ?>"><?php echo esc_html(number_format($bd['regular_interest'],2)); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(66, 165)); ?>"><?php echo esc_html(number_format($loan->service_fee,2)); ?></div>
     <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(70, 165)); ?>"><?php echo esc_html(number_format($net_proceeds,2)); ?></div>
-    <div class="tk-dot-val tk-dot-small" style="<?php echo esc_attr($pos(73, 132)); ?>"><?php echo esc_html($effective_rate); ?></div>
   
 
     <div class="tk-dot-wrap tk-dot-small" style="<?php echo esc_attr($pos(95, 25, 'width:76mm;')); ?>"><?php echo esc_html($id_presented); ?></div>
